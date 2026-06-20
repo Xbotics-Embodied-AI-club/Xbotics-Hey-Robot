@@ -1,0 +1,45 @@
+<mujoco model="xlerobot_scene">
+  <include file="./xlerobot.xml"/>
+
+  <option timestep="0.002" gravity="0 0 -9.80665" integrator="implicitfast"/>
+
+  <statistic center="1.0 0 0.4" extent="3.0"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="120" elevation="-20" offwidth="640" offheight="512"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <texture type="2d" name="groundplane" builtin="flat" mark="edge" rgb1="0.2 0.2 0.2" rgb2="0.4 0.6 0.4"
+      markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
+    <!-- 桌面：浅灰色，接近真实办公桌 -->
+    <material name="table_mat" rgba="0.35 0.25 0.18 1"/>
+    <!-- 目标物体：深蓝色，和桌面形成高对比度 -->
+    <material name="target_obj" rgba="0.85 0.15 0.15 1"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 2.0" dir="0 0 -1" directional="true"/>
+    <light pos="2.0 1.0 1.5" dir="0 0 -1" directional="false" diffuse="0.4 0.4 0.4"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+
+    <!-- 桌面：机器人正前方(+X) 1米，高度73cm -->
+    <body name="table" pos="1.0 0 0.73">
+      <geom name="table_top" type="box" size="0.20 0.25 0.015" material="table_mat"/>
+      <geom name="table_leg_fl" type="box" pos="0.17 -0.22 -0.35" size="0.015 0.015 0.35" rgba="0.35 0.33 0.30 1"/>
+      <geom name="table_leg_fr" type="box" pos="-0.17 -0.22 -0.35" size="0.015 0.015 0.35" rgba="0.35 0.33 0.30 1"/>
+      <geom name="table_leg_bl" type="box" pos="0.17 0.22 -0.35" size="0.015 0.015 0.35" rgba="0.35 0.33 0.30 1"/>
+      <geom name="table_leg_br" type="box" pos="-0.17 0.22 -0.35" size="0.015 0.015 0.35" rgba="0.35 0.33 0.30 1"/>
+    </body>
+
+    <!-- 目标方块：桌面靠前位置 -->
+    <body name="target" pos="1.0 0 0.745">
+      <joint name="target_free" type="free"/>
+      <geom name="target_geom" type="box" size="0.03 0.03 0.03" material="target_obj" mass="0.05"/>
+    </body>
+  </worldbody>
+</mujoco>

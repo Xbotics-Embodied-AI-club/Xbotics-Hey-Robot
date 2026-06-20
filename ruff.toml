@@ -1,0 +1,151 @@
+# Ruff 配置必须和项目实际 Python 版本一致。
+# 当前项目 runtime / mypy / black 都以 Python 3.12 为基线，因此这里也固定为 py312。
+target-version = "py312"
+
+# 统一行宽，和 black 保持一致，避免格式化工具相互打架。
+line-length = 88
+respect-gitignore = true
+
+# 这里排除三类内容：
+# 1. 常规缓存、构建产物、第三方目录
+# 2. vendor / 外部 SDK 代码（不按本仓库人工代码标准维护）
+# 3. generated protobuf / gRPC contract（由 codegen 生成，不作为手写源码审查）
+exclude = [
+  ".bzr",
+  ".direnv",
+  ".eggs",
+  ".git",
+  ".git-rewrite",
+  ".hg",
+  ".ipynb_checkpoints",
+  ".mypy_cache",
+  ".nox",
+  ".pants.d",
+  ".pyenv",
+  ".pytest_cache",
+  ".pytype",
+  ".ruff_cache",
+  ".svn",
+  ".tox",
+  ".venv",
+  ".vscode",
+  "__pypackages__",
+  "_build",
+  "buck-out",
+  "build",
+  "dist",
+  "picoclaw",
+  "node_modules",
+  "site-packages",
+  ".history",
+  "src/hey_robot/robots/components/scservo_sdk",
+  "src/hey_robot/capability/contract/v1/capability_pb2.py",
+  "src/hey_robot/capability/contract/v1/capability_pb2.pyi",
+  "src/hey_robot/capability/contract/v1/capability_pb2_grpc.py",
+]
+
+[lint]
+# 这一组规则是生产级基线，覆盖：
+# - 命名、import、基本风格、潜在 bug
+# - async / pytest / pathlib / pyupgrade
+# - 安全、简化、性能、可维护性
+extend-select = [
+  "A",     # 避免覆盖内置名等高混淆命名
+  "ANN",   # 类型注解规范
+  "ARG",   # 未使用参数等参数问题
+  "ASYNC", # async 相关误用
+  "B",     # flake8-bugbear，偏 bug 发现
+  "C",     # 复杂度控制
+  "C4",    # 推导式/容器写法优化
+  "E",     # pycodestyle error
+  "ERA",   # 注释掉的废弃代码
+  "F",     # pyflakes
+  "FAST",  # FastAPI 相关检查
+  "FLY",   # 可改写为更合理 f-string 的场景
+  "FURB",  # refurb 现代化建议
+  "I",     # import 排序
+  "INP",   # namespace package / 包结构问题
+  "N",     # 命名规范
+  "PERF",  # 性能层面的低成本改进
+  "PIE",   # 代码坏味道
+  "PTH",   # pathlib 替代 os/path
+  "PT",    # pytest 风格约束
+  "RET",   # return 结构优化
+  "RUF",   # Ruff 自带专有规则
+  "S",     # 安全规则（bandit）
+  "SIM",   # 简化建议
+  "T10",   # debugger 残留
+  "T201",  # print 残留
+  "TID",   # import tidy 约束
+  "UP",    # pyupgrade，向当前 Python 版本靠拢
+  "W",     # pycodestyle warning
+]
+
+# ignore 不是“随便放过”，而是明确记录当前仓库的工程边界。
+# 原则：
+# - 能修代码就修代码
+# - 只有跨边界、框架约束、历史成本过高的项才做规则例外
+ignore = [
+  "ANN001", # 暂不要求所有函数参数都补齐注解，后续按模块逐步收紧
+  "ANN003", # 暂不强制 *args 标注
+  "ANN201", # 暂不强制所有 public function 显式返回注解
+  "ANN202", # 暂不强制 private function 显式返回注解
+  "ANN204", # 特殊方法返回类型先不一刀切
+  "ANN206", # 暂不强制 classmethod 返回注解
+  "ANN401", # 暂允许 Any，当前系统边界和协议层仍有必要使用
+  "B008",   # 允许少量默认参数中的函数调用
+  "B009",   # 允许 get-attr-with-constant
+  "B010",   # 允许 set-attr-with-constant
+  "C901",   # 复杂度问题后续按模块治理，不先全仓阻塞
+  "E402",   # bootstrap/import-hook 场景客观存在，具体文件再精确约束
+  "E501",   # 行宽由 formatter 统一控制，不单独作为失败条件
+  "ERA001", # 暂不把注释代码作为 hard gate
+  "RET504", # 某些 return 前赋值可读性更好，先不强推
+  "RUF001", # 当前仓库有中英文混排文案，先允许全角中文符号
+  "RUF002", # docstring 中允许中文全角标点
+  "RUF003", # 注释中允许中文全角标点
+  "S101",   # assert 在测试中是正常手段，不作为全仓阻塞项
+  "S311",   # 测试/脚本里允许非加密随机用途
+  "SIM108", # 三元表达式并不总比 if/else 更易读
+]
+
+[lint.per-file-ignores]
+# scripts 本质上是 CLI/运维入口：
+# - INP001：脚本目录不强制做成可导入 package
+# - T201：CLI 输出允许使用 print
+"scripts/**/*.py" = ["INP001", "T201"]
+
+# 发布脚本调用固定命令，属于受控运维脚本，不是接收外部任意输入的执行器。
+"scripts/dev/publish.py" = ["S603"]
+
+# 这些硬件/Build 脚本需要先做 sys.path bootstrap，再导入本地模块。
+# S314：XML 解析仅处理项目捆绑的本地资产文件，不存在不受信输入。
+"scripts/robots/xlerobot/*.py" = ["E402", "S314"]
+
+# gRPC servicer 方法名必须与 proto contract 一致，不能改成 Python 风格小写。
+"src/hey_robot/capability/transport/grpc/server.py" = ["N802"]
+
+# 这是第三方协议/硬件语义映射层，字段命名需要贴近设备协议。
+"src/hey_robot/robots/components/servo_bus.py" = ["N815"]
+
+# pytest 入口需要先注入 src 路径，再导入项目模块。
+"tests/conftest.py" = ["E402"]
+
+# 测试里允许：
+# - assert
+# - 部分未完全注解的函数参数/返回值
+"tests/**/*.py" = ["ANN001", "ANN201", "S101"]
+
+[lint.flake8-builtins]
+# 这些名字在当前代码库里有明确语义，不强制禁止。
+builtins-ignorelist = ["input", "id", "bytes", "type"]
+
+[lint.isort]
+# import 排序风格固定，避免不同开发者本地输出不一致。
+force-wrap-aliases = true
+combine-as-imports = true
+split-on-trailing-comma = true
+
+[lint.pydocstyle]
+# docstring 统一采用 numpy 风格。
+convention = "numpy"

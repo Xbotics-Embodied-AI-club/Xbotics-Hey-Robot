@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package hey_robot.capability.v1;
+
+import "google/protobuf/struct.proto";
+
+service CapabilityService {
+  rpc GetHealth(GetHealthRequest) returns (GetHealthResponse);
+  rpc ExecuteCapability(ExecuteCapabilityRequest) returns (ExecuteCapabilityResponse);
+  rpc CancelCapability(CancelCapabilityRequest) returns (CancelCapabilityResponse);
+}
+
+message GetHealthRequest {
+  string service_id = 1;
+}
+
+message GetHealthResponse {
+  string service_id = 1;
+  string name = 2;
+  string robot_id = 3;
+  bool online = 4;
+  bool loaded = 5;
+  bool busy = 6;
+  string current_skill_id = 7;
+  string error_code = 8;
+  string error_message = 9;
+  google.protobuf.Struct metrics = 10;
+  string version = 11;
+}
+
+message ExecuteCapabilityRequest {
+  string service_id = 1;
+  string trace_id = 2;
+  string episode_id = 3;
+  string skill_id = 4;
+  string skill_name = 5;
+  string robot_id = 6;
+  string objective = 7;
+  google.protobuf.Struct arguments = 8;
+  double timeout_sec = 9;
+  google.protobuf.Struct metadata = 10;
+}
+
+message ExecuteCapabilityResponse {
+  bool success = 1;
+  string status = 2;
+  string summary = 3;
+  string failure_mode = 4;
+  string error_code = 5;
+  string error_message = 6;
+  google.protobuf.Struct metrics = 7;
+}
+
+message CancelCapabilityRequest {
+  string service_id = 1;
+  string skill_id = 2;
+}
+
+message CancelCapabilityResponse {
+  bool accepted = 1;
+  string summary = 2;
+  string error_code = 3;
+  string error_message = 4;
+}

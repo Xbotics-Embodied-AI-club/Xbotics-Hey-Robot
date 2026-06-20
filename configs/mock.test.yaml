@@ -1,0 +1,151 @@
+# Minimal mock deployment used by tests and lightweight smoke checks.
+deployment:
+  id: mock-test
+  mode: local
+  bus:
+    type: nats
+    url: nats://127.0.0.1:4222
+    options:
+      robot_publish_hz: 10.0
+
+logging:
+  level: INFO
+  theme: dark
+  json_format: false
+  file_path: logs/mock-test/app.log
+  json_file_path: logs/mock-test/app.jsonl
+  throttle_sec: 0.0
+
+resources:
+  runtime_dir: runtime/mock.test
+  media:
+    root: runtime/mock.test/media
+    max_items: 64
+    image_save_every_n: 1
+  episodes:
+    root: runtime/mock.test/episodes
+  events:
+    retain: 200
+
+skills:
+  modules:
+    - hey_robot.skills.builtin
+  mode: bringup
+  enabled:
+    - inspect_scene
+    - look_around
+    - detect_marker
+    - human_follow
+    - stop_motion
+
+notifications:
+  defaults:
+    channels: [web]
+  channels:
+    web: {}
+    voice:
+      chat_id: mock-voice
+      sender_id: voice-user
+    feishu:
+      chat_id: ""
+  kinds:
+    task_watchdog:
+      severity: critical
+      channels: [web]
+    proactive_message:
+      severity: info
+      channels: [web]
+
+identity:
+  enabled: true
+  unified_user_episodes: true
+  bindings:
+    "cli:sender:local-user": owner
+    "web:sender:web-user": owner
+    "voice:sender:voice-user": owner
+
+channels:
+  cli:
+    type: cli
+    enabled: true
+    account_id: local
+    sender_id: local-user
+    chat_id: local-cli
+  web:
+    type: web
+    enabled: false
+    account_id: mock-web
+    host: 127.0.0.1
+    port: 18080
+    sender_id: web-user
+    chat_id: mock-web
+    access_log: false
+    uvicorn_log_level: warning
+  voice:
+    type: voice
+    enabled: true
+    account_id: mock-voice
+    sender_id: voice-user
+    chat_id: mock-voice
+    scripted_texts:
+      - "小白 inspect the current scene"
+    scripted_start_delay_sec: 0.02
+    scripted_interval_sec: 0.01
+    asr:
+      model: ep-asr
+    tts:
+      enabled: false
+  feishu:
+    type: feishu
+    enabled: false
+    account_id: mock-feishu
+    app_id_env: FEISHU_APP_ID
+    app_secret_env: FEISHU_APP_SECRET
+    encrypt_key_env: FEISHU_ENCRYPT_KEY
+    verification_token_env: FEISHU_VERIFICATION_TOKEN
+    group_policy: mention
+    reply_to_message: true
+    domain: feishu
+    allow_from:
+      - "*"
+    media_root: runtime/mock.test/media/feishu
+
+robots:
+  mock0:
+    type: mock
+    family: xlerobot
+    environment: mock
+    driver: mock
+    embodiment_profile: xlerobot_mock
+    enabled: true
+    body: xlerobot
+    control_hz: 10.0
+
+capability_services: {}
+
+policies:
+  embodied_skills:
+    type: skill
+    enabled: true
+    robot_id: mock0
+    device: skill-runtime
+    freq_hz: 10.0
+    settings:
+      codec: skill
+      body: xlerobot
+      default_step_cm: 20.0
+      default_turn_deg: 30.0
+      max_step_cm: 80.0
+      max_turn_deg: 120.0
+
+agents:
+  main:
+    type: robot_agent
+    enabled: true
+    robot_id: mock0
+    policy_id: embodied_skills
+    settings:
+      mode: direct
+      max_iterations: 3
+      execution_feedback:
+        backend: status

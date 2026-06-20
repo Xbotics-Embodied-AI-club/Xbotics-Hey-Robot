@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>任务列表 — Hey Robot</title>
+  <link rel="stylesheet" href="/static/shared/css/tokens.css">
+  <link rel="stylesheet" href="/static/shared/css/base.css">
+  <link rel="stylesheet" href="/static/shared/css/components.css">
+  <style>
+    .tasks-shell {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: var(--space-xl);
+    }
+    .tasks-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: var(--space-xl);
+      padding-bottom: var(--space-lg);
+      border-bottom: 1px solid var(--border);
+    }
+    .tasks-header h1 { font-size: var(--font-size-xl); font-weight: 600; }
+    .tasks-header .back-link { color: var(--text-secondary); font-size: var(--font-size-sm); }
+    .tasks-header .back-link:hover { color: var(--accent); }
+    .task-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-md);
+      padding: var(--space-lg);
+      margin-bottom: var(--space-md);
+      transition: background var(--transition-fast);
+    }
+    .task-card:hover { background: var(--bg-hover); }
+    .task-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: var(--space-sm);
+    }
+    .task-card-title {
+      font-weight: 600;
+      font-size: var(--font-size-md);
+      color: var(--text-primary);
+    }
+    .task-card-title a { color: inherit; }
+    .task-card-title a:hover { color: var(--accent); text-decoration: none; }
+    .task-card-meta {
+      font-size: var(--font-size-xs);
+      color: var(--text-disabled);
+      display: flex;
+      gap: var(--space-lg);
+      flex-wrap: wrap;
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: var(--radius-full);
+      font-size: var(--font-size-xs);
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .badge-pending { background: var(--bg-input); color: var(--text-disabled); }
+    .badge-active { background: var(--accent); color: #fff; }
+    .badge-completed { background: var(--success-bg); color: var(--success); }
+    .badge-failed { background: var(--danger-bg); color: var(--danger); }
+    .badge-cancelled { background: var(--warning-bg); color: var(--warning); }
+    .empty-state { text-align: center; color: var(--text-disabled); padding: var(--space-2xl); }
+    @media (max-width: 768px) {
+      .tasks-shell { padding: var(--space-md); }
+    }
+  </style>
+</head>
+<body style="background:var(--bg-primary);min-height:100dvh">
+
+<div class="tasks-shell">
+  <div class="tasks-header">
+    <h1>任务列表</h1>
+    <a href="/chat" class="back-link">&larr; 返回对话</a>
+  </div>
+  <div id="task-list"><div class="empty-state">加载中...</div></div>
+</div>
+
+<script src="/static/shared/js/utils.js"></script>
+<script src="/static/shared/js/api.js"></script>
+<script src="/static/views/tasks/tasks.js"></script>
+</body>
+</html>

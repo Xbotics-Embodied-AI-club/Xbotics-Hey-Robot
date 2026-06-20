@@ -1,0 +1,367 @@
+﻿deployment:
+  id: xlerobot.real.windows
+  mode: local
+  bus:
+    type: nats
+    url: nats://127.0.0.1:4222
+    options:
+      robot_publish_hz: 2.0
+      camera_stream_hz: 15.0
+      human_follow_service_enabled: true
+      robot_action_log_every_steps: 1
+      robot_status_log_every_frames: 30
+
+logging:
+  level: INFO
+  theme: dark
+  json_format: false
+  file_path: logs/xlerobot.real.windows/app.log
+  json_file_path: logs/xlerobot.real.windows/app.jsonl
+  throttle_sec: 0.0
+
+resources:
+  runtime_dir: runtime/xlerobot.real.windows
+  media:
+    root: runtime/xlerobot.real.windows/media
+    max_items: 64
+    image_save_every_n: 1
+  episodes:
+    root: runtime/xlerobot.real.windows/episodes
+  events:
+    retain: 2000
+
+skills:
+  modules:
+    - hey_robot.skills.builtin
+  mode: bringup
+  enabled:
+    - inspect_scene
+    - look_around
+    - detect_marker
+    - move_base
+    - turn_base
+    - human_follow
+    - stop_motion
+    - reset_posture
+    - set_arm_pose
+    - move_arm_joints
+    - set_gripper
+
+notifications:
+  defaults:
+    channels: [web]
+  channels:
+    web: {}
+    voice:
+      chat_id: xlerobot-voice
+      sender_id: voice-user
+    feishu:
+      chat_id: ""
+  kinds:
+    task_watchdog:
+      severity: critical
+      channels: [web, feishu]
+    proactive_message:
+      severity: info
+      channels: [web]
+
+identity:
+  enabled: true
+  unified_user_episodes: true
+  bindings:
+    "web:sender:web-user": owner
+    "voice:sender:voice-user": owner
+    # Replace the Feishu open_id with your actual account after binding/inspection.
+    "feishu:sender:ou_160f4368eb2ada4edda22bd33ce435af": owner
+
+channels:
+  cli:
+    type: cli
+    enabled: false
+    account_id: xlerobot
+    prompt: "xlerobot> "
+    sender_id: local-user
+    chat_id: xlerobot-local
+  web:
+    type: web
+    enabled: true
+    account_id: xlerobot-web
+    sender_id: web-user
+    host: 0.0.0.0
+    port: 8080
+    access_log: false
+    uvicorn_log_level: warning
+  voice:
+    type: voice
+    enabled: true
+    account_id: xlerobot-voice
+    sender_id: voice-user
+    chat_id: xlerobot-voice
+    activation:
+      enabled: true
+      wake_words:
+        - 小白
+        - 机器人
+        - robot
+      strip_wake_word: true
+      session_timeout_sec: 60.0
+      min_route_chars: 2
+    tts_echo_guard_sec: 1.0
+    reply_tts: true
+    recorder:
+      input_device: 1
+      sample_rate: 16000
+      channels: 1
+      block_ms: 100
+      energy_threshold: 0.012
+      silence_sec: 0.9
+      pre_roll_sec: 0.4
+      min_speech_sec: 0.4
+      max_speech_sec: 8.0
+    asr:
+      provider: doubao
+      api_key_env: ARK_API_KEY
+      endpoint: wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream
+      resource_id: volc.seedasr.sauc.duration
+      language: zh-CN
+      sample_rate: 16000
+      bits: 16
+      channels: 1
+      chunk_ms: 200
+      sherpa_model_dir: models/asr
+      sherpa_tokens: tokens.txt
+      sherpa_encoder: encoder.int8.onnx
+      sherpa_decoder: decoder.onnx
+      sherpa_joiner: joiner.int8.onnx
+      sherpa_provider: cpu
+      listen_timeout_sec: 1.6
+    tts:
+      provider: doubao
+      enabled: true
+      api_key_env: ARK_API_KEY
+      resource_id: seed-tts-2.0
+      voice_type: zh_female_vv_uranus_bigtts
+      endpoint: wss://openspeech.bytedance.com/api/v3/tts/bidirection
+      encoding: pcm
+      sample_rate: 16000
+      output_device: 3
+  feishu:
+    type: feishu
+    enabled: true
+    account_id: xlerobot-feishu
+    app_id_env: FEISHU_APP_ID
+    app_secret_env: FEISHU_APP_SECRET
+    encrypt_key_env: FEISHU_ENCRYPT_KEY
+    verification_token_env: FEISHU_VERIFICATION_TOKEN
+    group_policy: mention
+    reply_to_message: true
+    domain: feishu
+    allow_from:
+      - ou_160f4368eb2ada4edda22bd33ce435af
+    media_root: runtime/xlerobot.real.windows/media/feishu
+robots:
+  xlerobot:
+    type: xlerobot
+    family: xlerobot
+    environment: real
+    driver: native
+    embodiment_profile: xlerobot_real
+    enabled: true
+    serial_bus:
+      port: COM5
+      baudrate: 1000000
+    video_timeout_ms: 150
+    control_hz: 10.0
+    telemetry_hz: 2.0
+    default_linear_speed: 0.2
+    default_angular_speed: 0.45
+    motion_time_scale: 2.0
+    startup_probe: true
+    components:
+      base:
+        type: lekiwi_base
+        enabled: true
+        left_front_id: 7
+        right_front_id: 9
+        rear_id: 8
+        wheel_radius_m: 0.08
+        chassis_radius_m: 0.18
+        max_linear_speed_mps: 0.5
+        max_angular_speed_radps: 1.0
+        default_wheel_speed: 3250
+      arm:
+        type: so101_arm
+        enabled: true
+        joint_ids:
+          base: 1
+          shoulder: 2
+          elbow: 3
+          wrist_flex: 4
+          wrist_roll: 5
+          gripper: 6
+        default_speed: 1000
+        default_acc: 50
+        auto_home_on_startup: false
+        home_on_close: false
+        # Low forward-facing center pose.
+        rest_position:
+          base: 0
+          shoulder: 10
+          elbow: 140
+          wrist_flex: 25
+          wrist_roll: -90
+          gripper: 45
+        named_poses:
+          observe_front:
+            base: -90
+            shoulder: 5
+            elbow: 145
+            wrist_flex: 25
+            wrist_roll: 0
+            gripper: 45
+          pregrasp_table:
+            base: -90
+            shoulder: 25
+            elbow: 120
+            wrist_flex: 20
+            wrist_roll: 0
+            gripper: 90
+          carry_compact:
+            base: -90
+            shoulder: 15
+            elbow: 135
+            wrist_flex: 35
+            wrist_roll: 0
+            gripper: 20
+          drop_zone_ready:
+            base: -45
+            shoulder: 35
+            elbow: 105
+            wrist_flex: 10
+            wrist_roll: 0
+            gripper: 30
+        joint_limits:
+          base: [-180, 180]
+          shoulder: [0, 180]
+          elbow: [0, 180]
+          wrist_flex: [-90, 90]
+          wrist_roll: [-180, 180]
+          gripper: [0, 90]
+      default_camera: front
+      cameras:
+        front:
+          type: opencv_camera
+          enabled: true
+          owner: robot_driver
+          device_id: 1
+          backend: dshow
+          width: 1280
+          height: 720
+          fps: 30
+      battery:
+        type: servo_bus_battery
+        enabled: true
+        servo_ids: [1]
+        full_voltage: 12.6
+        low_voltage: 10.5
+        critical_voltage: 9.5
+        min_voltage: 9.0
+    safety:
+      max_abs_action: null
+
+capability_services:
+  arm_vla:
+    type: vla_service
+    enabled: true
+    robot_id: xlerobot
+    skill_names:
+      - vla_manipulation
+    resources:
+      - arm
+      - gripper
+      - camera
+    timeout_sec: 30
+    settings:
+      policy_runtime: groot_zmq
+      policy_host: "127.0.0.1"
+      policy_port: 5555
+      task_prompt: "Pick up the object."
+      arm: arm
+      cameras:
+        - front
+      camera_devices:
+        front: 1
+      camera_width: 1920
+      camera_height: 1080
+      camera_fps: 30
+      camera_key_map:
+        front: camera1
+      fps: 25
+      execution_time: 30
+      action_mode: absolute_joint_position_rad
+      action_horizon: 16
+
+policies:
+  embodied_skills:
+    type: skill
+    enabled: true
+    robot_id: xlerobot
+    device: skill-runtime
+    freq_hz: 1.0
+    settings:
+      codec: skill
+      body: xlerobot
+      default_step_cm: 20.0
+      default_turn_deg: 30.0
+      max_step_cm: 80.0
+      max_turn_deg: 120.0
+
+agents:
+  main:
+    type: robot_agent
+    enabled: true
+    robot_id: xlerobot
+    policy_id: embodied_skills
+    settings:
+      mode: autonomous
+      max_iterations: 6
+      providers:
+        planner:
+          type: deepseek
+          model_env: DEEPSEEK_MODEL
+          api_key_env: DEEPSEEK_API_KEY
+          base_url_env: DEEPSEEK_BASE_URL
+          temperature: 0.0
+          max_tokens: 1024
+          reasoning_effort: high
+          extra_body:
+            thinking:
+              type: enabled
+        feedback:
+          type: dashscope
+          model_env: DASHSCOPE_MODEL
+          api_key_env: DASHSCOPE_API_KEY
+          temperature: 0.0
+          max_tokens: 256
+        scene_captioner:
+          type: dashscope
+          model_env: DASHSCOPE_MODEL
+          api_key_env: DASHSCOPE_API_KEY
+          temperature: 0.0
+          max_tokens: 512
+      execution_feedback:
+        backend: status
+        media_root: runtime/xlerobot.real.windows/media
+      task_supervisor:
+        status_stale_sec: 90.0
+        observation_stale_sec: 90.0
+      task_safety:
+        enabled: true
+        voice_motion_requires_confirmation: true
+      perception:
+        scene_captioner:
+          enabled: true
+          purpose: scene_captioner
+      autonomy:
+        enabled: true
+        max_events: 100

@@ -1,0 +1,267 @@
+﻿# XLeRobot MuJoCo simulation deployment for Ubuntu local development and testing.
+# Usage: hey-robot run --config configs/xlerobot.sim.ubuntu.yaml
+
+deployment:
+  id: xlerobot.sim.ubuntu
+  mode: local
+  bus:
+    type: nats
+    url: nats://127.0.0.1:4222
+    options:
+      robot_publish_hz: 2.0
+      robot_action_log_every_steps: 1
+      robot_status_log_every_frames: 5
+
+logging:
+  level: INFO
+  theme: dark
+  json_format: false
+  file_path: logs/xlerobot.sim.ubuntu/app.log
+  json_file_path: logs/xlerobot.sim.ubuntu/app.jsonl
+  throttle_sec: 0.0
+
+resources:
+  runtime_dir: runtime/xlerobot.sim.ubuntu
+  media:
+    root: runtime/xlerobot.sim.ubuntu/media
+    max_items: 64
+    image_save_every_n: 1
+  episodes:
+    root: runtime/xlerobot.sim.ubuntu/episodes
+  events:
+    retain: 2000
+
+skills:
+  modules:
+    - hey_robot.skills.builtin
+  mode: production
+  enabled:
+    - inspect_scene
+    - look_around
+    - detect_marker
+    - move_base
+    - turn_base
+    - human_follow
+    - stop_motion
+    - reset_posture
+    - set_arm_pose
+    - move_arm_joints
+    - set_gripper
+
+notifications:
+  defaults:
+    channels: [web]
+  channels:
+    web: {}
+    voice:
+      chat_id: sim-voice
+      sender_id: voice-user
+    feishu:
+      chat_id: ""
+  kinds:
+    task_watchdog:
+      severity: critical
+      channels: [web, feishu]
+    proactive_message:
+      severity: info
+      channels: [web]
+
+identity:
+  enabled: true
+  unified_user_episodes: true
+  bindings:
+    "cli:sender:local-user": owner
+    "web:sender:web-user": owner
+    "voice:sender:voice-user": owner
+    # Replace the Feishu open_id with your actual account after binding/inspection.
+    "feishu:sender:ou_160f4368eb2ada4edda22bd33ce435af": owner
+
+channels:
+  cli:
+    type: cli
+    enabled: false
+    account_id: sim-dev
+    prompt: "sim-dev> "
+    sender_id: local-user
+    chat_id: sim-dev-local
+  web:
+    type: web
+    enabled: true
+    account_id: sim-web
+    sender_id: web-user
+    host: 0.0.0.0
+    port: 8080
+    access_log: false
+    uvicorn_log_level: warning
+  voice:
+    type: voice
+    enabled: true
+    account_id: sim-voice
+    sender_id: voice-user
+    chat_id: sim-voice
+    activation:
+      enabled: true
+      wake_words:
+        - 小白
+        - 机器人
+        - robot
+      strip_wake_word: true
+      session_timeout_sec: 60.0
+      min_route_chars: 4
+    tts_echo_guard_sec: 1.0
+    reply_tts: true
+    recorder:
+      input_device: 0
+      sample_rate: 16000
+      channels: 1
+      block_ms: 100
+      energy_threshold: 0.02
+      silence_sec: 0.5
+      pre_roll_sec: 0.4
+      min_speech_sec: 0.4
+      max_speech_sec: 6.0
+    asr:
+      provider: doubao
+      api_key_env: ARK_API_KEY
+      endpoint: wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream
+      resource_id: volc.seedasr.sauc.duration
+      language: zh-CN
+      sample_rate: 16000
+      bits: 16
+      channels: 1
+      chunk_ms: 200
+    tts:
+      provider: doubao
+      enabled: true
+      api_key_env: ARK_API_KEY
+      resource_id: seed-tts-2.0
+      voice_type: zh_female_vv_uranus_bigtts
+      endpoint: wss://openspeech.bytedance.com/api/v3/tts/bidirection
+      encoding: pcm
+      sample_rate: 16000
+      output_device: 0
+  feishu:
+    type: feishu
+    enabled: true
+    account_id: sim-feishu
+    app_id_env: FEISHU_APP_ID
+    app_secret_env: FEISHU_APP_SECRET
+    encrypt_key_env: FEISHU_ENCRYPT_KEY
+    verification_token_env: FEISHU_VERIFICATION_TOKEN
+    group_policy: mention
+    reply_to_message: true
+    domain: feishu
+    allow_from:
+      - ou_160f4368eb2ada4edda22bd33ce435af
+    media_root: runtime/xlerobot.sim.ubuntu/media/feishu
+
+robots:
+  sim_robot:
+    type: xlerobot_sim
+    family: xlerobot
+    environment: sim
+    driver: mujoco
+    embodiment_profile: xlerobot_sim
+    enabled: true
+    settings:
+      mjcf_path: assets/robots/xlerobot/scene.xml
+      render_width: 640
+      render_height: 480
+      control_hz: 2.0
+      linear_speed: 0.2
+      angular_speed: 0.45
+      viewer:
+        enabled: false
+
+capability_services:
+  arm_vla:
+    type: vla_service
+    enabled: true
+    robot_id: sim_robot
+    skill_names:
+      - vla_manipulation
+    resources:
+      - arm
+      - gripper
+      - camera
+    timeout_sec: 30
+    settings:
+      policy_runtime: fake
+      policy_type: smolvla
+      policy_model_path: ""
+      device: cuda
+      task_prompt: "Grab the notebook."
+      arm: right
+      cameras:
+        - front
+        - right_wrist
+        - left_wrist
+      camera_key_map:
+        front: observation.images.camera1
+        right_wrist: observation.images.camera2
+        left_wrist: observation.images.camera3
+      fps: 25
+      execution_time: 10
+      action_mode: absolute_joint_position_rad
+      action_horizon: 50
+
+policies:
+  embodied_skills:
+    type: skill
+    enabled: true
+    robot_id: sim_robot
+    device: skill-runtime
+    freq_hz: 1.0
+    settings:
+      codec: skill
+      body: xlerobot
+      default_step_cm: 20.0
+      default_turn_deg: 30.0
+      max_step_cm: 80.0
+      max_turn_deg: 120.0
+
+agents:
+  main:
+    type: robot_agent
+    enabled: true
+    robot_id: sim_robot
+    policy_id: embodied_skills
+    settings:
+      mode: autonomous
+      max_iterations: 6
+      providers:
+        planner:
+          type: deepseek
+          model_env: DEEPSEEK_MODEL
+          api_key_env: DEEPSEEK_API_KEY
+          base_url_env: DEEPSEEK_BASE_URL
+          temperature: 0.0
+          max_tokens: 1024
+          reasoning_effort: high
+          extra_body:
+            thinking:
+              type: enabled
+        feedback:
+          type: deterministic
+        scene_captioner:
+          type: dashscope
+          model_env: DASHSCOPE_MODEL
+          api_key_env: DASHSCOPE_API_KEY
+          temperature: 0.0
+          max_tokens: 512
+      execution_feedback:
+        backend: status
+        media_root: runtime/xlerobot.sim.ubuntu/media
+      task_supervisor:
+        status_stale_sec: 90.0
+        observation_stale_sec: 90.0
+      task_safety:
+        enabled: true
+        voice_motion_requires_confirmation: true
+      perception:
+        scene_captioner:
+          enabled: true
+          purpose: scene_captioner
+      autonomy:
+        enabled: true
+        max_events: 100

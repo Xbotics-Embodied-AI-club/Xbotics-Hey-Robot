@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>运维面板 — Hey Robot</title>
+  <link rel="stylesheet" href="/static/shared/css/tokens.css?v=20260620-2">
+  <link rel="stylesheet" href="/static/shared/css/base.css?v=20260620-2">
+  <link rel="stylesheet" href="/static/shared/css/components.css?v=20260620-2">
+  <style>
+    .admin-shell {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: var(--space-xl);
+    }
+    body.admin-page {
+      height: auto;
+      min-height: 100dvh;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+    .admin-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: var(--space-xl);
+      padding-bottom: var(--space-lg);
+      border-bottom: 1px solid var(--border);
+    }
+    .admin-header h1 {
+      font-size: var(--font-size-xl);
+      font-weight: 600;
+    }
+    .admin-header .back-link {
+      color: var(--text-secondary);
+      font-size: var(--font-size-sm);
+    }
+    .admin-header .back-link:hover { color: var(--accent); }
+    .admin-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-lg);
+    }
+    .admin-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-md);
+      padding: var(--space-lg);
+    }
+    .admin-card.full { grid-column: 1 / -1; }
+    .admin-card h3 {
+      font-size: var(--font-size-xs);
+      font-weight: 600;
+      color: var(--text-disabled);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: var(--space-md);
+    }
+    .kv-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 0;
+      font-size: var(--font-size-sm);
+    }
+    .kv-row .k { color: var(--text-secondary); }
+    .kv-row .v {
+      color: var(--text-primary);
+      font-family: var(--font-mono);
+      max-width: 65%;
+      text-align: right;
+      overflow-wrap: anywhere;
+    }
+    .event-row {
+      padding: var(--space-xs) 0;
+      font-size: var(--font-size-sm);
+      border-bottom: 1px solid var(--border-light);
+    }
+    .event-row:last-child { border-bottom: none; }
+    .event-row .kind { color: var(--accent); font-family: var(--font-mono); font-size: var(--font-size-xs); }
+    .event-row .summary { color: var(--text-primary); margin-top: 2px; }
+    .event-row .meta { color: var(--text-disabled); font-size: var(--font-size-xs); margin-top: 2px; }
+    .badge { display:inline-block;padding:2px 8px;border-radius:var(--radius-full);font-size:var(--font-size-xs);font-weight:600 }
+    .badge-ok { background:var(--success-bg);color:var(--success) }
+    .badge-warn { background:var(--warning-bg);color:var(--warning) }
+    .badge-err { background:var(--danger-bg);color:var(--danger) }
+    .badge-active { background:var(--accent);color:#fff }
+    .badge-completed { background:var(--success-bg);color:var(--success) }
+    .badge-failed { background:var(--danger-bg);color:var(--danger) }
+    .badge-cancelled { background:var(--warning-bg);color:var(--warning) }
+    .badge-pending { background:var(--bg-input);color:var(--text-disabled) }
+    .feature-chip {
+      display: inline-block;
+      margin: 2px 0 2px 6px;
+      padding: 2px 7px;
+      border-radius: var(--radius-full);
+      background: var(--bg-input);
+      color: var(--text-secondary);
+      font-family: var(--font-sans);
+      font-size: var(--font-size-xs);
+      white-space: nowrap;
+    }
+    .empty-state { color: var(--text-disabled); font-size: var(--font-size-sm); text-align: center; padding: var(--space-xl); }
+    .skills-list {
+      display: grid;
+      grid-template-columns: 1fr;
+    }
+    @media (max-width: 768px) {
+      .admin-grid { grid-template-columns: 1fr; }
+      .admin-shell { padding: var(--space-md); }
+    }
+  </style>
+</head>
+<body class="admin-page">
+
+<div class="admin-shell">
+  <div class="admin-header">
+    <h1>Hey Robot 运维面板</h1>
+    <a href="/chat" class="back-link">&larr; 返回对话</a>
+  </div>
+
+  <div class="admin-grid">
+    <!-- Deployment Info -->
+    <div class="admin-card">
+      <h3>部署信息</h3>
+      <div id="deploy-info">
+        <div class="kv-row"><span class="k">Deployment ID</span><span class="v" id="dep-id">--</span></div>
+        <div class="kv-row"><span class="k">Channel</span><span class="v" id="dep-channel">--</span></div>
+        <div class="kv-row"><span class="k">局域网 IP</span><span class="v" id="dep-host">--</span></div>
+        <div class="kv-row"><span class="k">Port</span><span class="v" id="dep-port">--</span></div>
+      </div>
+    </div>
+
+    <!-- Health -->
+    <div class="admin-card">
+      <h3>服务健康</h3>
+      <div id="health-info">
+        <div class="kv-row"><span class="k">WebChannel</span><span class="v"><span class="badge badge-ok" id="health-badge">正常</span></span></div>
+        <div class="kv-row"><span class="k">已启用功能</span><span class="v" id="health-features">--</span></div>
+      </div>
+    </div>
+
+    <!-- Stats Overview -->
+    <div class="admin-card full" style="display:flex;justify-content:space-around;text-align:center">
+      <div><div style="font-size:var(--font-size-2xl);font-weight:700" id="stat-tasks">0</div><div style="font-size:var(--font-size-xs);color:var(--text-disabled)">Tasks</div></div>
+      <div><div style="font-size:var(--font-size-2xl);font-weight:700" id="stat-robots">0</div><div style="font-size:var(--font-size-xs);color:var(--text-disabled)">Robots</div></div>
+      <div><div style="font-size:var(--font-size-2xl);font-weight:700" id="stat-skills">0</div><div style="font-size:var(--font-size-xs);color:var(--text-disabled)">Skills</div></div>
+      <div><div style="font-size:var(--font-size-2xl);font-weight:700" id="stat-events">0</div><div style="font-size:var(--font-size-xs);color:var(--text-disabled)">Events</div></div>
+    </div>
+
+    <!-- Recent Skills — full width, high visibility -->
+    <div class="admin-card full">
+      <h3>最近技能执行</h3>
+      <div id="skills-ops-list" class="skills-list"><div class="empty-state">加载中...</div></div>
+    </div>
+
+    <!-- Robot States -->
+    <div class="admin-card">
+      <h3>机器人状态</h3>
+      <div id="robots-ops-list"><div class="empty-state">加载中...</div></div>
+    </div>
+
+    <!-- Recent Tasks -->
+    <div class="admin-card">
+      <h3>最近任务</h3>
+      <div id="tasks-ops-list"><div class="empty-state">加载中...</div></div>
+    </div>
+
+    <!-- Recent Events — scrolled to keep page short -->
+    <div class="admin-card full">
+      <h3>运行时事件</h3>
+      <div id="events-list" style="max-height:260px;overflow-y:auto"><div class="empty-state">加载中...</div></div>
+    </div>
+  </div>
+</div>
+
+<script src="/static/shared/js/utils.js?v=20260620-2"></script>
+<script src="/static/shared/js/api.js?v=20260620-2"></script>
+<script src="/static/views/admin/admin.js?v=20260620-2"></script>
+</body>
+</html>

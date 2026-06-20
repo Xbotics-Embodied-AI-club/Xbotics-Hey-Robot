@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>任务详情 — Hey Robot</title>
+  <link rel="stylesheet" href="/static/shared/css/tokens.css">
+  <link rel="stylesheet" href="/static/shared/css/base.css">
+  <link rel="stylesheet" href="/static/shared/css/components.css">
+  <style>
+    .detail-shell {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: var(--space-xl);
+    }
+    .detail-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: var(--space-xl);
+      padding-bottom: var(--space-lg);
+      border-bottom: 1px solid var(--border);
+    }
+    .detail-header h1 { font-size: var(--font-size-lg); font-weight: 600; }
+    .detail-header nav { display: flex; gap: var(--space-lg); }
+    .detail-header nav a { color: var(--text-secondary); font-size: var(--font-size-sm); }
+    .detail-header nav a:hover { color: var(--accent); }
+    .detail-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-md);
+      padding: var(--space-lg);
+      margin-bottom: var(--space-lg);
+    }
+    .detail-card h3 {
+      font-size: var(--font-size-xs);
+      font-weight: 600;
+      color: var(--text-disabled);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: var(--space-md);
+    }
+    .kv-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 0;
+      font-size: var(--font-size-sm);
+    }
+    .kv-row .k { color: var(--text-secondary); }
+    .kv-row .v { color: var(--text-primary); font-family: var(--font-mono); font-size: var(--font-size-xs); }
+    .attempt-item {
+      padding: var(--space-sm) 0;
+      border-bottom: 1px solid var(--border-light);
+      font-size: var(--font-size-sm);
+    }
+    .attempt-item:last-child { border-bottom: none; }
+    .attempt-item .attempt-text { color: var(--text-primary); margin-bottom: 2px; }
+    .attempt-item .attempt-meta { color: var(--text-disabled); font-size: var(--font-size-xs); }
+    .badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: var(--radius-full);
+      font-size: var(--font-size-xs);
+      font-weight: 600;
+    }
+    .badge-active { background: var(--accent); color: #fff; }
+    .badge-completed { background: var(--success-bg); color: var(--success); }
+    .badge-failed { background: var(--danger-bg); color: var(--danger); }
+    .badge-pending { background: var(--bg-input); color: var(--text-disabled); }
+    .badge-cancelled { background: var(--warning-bg); color: var(--warning); }
+    .empty-state { text-align: center; color: var(--text-disabled); padding: var(--space-2xl); }
+    @media (max-width: 768px) {
+      .detail-shell { padding: var(--space-md); }
+    }
+  </style>
+</head>
+<body style="background:var(--bg-primary);min-height:100dvh">
+
+<div class="detail-shell">
+  <div class="detail-header">
+    <h1 id="detail-title">任务详情</h1>
+    <nav>
+      <a href="/tasks">&larr; 任务列表</a>
+      <a href="/chat">返回对话</a>
+    </nav>
+  </div>
+  <div id="detail-content"><div class="empty-state">加载中...</div></div>
+</div>
+
+<script src="/static/shared/js/utils.js"></script>
+<script src="/static/shared/js/api.js"></script>
+<script src="/static/views/tasks/tasks.js"></script>
+</body>
+</html>

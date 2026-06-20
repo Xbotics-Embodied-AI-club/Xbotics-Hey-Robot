@@ -1,0 +1,16 @@
+[run]
+source = hey_robot
+
+[report]
+omit =
+    src/hey_robot/audio/*
+    src/hey_robot/cli/*
+    src/hey_robot/monitoring/*
+    src/hey_robot/providers/openai_compat_provider.py
+    src/hey_robot/channels/feishu/transport.py
+    src/hey_robot/robots/components/*
+    src/hey_robot/robots/lekiwi/*
+    src/hey_robot/robots/so101/*
+    src/hey_robot/robots/xlerobot/hardware/*
+    src/hey_robot/robots/xlerobot/driver.py
+    src/hey_robot/robots/service.py

@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Hey Robot</title>
+  <link rel="stylesheet" href="/static/shared/css/tokens.css?v=20260620-2">
+  <link rel="stylesheet" href="/static/shared/css/base.css?v=20260620-2">
+  <link rel="stylesheet" href="/static/shared/css/components.css?v=20260620-4">
+</head>
+<body>
+
+<div class="app-shell">
+
+  <!-- Left Sidebar — chat history -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <span class="sidebar-title">历史对话</span>
+      <button class="panel-toggle-btn" id="sidebar-collapse" title="折叠侧边栏">&larr;</button>
+    </div>
+    <div class="sidebar-list" id="history-list">
+      <div class="sidebar-item active" data-episode="current">
+        <span>当前对话</span>
+      </div>
+    </div>
+    <div style="padding: var(--space-lg); border-top: 1px solid var(--border-light); display:flex; flex-direction:column; gap: var(--space-sm)">
+      <a href="/tasks" class="btn btn-ghost btn-sm" style="width:100%; justify-content:flex-start">任务列表 &rarr;</a>
+      <a href="/admin" class="btn btn-ghost btn-sm" style="width:100%; justify-content:flex-start">运维面板 &rarr;</a>
+      <div id="lan-url-hint" style="display:none; margin-top: var(--space-sm); padding-top: var(--space-sm); border-top: 1px solid var(--border-light); font-size: var(--font-size-xs); color: var(--text-disabled); line-height: 1.5">
+        <span style="display:block; margin-bottom:2px">手机访问：</span>
+        <span id="lan-url-text" style="color:var(--accent); word-break:break-all"></span>
+      </div>
+    </div>
+  </aside>
+  <button class="sidebar-toggle" id="sidebar-expand" title="展开侧边栏" style="display:none">&rarr;</button>
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+  <!-- Main Chat Area -->
+  <main class="chat-main" id="chat-main">
+
+    <!-- Mobile topbar -->
+    <header class="topbar" id="topbar">
+      <button class="btn-icon" id="mobile-menu-btn" title="菜单">☰</button>
+      <div style="display:flex;align-items:center;gap:12px;font-size:13px">
+        <span><span class="dot" id="mobile-robot-dot"></span> 机器人</span>
+        <span id="mobile-battery" style="color:var(--text-secondary)">--</span>
+      </div>
+      <button class="btn-icon" id="mobile-panel-btn" title="状态" style="font-size:14px">ⓘ</button>
+    </header>
+
+    <!-- WS connection banner -->
+    <div id="ws-banner" style="display:none;background:var(--warning);color:#000;text-align:center;padding:6px;font-size:12px;font-weight:600">
+      实时连接已断开，正在重连... 消息可能延迟
+    </div>
+
+    <!-- Messages -->
+    <div class="chat-messages" id="chat-messages">
+      <div class="chat-messages-inner" id="chat-messages-inner">
+        <!-- Welcome message -->
+        <div class="msg fade-in" id="welcome-msg">
+          <div class="msg-avatar agent">🤖</div>
+          <div class="msg-body">
+            <div class="msg-content">你好，我是 Hey Robot。
+
+我可以帮你控制机器人观察环境、移动、操作物体。直接告诉我你想做什么就好。</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Input -->
+    <div class="chat-input-wrap">
+      <div class="chat-input-inner">
+        <textarea
+          class="chat-input"
+          id="chat-input"
+          rows="1"
+          placeholder="告诉机器人你想做什么..."
+          autofocus
+        ></textarea>
+        <button class="chat-input-send" id="send-btn" title="发送">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M1 8L15 1L8 15L7 9L1 8Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <button class="panel-toggle-btn" id="right-panel-expand" title="展开状态栏" style="display:none">&larr;</button>
+  <!-- Right Panel — robot status -->
+  <aside class="right-panel" id="right-panel">
+    <div class="right-panel-section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-md)">
+        <span class="section-label">机器人状态</span>
+        <button class="panel-toggle-btn" id="right-panel-collapse" title="折叠侧边栏">&rarr;</button>
+      </div>
+
+      <div class="status-row">
+        <span class="label">在线状态</span>
+        <span class="value">
+          <span class="dot dot-muted" id="robot-dot"></span>
+          <span id="robot-state-label">连接中...</span>
+        </span>
+      </div>
+      <div class="status-row">
+        <span class="label">电池</span>
+        <span class="value" id="battery-value">--</span>
+      </div>
+      <div class="battery-bar" id="battery-bar-row">
+        <div class="battery-bar-fill" id="battery-fill" style="width:0%"></div>
+      </div>
+      <div class="status-row" id="base-status-row" style="margin-top:var(--space-sm)">
+        <span class="label">底盘</span>
+        <span class="value" id="base-value">--</span>
+      </div>
+      <div class="status-row" id="arm-status-row">
+        <span class="label">机械臂</span>
+        <span class="value" id="arm-value">--</span>
+      </div>
+      <div class="status-row" id="camera-status-row">
+        <span class="label">相机</span>
+        <span class="value" id="camera-value">--</span>
+      </div>
+
+      <div id="recovery-banner" style="display:none;margin-top:var(--space-md)" class="recovery-banner">
+        ⚠ 需要人工处理
+      </div>
+    </div>
+
+    <div class="right-panel-section" id="task-section" style="display:none">
+      <span class="section-label">当前任务</span>
+      <div style="font-size:var(--font-size-sm);font-weight:600;margin-bottom:var(--space-xs)" id="task-name">--</div>
+      <div style="font-size:var(--font-size-xs);color:var(--text-secondary)" id="task-phase">--</div>
+      <div class="battery-bar" style="margin-top:var(--space-sm)">
+        <div class="battery-bar-fill" id="task-progress-fill" style="width:0%;background:var(--accent)"></div>
+      </div>
+    </div>
+
+    <div class="estop-wrap">
+      <button class="estop-btn" id="estop-btn">⏹ 紧急停止</button>
+    </div>
+  </aside>
+
+  <!-- Mobile right panel (bottom sheet) -->
+  <div class="right-panel mobile-sheet" id="mobile-panel" style="display:none">
+    <div class="right-panel-section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-md)">
+        <span class="section-label">机器人状态</span>
+        <button class="panel-toggle-btn" id="mobile-panel-close">关闭</button>
+      </div>
+      <div class="status-row">
+        <span class="label">在线状态</span>
+        <span class="value"><span class="dot dot-muted" id="mobile-robot-dot2"></span> <span id="mobile-robot-state">连接中...</span></span>
+      </div>
+      <div class="status-row">
+        <span class="label">电池</span>
+        <span class="value" id="mobile-battery2">--</span>
+      </div>
+    </div>
+    <div class="estop-wrap" style="border-top:none;padding-top:0">
+      <button class="estop-btn" id="mobile-estop-btn">⏹ 紧急停止</button>
+    </div>
+  </div>
+</div>
+
+<!-- Lightbox overlay -->
+<div id="lightbox" style="display:none" class="lightbox-overlay" onclick="this.style.display='none'">
+  <button class="lightbox-close" onclick="document.getElementById('lightbox').style.display='none'">&times;</button>
+  <button class="lightbox-nav prev" id="lightbox-prev">&lang;</button>
+  <button class="lightbox-nav next" id="lightbox-next">&rang;</button>
+  <img id="lightbox-img" src="" alt="">
+</div>
+
+<!-- Confirmation dialog -->
+<div id="confirm-dialog" style="display:none;position:fixed;inset:0;z-index:2000;background:var(--bg-overlay);display:none;align-items:center;justify-content:center">
+  <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-xl);max-width:400px;width:90%">
+    <div style="font-weight:600;margin-bottom:var(--space-sm);color:var(--danger)">紧急停止</div>
+    <div style="font-size:var(--font-size-sm);color:var(--text-secondary);margin-bottom:var(--space-xl)">确定要紧急停止机器人吗？所有正在执行的动作将被立即中断。</div>
+    <div style="display:flex;gap:var(--space-sm);justify-content:flex-end">
+      <button class="btn btn-secondary" onclick="document.getElementById('confirm-dialog').style.display='none'">取消</button>
+      <button class="btn btn-danger" id="estop-confirm-btn">确认停止</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/shared/js/store.js?v=20260620-2"></script>
+<script src="/static/shared/js/utils.js?v=20260620-2"></script>
+<script src="/static/shared/js/api.js?v=20260620-2"></script>
+<script src="/static/shared/js/ws.js?v=20260620-2"></script>
+<script src="/static/views/chat/chat.js?v=20260620-2"></script>
+</body>
+</html>

@@ -1,0 +1,124 @@
+[project]
+name = "hey-robot"
+version = "1.0.0"
+description = "Hey Robot: Production-Grade Distributed VLA/VLM Robot System"
+authors = [{ name = "Hey Robot Contributors" }]
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "MIT" }
+
+# Core runtime dependencies (minimal)
+dependencies = [
+    "numpy>=1.24.0",
+    "pillow>=10.0.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.2.2",
+    "httpx[socks]>=0.28.1",
+    "pyzmq>=25.0.0",
+    "nats-py>=2.8.0",
+    "grpcio==1.73.1",
+    "protobuf>=4.25.0",
+    "imageio>=2.37.2",
+    "imageio-ffmpeg>=0.6.0",
+    "pyserial>=3.5",
+    "opencv-python==4.10.0.84",
+    "json-repair>=0.54.0",
+    "jinja2>=3.1.0",
+    "openai>=1.90.0",
+    "fastapi>=0.115.0",
+    "starlette>=0.45,<1.0.0",
+    "uvicorn>=0.30.0",
+    "sounddevice>=0.4.6",
+    "sherpa-onnx>=1.12.0",
+    "sherpa-onnx-core>=1.12.0",
+    "lark-oapi>=1.5.0,<2.0.0",
+    "websockets>=12.0",
+    "torch>=2.0.0",
+    "lerobot==0.5.0",
+    "lerobot[async]==0.5.0",
+    "feetech-servo-sdk==1.0.0",
+    "huggingface-hub>=1.0.0,<2.0.0",
+    "ultralytics>=8.4.67",
+    "wsproto>=1.3.2",
+]
+
+[project.scripts]
+hey-robot = "hey_robot.cli.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = true
+
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+exclude = [
+    "^src/hey_robot/robots/components/scservo_sdk/",
+    "^src/hey_robot/capability/contract/v1/capability_pb2.py$",
+    "^src/hey_robot/capability/contract/v1/capability_pb2_grpc.py$",
+]
+
+[[tool.mypy.overrides]]
+module = ["hey_robot.robots.components.scservo_sdk.*"]
+ignore_errors = true
+
+[project.optional-dependencies]
+sim = ["mujoco>=3.3.0"]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.0.0",
+    "poethepoet>=0.45.0",
+    "pytest>=9.0.2",
+    "pytest-cov>=7.1.0",
+    "types-PyYAML",
+    "ruff>=0.14.13",
+    "pytest-asyncio>=1.3.0",
+    "pytest-env>=1.6.0",
+    "grpcio-tools>=1.62.0",
+]
+
+[tool.poe.tasks._validate-config]
+help = "Validate config file references are not stale"
+cmd = "python scripts/dev/validate_config.py"
+
+[tool.poe.tasks.style]
+help = "Format and auto-fix the repository"
+sequence = [
+    { cmd = "ruff format ." },
+    { cmd = "ruff check . --fix" },
+]
+
+[tool.poe.tasks.lint]
+help = "Run lint and type checks"
+sequence = [
+    { ref = "_validate-config" },
+    { cmd = "ruff check ." },
+    { cmd = "mypy src" },
+]
+
+[tool.poe.tasks.test]
+help = "Run the test suite with coverage"
+cmd = "pytest -q"
+
+[tool.poe.tasks.clean]
+help = "Clean pyc, build, test, and lint artifacts"
+sequence = [
+    { cmd = "python scripts/dev/clean.py pyc" },
+    { cmd = "python scripts/dev/clean.py build" },
+    { cmd = "python scripts/dev/clean.py test" },
+    { cmd = "python scripts/dev/clean.py lint" },
+]
+
+[tool.poe.tasks.proto]
+help = "Regenerate capability protobuf and gRPC contract artifacts"
+cmd = "powershell -ExecutionPolicy Bypass -File scripts/dev/generate_capability_proto.ps1"

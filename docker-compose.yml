@@ -1,0 +1,38 @@
+name: hey-robot
+
+x-common-env: &common-env
+  PYTHONUNBUFFERED: "1"
+
+x-common-volumes: &common-volumes
+  - ./configs:/app/configs:ro
+  - ./runtime:/app/runtime
+
+services:
+  nats:
+    image: nats:2.10-alpine
+    ports:
+      - "${HEY_ROBOT_NATS_PORT:-4222}:4222"
+      - "${HEY_ROBOT_NATS_MONITOR_PORT:-8222}:8222"
+    command: ["-js", "-m", "8222"]
+    restart: unless-stopped
+
+  runtime:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        PYTHON_VERSION: ${HEY_ROBOT_PYTHON_VERSION:-3.12}
+    platform: ${HEY_ROBOT_RUNTIME_PLATFORM:-linux/amd64}
+    environment: *common-env
+    volumes: *common-volumes
+    depends_on:
+      - nats
+    ports:
+      - "${HEY_ROBOT_GATEWAY_PORT:-8080}:8080"
+      - "${HEY_ROBOT_MONITOR_PORT:-8081}:8081"
+    command:
+      - hey-robot
+      - run
+      - --config
+      - /app/configs/deployment/mock.dev.yaml
+    restart: unless-stopped
