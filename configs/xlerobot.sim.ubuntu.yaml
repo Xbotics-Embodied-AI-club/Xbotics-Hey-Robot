@@ -34,7 +34,7 @@ resources:
 skills:
   modules:
     - hey_robot.skills.builtin
-  mode: production
+  mode: bringup
   enabled:
     - inspect_scene
     - look_around
@@ -111,7 +111,7 @@ channels:
     tts_echo_guard_sec: 1.0
     reply_tts: true
     recorder:
-      input_device: 0
+      input_device: null  # 使用系统默认输入设备（PulseAudio）
       sample_rate: 16000
       channels: 1
       block_ms: 100
@@ -139,7 +139,7 @@ channels:
       endpoint: wss://openspeech.bytedance.com/api/v3/tts/bidirection
       encoding: pcm
       sample_rate: 16000
-      output_device: 0
+      output_device: null  # 使用系统默认输出设备
   feishu:
     type: feishu
     enabled: true
@@ -152,7 +152,7 @@ channels:
     reply_to_message: true
     domain: feishu
     allow_from:
-      - ou_160f4368eb2ada4edda22bd33ce435af
+      - "*"
     media_root: runtime/xlerobot.sim.ubuntu/media/feishu
 
 robots:
@@ -171,7 +171,7 @@ robots:
       linear_speed: 0.2
       angular_speed: 0.45
       viewer:
-        enabled: false
+        enabled: true
 
 capability_services:
   arm_vla:
