@@ -157,7 +157,7 @@ channels:
     reply_to_message: true
     domain: feishu
     allow_from:
-      - ou_160f4368eb2ada4edda22bd33ce435af
+      - "*"
     media_root: runtime/xlerobot.real.windows/media/feishu
 robots:
   xlerobot:

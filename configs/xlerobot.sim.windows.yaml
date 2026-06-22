@@ -145,7 +145,7 @@ channels:
       endpoint: wss://openspeech.bytedance.com/api/v3/tts/bidirection
       encoding: pcm
       sample_rate: 16000
-      output_device: 4
+      output_device: 3
   feishu:
     type: feishu
     enabled: true
@@ -158,7 +158,7 @@ channels:
     reply_to_message: true
     domain: feishu
     allow_from:
-      - ou_160f4368eb2ada4edda22bd33ce435af
+      - "*"
     media_root: runtime/xlerobot.sim.windows/media/feishu
 
 robots:
@@ -178,7 +178,7 @@ robots:
       linear_speed: 0.2
       angular_speed: 0.45
       viewer:
-        enabled: true
+        enabled: false
 
 capability_services:
   arm_vla:
