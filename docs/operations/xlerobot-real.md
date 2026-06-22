@@ -1,145 +1,207 @@
 # XLeRobot 真机部署
 
-XLeRobot 是 Hey Robot 的组合式真实机器人 embodiment，当前硬件构成：
+XLeRobot 是 Hey Robot 的组合式真实机器人 embodiment：
 
-- `SO101`：六自由度机械臂 + 夹爪
-- `LeKiwi`：三轮全向移动底盘
-- `OpenCVCamera`：本地相机组件
-- `ServoBusBattery`：通过 Feetech 舵机总线读取电池电压
-- `XLeRobot`：上述组件的组合体
+- **SO101**：六自由度机械臂 + 夹爪（Feetech 舵机 ID 1-6）
+- **LeKiwi**：三轮全向移动底盘（Feetech 舵机 ID 7-9）
+- **OpenCVCamera**：双路摄像头（头部 front + 腕部 wrist）
+- **ServoBusBattery**：通过舵机总线读取电池电压
 
 Agent 和 Skill 层不绑定具体机器人形态，上层发送 `SkillAction`，robot driver 判断目标 embodiment 是否能执行。
 
 ## 配置文件
 
-```
-configs/xlerobot.real.windows.yaml
-```
+| OS | 配置 |
+|---|---|
+| Windows | `configs/xlerobot.real.windows.yaml` |
+| Ubuntu | `configs/xlerobot.real.ubuntu.yaml` |
 
-## 平台要求
+## 平台差异
 
-- Windows，串口示例 `COM5`
-- 相机后端 `dshow`
-
-## 部署步骤
-
-### 1. 安装依赖
-
-```powershell
-uv sync --dev
-```
-
-如果启用本地语音唤醒和 `sherpa_onnx` ASR，先下载语音模型：
-
-```powershell
-uv run python scripts\model_downloads\download_speech_models.py
-```
-
-### 2. 启动 NATS
-
-`hey-robot run` 不启动 NATS broker，需要先单独运行：
-
-```powershell
-nats-server
-```
-
-### 3. 验证硬件映射
-
-启动前确认 `configs/xlerobot.real.windows.yaml` 中的配置：
-
-- `robots.xlerobot.serial_bus.port`
-- `robots.xlerobot.components.camera.device_id`
-- `robots.xlerobot.components.camera.backend`
-- 与实际接线不一致的 arm/base ID
-
-然后检查环境：
-
-```powershell
-uv run python scripts\ops\check_platform.py --config configs\xlerobot.real.windows.yaml
-uv run hey-robot inspect --config configs\xlerobot.real.windows.yaml
-```
-
-如果 `check_platform` 报错，先解决平台问题再启动 runtime。
-
-### 4. 启动系统
-
-```powershell
-uv run hey-robot run --config configs\xlerobot.real.windows.yaml
-```
-
-这条命令在单进程中启动所有启用的服务：robot service、skill controller、task supervisor、agent、gateway，以及可选的 human-follow service。
+| 配置项 | Windows | Ubuntu |
+|---|---|---|
+| 串口 | `COM5` | `/dev/ttyUSB0` |
+| 摄像头后端 | `dshow` | `v4l2` |
+| 摄像头 device_id | `1` | `0`（头）、`1`（腕） |
+| 音频设备 | 设备索引号 | `null`（PulseAudio 默认） |
+| 路径分隔 | `\` | `/` |
+| 命令前缀 | `uv run python scripts\...` | `uv run python scripts/...` |
 
 ## 环境变量
 
-默认 agent provider 需要的变量：
+`.env` 文件中配置：
 
-- `DEEPSEEK_API_KEY`
-- `DEEPSEEK_MODEL`（例如 `deepseek-chat`）
-- `DASHSCOPE_API_KEY`（DashScope 视觉模型）
-- `DASHSCOPE_MODEL`（例如 `qwen-vl-plus`）
+- `DEEPSEEK_API_KEY`、`DEEPSEEK_MODEL` — Agent 推理
+- `DASHSCOPE_API_KEY`、`DASHSCOPE_MODEL` — Vision / 场景理解
+- `ARK_API_KEY` — 语音 TTS（Doubao）
+- `FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_ENCRYPT_KEY`、`FEISHU_VERIFICATION_TOKEN` — 飞书通道
 
-可选（启用语音时需要）：
+## 部署流程
 
-- `ARK_API_KEY`
+### 1. 安装依赖
 
-可选（启用飞书时需要）：
-
-- `FEISHU_APP_ID`
-- `FEISHU_APP_SECRET`
-- `FEISHU_ENCRYPT_KEY`
-- `FEISHU_VERIFICATION_TOKEN`
-
-## 运行时诊断
-
-```powershell
-uv run python scripts\robots\xlerobot\diagnose.py --config configs\xlerobot.real.windows.yaml
+```bash
+uv sync --dev
 ```
+
+### 2. 下载模型
+
+```bash
+uv run python scripts/model_downloads/download_speech_models.py
+uv run python scripts/model_downloads/download_vision_models.py
+```
+
+国内网络 GitHub 直连可能失败，脚本会自动走 ghproxy 镜像。也可通过 `GH_PROXY` 环境变量指定自定义镜像。
+
+### 3. 音频设备检查
+
+```bash
+uv run python scripts/audio/list_devices.py
+```
+
+确认默认麦克风和扬声器可用。Ubuntu 配置已设 `input_device: null` / `output_device: null`，一般不需要修改。
+
+### 4. 启动 NATS
+
+`hey-robot run` 不自动启动 NATS broker：
+
+```bash
+nats-server
+```
+
+### 5. 摄像头扫描
+
+连接机器人前先确认摄像头 device_id：
+
+```bash
+uv run python scripts/robots/xlerobot/scan_cameras.py
+```
+
+截图保存到 `outputs/diagnostic/cameras/`，打开确认：
+- 哪个 `/dev/videoN` 是头部（front）
+- 哪个 `/dev/videoN` 是腕部（wrist）
+
+如果和配置不一致，修改 `cameras.front.device_id` 和 `cameras.wrist.device_id`。
+
+### 6. 连接机器人，运行诊断
+
+插上机器人 USB，确认串口出现后：
+
+```bash
+uv run python scripts/robots/xlerobot/diagnose.py
+```
+
+一键检查：串口总线 → 底盘舵机 → 机械臂舵机 → 摄像头 → 电池。
+
+如果串口不是配置文件中的默认值，临时指定：
+
+```bash
+uv run python scripts/robots/xlerobot/diagnose.py --serial-port /dev/ttyACM0
+```
+
+单独检查子系统：
+
+```bash
+uv run python scripts/robots/xlerobot/scan_servos.py     # 扫描在线舵机 ID
+uv run python scripts/robots/xlerobot/check_arm.py       # 检查机械臂关节角度
+```
+
+### 7. 验证配置
+
+```bash
+uv run hey-robot inspect --config configs/xlerobot.real.ubuntu.yaml
+```
+
+确认 services 列表、robot/agent/channel 配置、skills 清单符合预期。
+
+### 8. 诊断后修正配置
+
+| 配置项 | 根据诊断调整 |
+|---|---|
+| `serial_bus.port` | 按实际串口修改 |
+| `cameras.front.device_id` | 按摄像头扫描结果 |
+| `cameras.wrist.device_id` | 按摄像头扫描结果 |
+| `base.*_id` | 按舵机扫描结果 |
+| `arm.joint_ids.*` | 按舵机扫描结果 |
+
+### 9. 启动系统
+
+```bash
+hey-robot run --config configs/xlerobot.real.ubuntu.yaml
+```
+
+> **Linux 用户注意**：串口需要 `dialout` 组权限。如果遇到 `Permission denied: '/dev/ttyACM0'`：
+>
+> **一次性生效**（不用登出）：
+> ```bash
+> sg dialout -c "hey-robot run --config configs/xlerobot.real.ubuntu.yaml"
+> ```
+>
+> **永久修复**：
+> ```bash
+> sudo usermod -a -G dialout $USER
+> newgrp dialout     # 当前终端立即生效，或重新登录
+> ```
+
+所有服务在单进程中启动：robot service → skill controller → task supervisor → agent → gateway。
 
 ## 建议验证顺序
 
-当前 `configs/xlerobot.real.windows.yaml` 默认不把 `vla_manipulation` 加入 `skills.enabled`。建议先验证 11 个非 VLA skill 稳定，再单独调试 VLA capability service。
+先验证 11 个非 VLA skill 稳定，再单独调试 VLA：
 
-1. camera 稳定发布 frame
-2. `inspect_scene` 和 `look_around` 返回 observation
-3. `detect_marker` 能在有 marker 时返回检测结果
+1. 摄像头稳定发布 frame，心跳日志正常
+2. `inspect_scene` 和 `look_around` 返回观测
+3. `detect_marker` 在 marker 可见时返回检测结果
 4. `stop_motion`、`move_base`、`turn_base` 可用
 5. `set_arm_pose`、`move_arm_joints` 可用
 6. `set_gripper` 可用
-7. readiness gate 阻止不安全或不可执行动作
+7. readiness gate 阻止不安全的动作
 8. failure 进入 recovery flow
-9. VLA 稳定后再把 `vla_manipulation` 加入 `skills.enabled`
+9. VLA 稳定后把 `vla_manipulation` 加入 `skills.enabled`
 
-## 支持的 Robot Skills
+## 启用的 Skills（11 个）
 
-当前 `configs/xlerobot.real.windows.yaml` 启用 11 个非 VLA skill：
+默认 `mode: bringup`，启用 11 个非 VLA skill：
 
-- `inspect_scene`
-- `look_around`
-- `detect_marker`
-- `move_base`
-- `turn_base`
-- `human_follow`
-- `stop_motion`
-- `reset_posture`
-- `set_arm_pose`
-- `move_arm_joints`
-- `set_gripper`
+| 类别 | Skill | 说明 |
+|---|---|---|
+| 感知 | `inspect_scene` | 获取当前场景观察和摘要 |
+| 感知 | `look_around` | 转动/扫描视野并观察 |
+| 感知 | `detect_marker` | 检测可见 marker |
+| 导航 | `move_base` | 底盘前进/后退 |
+| 导航 | `turn_base` | 底盘左转/右转 |
+| 导航 | `human_follow` | 基于视觉的人体跟随 |
+| 安全 | `stop_motion` | 停止所有运动 |
+| 安全 | `reset_posture` | 回到安全姿态 |
+| 操作 | `set_arm_pose` | 设置机械臂命名姿态 |
+| 操作 | `move_arm_joints` | 控制机械臂关节 |
+| 操作 | `set_gripper` | 控制夹爪开合 |
 
-`vla_manipulation` 已注册，并且可以配置独立 VLA capability service；但当前不加入 `skills.enabled`。只有显式加入后，Agent 才能请求它。
+`vla_manipulation` 已注册 capability service，默认不加入 `skills.enabled`。VLA 稳定后手动添加。
 
-SO101 只支持 arm 和 observation skills，LeKiwi 只支持 base 和 observation skills。
+## 双摄像头配置
 
-## 测试
-
-```powershell
-uv run pytest tests\robots\test_xlerobot.py tests\robots\test_xlerobot_battery.py -q --no-cov
+```yaml
+cameras:
+  front:        # 头部，1280x720
+  wrist:        # 腕部，640x480
 ```
+
+## 语音配置
+
+- **ASR**：本地 sherpa-onnx（离线，模型在 `models/asr/`）
+- **TTS**：云端 Doubao（火山引擎），需 `ARK_API_KEY`
+- **唤醒词**：`小白`、`机器人`、`robot`
+
+如需切换云端 ASR，将 `channels.voice.asr.provider` 从 `sherpa_onnx` 改为 `doubao`。
+
+---
 
 # VLA Capability Service
 
 VLA 在系统中不属于 robot driver，而是独立的 `capability_service`。Agent 只请求 skill，是否走 VLA 由 `SkillControllerService` 和 `CapabilityRuntime` 决定。
 
-## 当前链路
+## 链路
 
 ```text
 Agent
@@ -154,58 +216,43 @@ Agent
 
 ## 先关闭 VLA 验证 native skills
 
-如果当前目标是先验证 IK、joint、named pose、gripper、camera、base 等 native skills：
-
 ```yaml
 capability_services:
   arm_vla:
     enabled: false
 ```
 
-关闭后普通 robot skills 不受影响。只有在把 `vla_manipulation` 加入 `skills.enabled` 后，Agent 才能请求 VLA；如果 capability service 不可用，请求会被拒绝。
+关闭后普通 robot skills 不受影响。
 
 ## 开启 VLA
 
-配置位置：`configs/xlerobot.real.windows.yaml`
+配置位置：`capability_services.arm_vla.settings`
 
-```yaml
-capability_services:
-  arm_vla:
-    type: vla_service
-    enabled: true
-    robot_id: xlerobot
-    target: "127.0.0.1:9090"
-    skill_names: [vla_manipulation]
-    resources: [arm, gripper, camera]
-    timeout_sec: 30
+Ubuntu 配置使用 `policy_runtime: groot_zmq`，通过 ZMQ 连接 policy server。Windows 配置使用 `policy_runtime: lerobot_single_arm`。
 
-    runtime: lerobot_single_arm
-    task_prompt: "Pick up tissue."
-    policy_type: pi05
-    policy_name: Grigorij/pi05_collect_tissue_23_02
-    server_address: "127.0.0.1:8080"
-    arm_port: "COM5"
-    policy_device: "cuda"
-    fps: 30
-    actions_per_chunk: 50
-    execution_time: 30
-```
+关键参数：
 
-- `target`：capability service 的 gRPC 地址
-- `server_address`：LeRobot policy server 地址
+| 参数 | 说明 |
+|---|---|
+| `policy_host` / `policy_port` | Policy server 地址 |
+| `task_prompt` | 任务提示词 |
+| `arm` | 机械臂标识 |
+| `cameras` | 摄像头列表，`camera_key_map` 对齐 model observation keys |
+| `execution_time` | 单次执行时长 |
+| `action_horizon` | 动作 chunk 长度 |
 
 ## 启动顺序
 
 先启动 LeRobot policy server：
 
-```powershell
+```bash
 uv run python -m lerobot.async_inference.policy_server --host=0.0.0.0 --port=8080
 ```
 
 再启动 VLA capability service：
 
-```powershell
-uv run hey-robot capability-service --config configs\xlerobot.real.windows.yaml --service-id arm_vla
+```bash
+uv run hey-robot capability-service --config configs/xlerobot.real.ubuntu.yaml --service-id arm_vla
 ```
 
 ## 更换模型
@@ -218,33 +265,21 @@ policy_name: Grigorij/pi05_collect_tissue_23_02
 task_prompt: "Pick up tissue."
 ```
 
-可替换为其他 LeRobot 支持的 policy type（`smolvla`、`act` 等）。需确认：
+需确认：
 
 - `policy_type` 和 checkpoint 类型匹配
-- `camera_config` 的 camera names 与训练时 observation keys 匹配
+- `camera_key_map` 的 key 与模型训练时 observation key 对齐
 - `task_prompt` 与训练任务接近
-- `arm_port` 指向正确的 SO101 arm serial port
-- `calibration_dir` 下有可用校准文件
-
-## 相机配置
-
-当前单摄像头配置（`left_wrist`，device 1）：
-
-```yaml
-camera_source: opencv
-camera_config:
-  camera1:
-    index_or_path: 1
-    width: 640
-    height: 480
-    fps: 30
-```
-
-如果需要接入第二个摄像头，先运行 `scan_cameras.py` 确认设备号，再添加 `camera2` 配置块。`camera1` / `camera2` 这种 key 名必须和模型训练时的 observation key 对齐。详细步骤见 [运行时脚本索引](runtime-scripts.md#配置多摄像头)。
 
 ## 常见问题
 
-- `health.loaded=false`：通常缺少 `server_address`、`policy_name`、`policy_type`、`arm_port` 或 `task_prompt`
-- `policy_server_unavailable`：LeRobot policy server 未启动或 `server_address` 不正确
-- 相机打不开：检查 `camera_config.index_or_path`、Windows camera index 和 backend 占用
-- 动作不稳定：先降低 `execution_time`，确认 calibration、camera key、task prompt 和模型训练条件一致
+| 问题 | 排查 |
+|---|---|
+| 串口未识别 | `ls /dev/ttyUSB* /dev/ttyACM*`，检查 USB 连接和驱动 |
+| 串口 Permission denied | `sudo usermod -a -G dialout $USER` 再 `newgrp dialout`（或重新登录） |
+| 舵机无响应 | 跑 `scan_servos.py` 确认 ID，检查供电 |
+| 摄像头打不开 | 检查 `device_id` 和 `backend`（v4l2/dshow），确认未被占用 |
+| 飞书消息收不到 | 检查 `allow_from` 是否包含 `"*"` 或你的 open_id |
+| 语音识别为空 | 检查麦克风，确认 `models/asr/` 四个模型文件完整 |
+| VLA health.loaded=false | 检查 `policy_host/port`、`policy_type`、`task_prompt` |
+| 动作不稳定 | 降低 `execution_time`，确认 calibration 和 camera key 对齐训练配置 |

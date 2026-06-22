@@ -1,9 +1,9 @@
-# 部署文档
+# 部署文档索引
 
-按部署场景选择对应文档：
+按场景选择对应文档：
 
 | 场景 | 文档 |
-| --- | --- |
+|---|---|
 | XLeRobot 真机部署（含 VLA） | [xlerobot-real.md](./xlerobot-real.md) |
 | XLeRobot MuJoCo 仿真部署 | [xlerobot-sim.md](./xlerobot-sim.md) |
 | 飞书通道接入 | [feishu.md](./feishu.md) |
@@ -11,12 +11,13 @@
 
 ## 配置文件
 
-| 配置 | 文件 |
-| --- | --- |
-| XLeRobot 真机（Windows） | `configs/xlerobot.real.windows.yaml` |
-| XLeRobot 仿真（Windows） | `configs/xlerobot.sim.windows.yaml` |
-| XLeRobot 仿真（Ubuntu） | `configs/xlerobot.sim.ubuntu.yaml` |
-| Mock 开发环境 | `configs/mock.dev.yaml` |
-| Mock 测试环境 | `configs/mock.test.yaml` |
+命名约定：`{robot}.{env}.{os}.yaml`
 
-命名约定：`{robot}.{env}.{os}.yaml`，其中 `env` 为 `real` / `sim` / `mock`。
+| 配置 | 文件 | 场景 |
+|---|---|---|
+| XLeRobot 真机（Windows） | `configs/xlerobot.real.windows.yaml` | 真机 |
+| XLeRobot 真机（Ubuntu） | `configs/xlerobot.real.ubuntu.yaml` | 真机 |
+| XLeRobot 仿真（Windows） | `configs/xlerobot.sim.windows.yaml` | 仿真 |
+| XLeRobot 仿真（Ubuntu） | `configs/xlerobot.sim.ubuntu.yaml` | 仿真 |
+| Mock 开发环境 | `configs/mock.dev.yaml` | 开发 |
+| Mock 测试环境 | `configs/mock.test.yaml` | 测试 |

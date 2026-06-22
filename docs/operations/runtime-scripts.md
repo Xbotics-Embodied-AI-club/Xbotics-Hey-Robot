@@ -1,152 +1,111 @@
 # 运行脚本索引
 
-本页列出部署验证、硬件诊断、模型下载和开发维护脚本。
+部署验证、硬件诊断、模型下载和维护脚本。
 
-## 平台检查
+## 平台与配置
 
 验证本地平台和部署配置：
 
-```powershell
-uv run python scripts\ops\check_platform.py --config configs\xlerobot.real.windows.yaml
+```bash
+uv run python scripts/ops/check_platform.py --config configs/xlerobot.real.ubuntu.yaml
+```
+
+检查配置有效性：
+
+```bash
+uv run hey-robot inspect --config configs/xlerobot.real.ubuntu.yaml
 ```
 
 ## XLeRobot 诊断
 
-完整诊断流程：
+完整一键诊断：
 
-```powershell
-uv run python scripts\robots\xlerobot\diagnose.py --config configs\xlerobot.real.windows.yaml
+```bash
+uv run python scripts/robots/xlerobot/diagnose.py
 ```
+
+带摄像头视角截图（推荐第一次配置时用）：
+
+```bash
+uv run python scripts/robots/xlerobot/diagnose.py --scan-cameras
+```
+
+指定串口：
+
+```bash
+uv run python scripts/robots/xlerobot/diagnose.py --serial-port /dev/ttyUSB0
+```
+
+### 子系统检查
 
 扫描舵机：
 
-```powershell
-uv run python scripts\robots\xlerobot\scan_servos.py --config configs\xlerobot.real.windows.yaml
+```bash
+uv run python scripts/robots/xlerobot/scan_servos.py
 ```
 
-机械臂硬件检查：
+机械臂关节检查：
 
-```powershell
-uv run python scripts\robots\xlerobot\check_arm.py --config configs\xlerobot.real.windows.yaml
+```bash
+uv run python scripts/robots/xlerobot/check_arm.py
 ```
 
-相机扫描（默认会保存每个摄像头的视角截图到 outputs/diagnostic/cameras/）：
+### 摄像头扫描
 
-```powershell
-uv run python scripts\robots\xlerobot\scan_cameras.py
+枚举所有摄像头并保存视角截图到 `outputs/diagnostic/cameras/`：
+
+```bash
+uv run python scripts/robots/xlerobot/scan_cameras.py
 ```
 
-### 配置多摄像头
-
-当前默认使用单摄像头（`left_wrist`，device 1）。如果后续接入第二个摄像头，按以下步骤配置：
-
-**1. 扫描确认设备号**
-
-先运行 `scan_cameras.py`，打开 `outputs/diagnostic/cameras/` 下的截图，确认每个 device_id 对应哪个物理摄像头。
-
-**2. 修改 `configs/xlerobot.real.windows.yaml`**
-
-在 `robots.xlerobot.components.cameras` 下添加第二个摄像头，并更新 `default_camera`：
-
-```yaml
-default_camera: left_wrist
-cameras:
-  left_wrist:
-    type: opencv_camera
-    enabled: true
-    owner: robot_driver
-    device_id: 1
-    backend: dshow
-    width: 640
-    height: 480
-    fps: 30
-  right_wrist:          # 新增第二个摄像头
-    type: opencv_camera
-    enabled: true
-    owner: robot_driver
-    device_id: 2
-    backend: dshow
-    width: 640
-    height: 480
-    fps: 30
-```
-
-**3. 更新 VLA 相机映射**
-
-如果启用了 VLA capability service，需要同步更新 `capability_services.arm_vla.settings` 中的摄像头列表和 `camera_key_map`：
-
-```yaml
-cameras:
-  - left_wrist
-  - right_wrist
-camera_devices:
-  left_wrist: 1
-  right_wrist: 2
-camera_key_map:
-  left_wrist: camera1
-  right_wrist: camera2
-```
-
-`camera_key_map` 中的 key（如 `camera1`、`camera2`）必须和模型训练时的 observation key 保持一致。
-
-**4. 验证**
-
-重新运行诊断确认两个摄像头都正常：
-
-```powershell
-uv run python scripts\robots\xlerobot\diagnose.py --scan-cameras
-```
-
-诊断报告会列出每路摄像头的设备号、分辨率和归属，异常时附排查建议。
+打开截图确认每个 device_id 对应哪个物理摄像头，然后更新配置文件中的 `cameras.<name>.device_id`。
 
 ## 模型下载
 
-下载本地语音模型，包含 `sherpa_onnx` ASR 和唤醒词模型：
+语音模型（sherpa-onnx，约 126 MB）：
 
-```powershell
-uv run python scripts\model_downloads\download_speech_models.py
+```bash
+uv run python scripts/model_downloads/download_speech_models.py
 ```
 
-只下载其中一类语音模型：
+视觉模型（YOLO，用于 human follow）：
 
-```powershell
-uv run python scripts\model_downloads\download_speech_models.py --model asr
-uv run python scripts\model_downloads\download_speech_models.py --model wakeup
+```bash
+uv run python scripts/model_downloads/download_vision_models.py
 ```
 
-下载视觉检测模型，默认下载 `yolo26n.pt`，用于 human follow / YOLO detector 相关能力：
+强制重新下载：
 
-```powershell
-uv run python scripts\model_downloads\download_vision_models.py
+```bash
+uv run python scripts/model_downloads/download_speech_models.py --force
 ```
 
-列出可下载的视觉模型：
-
-```powershell
-uv run python scripts\model_downloads\download_vision_models.py --list
-```
+国内网络 GitHub 直连可能失败，脚本会自动走 ghproxy 镜像。可通过 `GH_PROXY` 环境变量指定自定义镜像。
 
 ## 音频
 
-列出音频设备：
+列出本机所有音频设备：
 
-```powershell
-uv run python scripts\audio\list_devices.py
+```bash
+uv run python scripts/audio/list_devices.py
+```
+
+机器可读 JSON：
+
+```bash
+uv run python scripts/audio/list_devices.py --json
 ```
 
 ## 开发维护
 
-清理生成文件：
-
-```powershell
-uv run python scripts\dev\clean.py pyc
-uv run python scripts\dev\clean.py build
-uv run python scripts\dev\clean.py test
-uv run python scripts\dev\clean.py lint
+```bash
+uv run python scripts/dev/clean.py pyc     # 清理 .pyc
+uv run python scripts/dev/clean.py build   # 清理构建产物
+uv run python scripts/dev/clean.py test    # 清理测试产物
 ```
 
 也可以通过 Poe 执行：
 
-```powershell
+```bash
 poe clean
 ```
