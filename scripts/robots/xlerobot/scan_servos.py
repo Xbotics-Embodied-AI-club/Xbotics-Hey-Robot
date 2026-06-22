@@ -1,32 +1,10 @@
-"""扫描 XLeRobot 串行总线上的 Feetech 舵机。
+"""扫描 XLeRobot 串行总线上的舵机（Windows / Ubuntu 通用）。
 
-用途：
-  - 不知道接了哪些舵机、ID 怎么分布时，用这个工具在指定 ID 范围内 ping 一遍。
-  - 验证底盘和机械臂上每个预期的舵机 ID 都能响应。
-  - 找出 ID 冲突或接线异常（不响应）的舵机。
-
-常见用法：
-  # 默认扫描 ID 1..20
-  uv run python scripts/robots/xlerobot/scan_servos.py
-
-  # 扩大扫描范围
-  uv run python scripts/robots/xlerobot/scan_servos.py --start-id 1 --end-id 30
-
-  # 临时覆盖串口
-  uv run python scripts/robots/xlerobot/scan_servos.py --serial-port COM6
-
-  # 机器可读 JSON 输出
-  uv run python scripts/robots/xlerobot/scan_servos.py --json
-
-输出说明：
-  - 每个在线舵机的 ID 和当前位置
-  - 配置文件预期的底盘/机械臂舵机 ID，标出哪些没找到
-
-退出码：
-  - 0：串口连接成功（即使没找到全部预期舵机也算成功）
-  - 2：串口连接失败
-
-更多选项：uv run python scripts/robots/xlerobot/scan_servos.py --help
+用法:
+    uv run python scripts/robots/xlerobot/scan_servos.py                    # 自动选配置
+    uv run python scripts/robots/xlerobot/scan_servos.py --serial-port /dev/ttyACM0
+    uv run python scripts/robots/xlerobot/scan_servos.py --start-id 1 --end-id 30
+    uv run python scripts/robots/xlerobot/scan_servos.py --json
 """
 
 from __future__ import annotations
@@ -44,18 +22,92 @@ from common import load_hardware_config, print_json_or_text
 
 from hey_robot.robots.components import ServoBus
 
+_SEPARATOR = "─" * 60
+
+
+def _display_width(text: str) -> int:
+    w = 0
+    for ch in text:
+        cp = ord(ch)
+        if (
+            0x1100 <= cp <= 0x115F
+            or 0x2E80 <= cp <= 0xA4CF
+            or 0xAC00 <= cp <= 0xD7A3
+            or 0xF900 <= cp <= 0xFAFF
+            or 0xFF01 <= cp <= 0xFF60
+            or 0xFFE0 <= cp <= 0xFFE6
+        ):
+            w += 2
+        else:
+            w += 1
+    return w
+
+
+def _pad_cjk(text: str, width: int) -> str:
+    dw = _display_width(text)
+    return text + " " * (width - dw) if dw < width else text
+
+
+class ServoReport:
+    def __init__(self, report: dict[str, Any]) -> None:
+        self._r = report
+
+    def render(self) -> str:
+        if self._r.get("error"):
+            return f"\n  XLeRobot 舵机扫描\n  {'=' * 16}\n\n  状态: 异常\n\n  {self._r['error']}\n"
+        return self._title() + self._servo_list() + self._summary()
+
+    def _title(self) -> str:
+        r = self._r
+        online = sum(1 for s in r["servos"] if s["ok"])
+        total = len(r["servos"])
+        return (
+            f"\n  XLeRobot 舵机扫描\n  {'=' * 16}\n\n"
+            f"  串口 {r['serial_port']} @ {r['baudrate']} baud"
+            f"    范围 ID {r['scan_range'][0]}..{r['scan_range'][1]}"
+            f"    在线 {online}/{total}\n"
+        )
+
+    def _servo_list(self) -> str:
+        servos = self._r["servos"]
+        if not servos:
+            return "\n  (无舵机在线)\n"
+        lines = ["\n  ▸ 在线舵机\n"]
+        kw = 10
+        for s in servos:
+            if not s["ok"]:
+                continue
+            sid = f"ID {s['servo_id']:>2}"
+            pos = f"pos={s['position']}" if s["position"] is not None else "pos=—"
+            lines.append(f"    ✓ {_pad_cjk(sid, kw)}{pos}")
+        return "\n".join(lines)
+
+    def _summary(self) -> str:
+        r = self._r
+        missing = r["missing_expected"]
+        lines: list[str] = [
+            "",
+            f"  {_SEPARATOR}",
+            "",
+            "  预期舵机",
+            f"    底盘    {r['expected']['base']}    缺失: {missing['base'] or '无'}",
+            f"    机械臂  {r['expected']['arm']}    缺失: {missing['arm'] or '无'}",
+            "",
+        ]
+        return "\n".join(lines)
+
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="扫描 XLeRobot 串行总线上的舵机，列出每个在线舵机的 ID 和位置。"
-    )
+    parser = argparse.ArgumentParser(description="扫描 XLeRobot 串行总线上的舵机。")
     parser.add_argument(
-        "--config",
-        default="configs/xlerobot.real.windows.yaml",
-        help="部署配置 YAML 路径",
+        "--config", default=None, help="部署配置 YAML 路径；不指定则自动选择"
     )
     parser.add_argument("--robot", default="xlerobot", help="部署配置中的机器人 ID")
-    parser.add_argument("--serial-port", default=None, help="临时覆盖串口，例如 COM5")
+    parser.add_argument(
+        "--serial-port",
+        default=None,
+        help="临时覆盖串口（Win: COM5, Ubuntu: /dev/ttyUSB0）",
+    )
     parser.add_argument(
         "--start-id", type=int, default=1, help="扫描起始舵机 ID（含），默认 1"
     )
@@ -64,9 +116,14 @@ def main() -> None:
     )
     parser.add_argument("--json", action="store_true", help="输出机器可读 JSON")
     args = parser.parse_args()
-
+    if args.config is None:
+        args.config = (
+            "configs/xlerobot.real.windows.yaml"
+            if sys.platform.startswith("win")
+            else "configs/xlerobot.real.ubuntu.yaml"
+        )
     report = scan(args)
-    print_json_or_text(report, format_report(report), as_json=args.json)
+    print_json_or_text(report, ServoReport(report).render(), as_json=args.json)
     raise SystemExit(0 if report["bus_ok"] else 2)
 
 
@@ -74,18 +131,44 @@ def scan(args: argparse.Namespace) -> dict[str, Any]:
     _settings, hardware = load_hardware_config(
         args.config, args.robot, serial_port=args.serial_port
     )
-    bus = ServoBus(hardware.serial_bus.port, hardware.serial_bus.baudrate)
-    bus_ok = bus.connect()
+    port = hardware.serial_bus.port
+    if not Path(port).exists():
+        return {
+            "bus_ok": False,
+            "serial_port": port,
+            "error": (
+                f"串口 {port} 不存在。请先连接机器人 USB，确认: ls /dev/ttyUSB* /dev/ttyACM*\n"
+                f"  如果串口存在但是 Permission denied:\n"
+                f"  方法一: sudo usermod -a -G dialout $USER  然后重新登录\n"
+                f'  方法二: sg dialout -c "..."'
+            ),
+        }
+    bus = ServoBus(port, hardware.serial_bus.baudrate)
+    try:
+        bus_ok = bus.connect()
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "permission denied" not in msg and "errno 13" not in msg:
+            raise
+        return {
+            "bus_ok": False,
+            "serial_port": port,
+            "error": (
+                f"串口 {port} 无权限。\n"
+                f"  方法一: sudo usermod -a -G dialout $USER  然后重新登录\n"
+                f'  方法二: sg dialout -c "uv run python scripts/robots/xlerobot/scan_servos.py"'
+            ),
+        }
     servos = []
     try:
         if bus_ok:
-            for servo_id in range(args.start_id, args.end_id + 1):
-                ok = bus.ping(servo_id)
+            for sid in range(args.start_id, args.end_id + 1):
+                ok = bus.ping(sid)
                 servos.append(
                     {
-                        "servo_id": servo_id,
+                        "servo_id": sid,
                         "ok": ok,
-                        "position": bus.read_position(servo_id) if ok else None,
+                        "position": bus.read_position(sid) if ok else None,
                     }
                 )
     finally:
@@ -98,43 +181,18 @@ def scan(args: argparse.Namespace) -> dict[str, Any]:
         ],
         "arm": list(hardware.arm.joint_ids.values()),
     }
-    found_ids = {item["servo_id"] for item in servos if item["ok"]}
+    found_ids = {s["servo_id"] for s in servos if s["ok"]}
     return {
         "bus_ok": bus_ok,
-        "serial_port": hardware.serial_bus.port,
+        "serial_port": port,
         "baudrate": hardware.serial_bus.baudrate,
         "scan_range": [args.start_id, args.end_id],
         "servos": servos,
         "expected": expected,
         "missing_expected": {
-            group: [servo_id for servo_id in ids if servo_id not in found_ids]
-            for group, ids in expected.items()
+            g: [i for i in ids if i not in found_ids] for g, ids in expected.items()
         },
     }
-
-
-def format_report(report: dict[str, Any]) -> str:
-    bus_status = "正常" if report["bus_ok"] else "异常"
-    lines = [
-        f"XLeRobot 舵机扫描：串口={report['serial_port']} 波特率={report['baudrate']} 总线={bus_status}",
-        f"扫描范围：ID {report['scan_range'][0]}..{report['scan_range'][1]}",
-        "",
-        "在线舵机：",
-    ]
-    lines.extend(
-        f"  - ID {item['servo_id']:2d}：在线  位置={item['position']}"
-        for item in report["servos"]
-        if item["ok"]
-    )
-    missing = report["missing_expected"]
-    lines.extend(
-        [
-            "",
-            f"底盘预期 ID：{report['expected']['base']}  缺失：{missing['base'] or '无'}",
-            f"机械臂预期 ID：{report['expected']['arm']}  缺失：{missing['arm'] or '无'}",
-        ]
-    )
-    return "\n".join(lines)
 
 
 if __name__ == "__main__":

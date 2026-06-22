@@ -1,31 +1,9 @@
-"""检查运行 hey-robot 所需的平台环境是否就绪。
+"""检查 hey-robot 运行所需的平台环境（Python / NATS / 依赖 / 配置）。
 
-用途：
-  - 第一次部署或换机器时，先跑这个工具确认 Python 版本、NATS 服务、可选依赖等都到位。
-  - 可选参数 --config 顺带校验部署配置文件里的串口、机器人类型等是否符合当前平台。
-  - 启动 runtime 之前推荐先跑一次，环境异常时直接给出修复提示。
-
-常见用法：
-  # 最简单：只检查平台基础项（Python、NATS）
-  uv run python scripts/ops/check_platform.py
-
-  # 顺带校验部署配置文件
-  uv run python scripts/ops/check_platform.py --config configs/xlerobot.real.windows.yaml
-
-  # 机器可读 JSON 输出
-  uv run python scripts/ops/check_platform.py --json
-
-输出说明：
-  - 平台信息：操作系统 / 版本 / Python 版本
-  - 基础检查项：Python 版本 / NATS 服务 / 可选依赖
-  - 配置检查项（如果传了 --config）：串口有效性 / 机器人类型匹配
-  - 推荐配置文件列表
-
-退出码：
-  - 0：所有必要项就绪
-  - 2：有检查项失败（看输出找原因）
-
-更多选项：uv run python scripts/ops/check_platform.py --help
+用法:
+    uv run python scripts/ops/check_platform.py                                    # 基础检查
+    uv run python scripts/ops/check_platform.py --config configs/xlerobot.real.ubuntu.yaml
+    uv run python scripts/ops/check_platform.py --json
 """
 
 from __future__ import annotations
@@ -43,6 +21,30 @@ from typing import Any
 from hey_robot.config.model import DeploymentConfig
 
 ROOT = Path(__file__).resolve().parents[2]
+_SEPARATOR = "─" * 60
+
+
+def _display_width(text: str) -> int:
+    w = 0
+    for ch in text:
+        cp = ord(ch)
+        if (
+            0x1100 <= cp <= 0x115F
+            or 0x2E80 <= cp <= 0xA4CF
+            or 0xAC00 <= cp <= 0xD7A3
+            or 0xF900 <= cp <= 0xFAFF
+            or 0xFF01 <= cp <= 0xFF60
+            or 0xFFE0 <= cp <= 0xFFE6
+        ):
+            w += 2
+        else:
+            w += 1
+    return w
+
+
+def _pad_cjk(text: str, width: int) -> str:
+    dw = _display_width(text)
+    return text + " " * (width - dw) if dw < width else text
 
 
 @dataclass(frozen=True)
@@ -52,10 +54,66 @@ class CheckResult:
     detail: str
 
 
+class PlatformReport:
+    def __init__(self, report: dict[str, Any]) -> None:
+        self._r = report
+
+    def render(self) -> str:
+        sec: list[str] = []
+        sec.append(self._title())
+        sec.append(self._checks())
+        if self._r.get("config"):
+            sec.append(self._config_checks())
+        sec.append(self._recommendation())
+        return "\n".join(sec)
+
+    def _title(self) -> str:
+        r = self._r
+        ready = r["ready"]
+        status = "✓ 就绪" if ready else "✗ 异常"
+        return (
+            f"\n  平台环境检查\n  {'=' * 12}\n\n"
+            f"  整体: {status}\n"
+            f"  系统: {r['platform']['system']} {r['platform']['release']}"
+            f"  Python {r['platform']['python']}\n"
+        )
+
+    def _checks(self) -> str:
+        lines = ["\n  ▸ 基础检查\n"]
+        kw = 16
+        for item in self._r["checks"]:
+            icon = "✓" if item["ok"] else "✗"
+            lines.append(f"    {icon} {_pad_cjk(item['name'], kw)}{item['detail']}")
+        return "\n".join(lines)
+
+    def _config_checks(self) -> str:
+        config = self._r["config"]
+        lines: list[str] = ["\n  ▸ 配置检查\n"]
+        kw = 20
+        for item in config["checks"]:
+            icon = "✓" if item["ok"] else "✗"
+            lines.append(f"    {icon} {_pad_cjk(item['name'], kw)}{item['detail']}")
+        channels = config.get("enabled_channels", [])
+        if channels:
+            lines.append(f"\n    启用通道: {', '.join(channels)}")
+        return "\n".join(lines)
+
+    def _recommendation(self) -> str:
+        return (
+            f"\n  {_SEPARATOR}\n"
+            f"\n"
+            f"  推荐配置文件:\n"
+            f"    Ubuntu 真机    configs/xlerobot.real.ubuntu.yaml\n"
+            f"    Ubuntu 仿真    configs/xlerobot.sim.ubuntu.yaml\n"
+            f"    Windows 真机   configs/xlerobot.real.windows.yaml\n"
+            f"    Windows 仿真   configs/xlerobot.sim.windows.yaml\n"
+            f"    开发 (mock)    configs/mock.dev.yaml\n"
+            f"\n"
+        )
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="检查运行 hey-robot 所需的 Python、NATS、依赖等平台环境。"
-    )
+    parser = argparse.ArgumentParser(description="检查 hey-robot 运行所需的平台环境。")
     parser.add_argument("--config", default=None, help="顺带校验的部署配置 YAML 路径")
     parser.add_argument("--json", action="store_true", help="输出机器可读 JSON")
     args = parser.parse_args()
@@ -64,7 +122,7 @@ def main() -> None:
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
-        print(format_report(report))
+        print(PlatformReport(report).render())
     raise SystemExit(0 if report["ready"] else 2)
 
 
@@ -79,8 +137,7 @@ def build_report(*, config_path: str | None) -> dict[str, Any]:
     checks: list[CheckResult] = [check_python(), check_nats_server()]
     checks.extend(
         build_import_checks(
-            enabled_channels=enabled_channels,
-            enabled_robot_types=enabled_robot_types,
+            enabled_channels=enabled_channels, enabled_robot_types=enabled_robot_types
         )
     )
     ready = all(item.ok for item in checks)
@@ -100,8 +157,9 @@ def build_report(*, config_path: str | None) -> dict[str, Any]:
 
 def check_python() -> CheckResult:
     ok = sys.version_info[:2] == (3, 12)
-    detail = f"python={sys.version.split()[0]} required=3.12.x"
-    return CheckResult(name="python", ok=ok, detail=detail)
+    return CheckResult(
+        name="python", ok=ok, detail=f"python={sys.version.split()[0]}  required=3.12.x"
+    )
 
 
 def check_nats_server() -> CheckResult:
@@ -109,7 +167,7 @@ def check_nats_server() -> CheckResult:
     return CheckResult(
         name="nats_server",
         ok=resolved is not None,
-        detail=resolved or "nats-server not found on PATH",
+        detail=resolved or "nats-server 未安装",
     )
 
 
@@ -122,13 +180,13 @@ def check_optional_import(module_name: str) -> CheckResult:
             ok=False,
             detail=f"{type(exc).__name__}: {exc}",
         )
-    return CheckResult(name=f"import:{module_name}", ok=True, detail="available")
+    return CheckResult(name=f"import:{module_name}", ok=True, detail="已安装")
 
 
 def build_import_checks(
     *, enabled_channels: set[str], enabled_robot_types: set[str]
 ) -> list[CheckResult]:
-    modules = set[str]()
+    modules: set[str] = set()
     if not enabled_channels and not enabled_robot_types:
         modules.update({"cv2", "serial"})
     if enabled_robot_types:
@@ -137,7 +195,7 @@ def build_import_checks(
         modules.update({"fastapi", "uvicorn"})
     if "voice" in enabled_channels:
         modules.add("sounddevice")
-    return [check_optional_import(module_name) for module_name in sorted(modules)]
+    return [check_optional_import(m) for m in sorted(modules)]
 
 
 def inspect_config(config_path: str) -> dict[str, Any]:
@@ -149,12 +207,9 @@ def inspect_config(config_path: str) -> dict[str, Any]:
             "ready": False,
             "path": str(path),
             "checks": [
-                asdict(
-                    CheckResult(name="config_path", ok=False, detail="file not found")
-                )
+                asdict(CheckResult(name="config_path", ok=False, detail="文件不存在"))
             ],
         }
-
     config = DeploymentConfig.from_yaml(path)
     checks: list[CheckResult] = [
         CheckResult(name="config_path", ok=True, detail=str(path))
@@ -164,14 +219,8 @@ def inspect_config(config_path: str) -> dict[str, Any]:
         "ready": all(item.ok for item in checks),
         "path": str(path),
         "deployment_id": config.deployment.id,
-        "enabled_channels": [
-            channel_id
-            for channel_id, channel in config.channels.items()
-            if channel.enabled
-        ],
-        "enabled_robot_types": [
-            robot.type for robot in config.robots.values() if robot.enabled
-        ],
+        "enabled_channels": [cid for cid, ch in config.channels.items() if ch.enabled],
+        "enabled_robot_types": [r.type for r in config.robots.values() if r.enabled],
         "checks": [asdict(item) for item in checks],
     }
 
@@ -180,7 +229,6 @@ def check_robot_platform_constraints(config: DeploymentConfig) -> list[CheckResu
     results: list[CheckResult] = []
     is_windows = platform.system().lower().startswith("win")
     expected_backends = {"dshow", "msmf", "auto"} if is_windows else {"v4l2", "auto"}
-
     for robot_id, robot in config.robots.items():
         settings = robot.settings
         serial_bus = settings.get("serial_bus")
@@ -193,7 +241,6 @@ def check_robot_platform_constraints(config: DeploymentConfig) -> list[CheckResu
                     detail=port or "missing serial_bus.port",
                 )
             )
-
         components = settings.get("components")
         if not isinstance(components, dict):
             continue
@@ -205,7 +252,7 @@ def check_robot_platform_constraints(config: DeploymentConfig) -> list[CheckResu
                 CheckResult(
                     name=f"{robot_id}:camera_backend",
                     ok=backend in expected_backends,
-                    detail=f"backend={backend} expected={sorted(expected_backends)}",
+                    detail=f"backend={backend}  expected={sorted(expected_backends)}",
                 )
             )
             results.append(
@@ -225,41 +272,6 @@ def is_valid_serial_port(port: str, *, is_windows: bool) -> bool:
         normalized = port.upper()
         return normalized.startswith("COM") and normalized[3:].isdigit()
     return port.startswith("/dev/")
-
-
-def format_report(report: dict[str, Any]) -> str:
-    ready_status = "就绪" if report["ready"] else "异常"
-    lines = [
-        f"hey-robot 平台环境检查：整体={ready_status}",
-        (
-            "平台信息："
-            f"{report['platform']['system']} {report['platform']['release']} "
-            f"python={report['platform']['python']}"
-        ),
-        "",
-        "基础检查项：",
-    ]
-    for item in report["checks"]:
-        status = "正常" if item["ok"] else "失败"
-        lines.append(f"  - {item['name']}：{status}  {item['detail']}")
-
-    config = report.get("config")
-    if config:
-        lines.extend(["", f"配置检查：{config['path']}"])
-        for item in config["checks"]:
-            status = "正常" if item["ok"] else "失败"
-            lines.append(f"  - {item['name']}：{status}  {item['detail']}")
-
-    lines.extend(
-        [
-            "",
-            "推荐配置文件：",
-            "  - Windows 真机运行：configs/xlerobot.real.windows.yaml",
-            "  - 本地开发（mock）：configs/mock.dev.yaml",
-            "  - 测试（mock）：configs/mock.test.yaml",
-        ]
-    )
-    return "\n".join(lines)
 
 
 if __name__ == "__main__":
