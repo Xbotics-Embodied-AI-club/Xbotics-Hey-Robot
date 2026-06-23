@@ -118,6 +118,12 @@ def test_skill_contract_runtime_instantiates_targeted_resources_from_arguments()
     assert resources == {"left_wrist_camera"}
 
 
+def test_inspect_scene_timeout_allows_slow_camera_response() -> None:
+    contract = SKILL_CONTRACTS.get("inspect_scene")
+
+    assert contract.timeout_sec >= 20.0
+
+
 def test_skill_contract_runtime_allows_dual_arm_parallel_resources() -> None:
     runtime = SkillContractRuntime()
     contract = SKILL_CONTRACTS.get("set_gripper")

@@ -237,6 +237,13 @@ class RobotService:
             )
         status = self._status_for_publish(status, action.envelope)
         status_metrics = dict(status.metrics or {})
+        logger.info(
+            "robot_status_trace publishing_action_status "
+            f"robot={robot_id} action_id={action.action_id} "
+            f"action_skill_id={action.skill_id or None} status_skill_id={status.skill_id or None} "
+            f"success={status.success} state={status.state} frame={status.frame_id} "
+            f"trace={status.envelope.trace_id} episode={status.envelope.episode_id}"
+        )
         await self.bus.publish(self.topics.robot_status, to_payload(status))
         await self.events.publish(
             RuntimeEvent.make(

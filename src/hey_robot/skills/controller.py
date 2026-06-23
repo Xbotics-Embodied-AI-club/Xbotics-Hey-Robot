@@ -316,13 +316,43 @@ class SkillControllerService:
             if state.spec.robot_id != status.envelope.robot_id:
                 continue
             state.latest_status = status
+            if status.skill_id:
+                active = sorted(state.active_runs.keys())
+                run_for_log = state.active_runs.get(status.skill_id)
+                logger.info(
+                    "skill_status_trace received "
+                    f"robot={status.envelope.robot_id} skill_id={status.skill_id} "
+                    f"success={status.success} state={status.state} frame={status.frame_id} "
+                    f"active_runs={active} "
+                    f"run_found={run_for_log is not None} "
+                    f"run_terminal={run_for_log.terminal if run_for_log is not None else None} "
+                    f"pending_status={run_for_log.pending_status is not None if run_for_log is not None else None} "
+                    f"pending_done={run_for_log.pending_status.done() if run_for_log is not None and run_for_log.pending_status is not None else None}"
+                )
             run = state.active_runs.get(status.skill_id or "")
             if run is None or run.terminal:
+                if status.skill_id:
+                    logger.warning(
+                        "skill_status_trace ignored "
+                        f"robot={status.envelope.robot_id} skill_id={status.skill_id} "
+                        f"reason={'missing_run' if run is None else 'terminal_run'}"
+                    )
                 continue
             future = run.pending_status
             if future is not None and not future.done():
+                logger.info(
+                    "skill_status_trace resolving_pending_status "
+                    f"robot={status.envelope.robot_id} skill_id={status.skill_id} "
+                    f"success={status.success} frame={status.frame_id}"
+                )
                 future.set_result(status)
                 continue
+            if status.skill_id and future is None:
+                logger.warning(
+                    "skill_status_trace no_pending_status "
+                    f"robot={status.envelope.robot_id} skill_id={status.skill_id} "
+                    f"task_active={run.task is not None}"
+                )
             if run.task is None and status.skill_id == run.intent.skill_id:
                 if status.success is True:
                     run.steps_executed += 1
@@ -553,6 +583,12 @@ class SkillControllerService:
         future: asyncio.Future[RobotStatus] = asyncio.get_running_loop().create_future()
         run.pending_status = future
         run.current_step = name
+        logger.info(
+            "skill_status_trace waiting_pending_status "
+            f"robot={run.intent.envelope.robot_id} skill_id={run.intent.skill_id} "
+            f"action={name} timeout_sec={run.timeout_sec:g} "
+            f"age_sec={max(0.0, time.time() - run.accepted_at):.3f}"
+        )
         await self.bus.publish(self.topics.robot_action, to_payload(action))
         await self.events.publish(
             RuntimeEvent.make(
@@ -573,10 +609,20 @@ class SkillControllerService:
         )
         try:
             status = await future
+            logger.info(
+                "skill_status_trace pending_status_received "
+                f"robot={status.envelope.robot_id} skill_id={status.skill_id} "
+                f"success={status.success} state={status.state} frame={status.frame_id}"
+            )
         finally:
             if run.pending_status is future:
                 run.pending_status = None
                 run.current_step = None
+                logger.info(
+                    "skill_status_trace pending_status_cleared "
+                    f"robot={run.intent.envelope.robot_id} skill_id={run.intent.skill_id} "
+                    f"future_done={future.done()} future_cancelled={future.cancelled()}"
+                )
         if status.success is False:
             raise RuntimeError(status.error or f"{name} failed")
         run.steps_executed += 1

@@ -862,6 +862,156 @@ def test_robot_agent_core_finishes_visual_answer_after_successful_perception() -
     assert result.task_finished is True
 
 
+def test_robot_agent_core_reuses_successful_perception_within_same_turn() -> None:
+    io = FakeAgentIO()
+    core = RobotAgentCore(
+        agent_id="main",
+        spec=AgentSpec(
+            type="robot_agent",
+            robot_id="mock0",
+            settings={"mode": "direct"},
+        ),
+        io=io,
+    )
+    turn = UserTurn(
+        envelope=Envelope(robot_id="mock0", agent_id="main"),
+        text="describe the scene",
+    )
+    core.bind_turn_context(
+        AgentTurnInput(turn=turn, snapshot=RobotSnapshot(robot_id="mock0"))
+    )
+    core._current_tool_call_start = len(core.runtime.state.tool_calls)
+    first_feedback = (
+        "Execution feedback for skill skill_seen:\n"
+        "- outcome: confirmed\n"
+        "- subgoal_success: True\n"
+        "- task_success: True\n"
+        "- summary: scene inspected\n"
+        "- recommended_action: report_or_continue"
+    )
+    core.runtime.state.add_tool_call(
+        "request_capability",
+        {"capability": "inspect_scene", "objective": "look"},
+        first_feedback,
+    )
+
+    result = asyncio.run(
+        core.request_capability(
+            "inspect_scene", "look again", slots={"question": "look again"}
+        )
+    )
+
+    assert "Perception result reused" in result
+    assert io.skills == []
+
+
+def test_robot_agent_core_allows_perception_again_in_new_turn() -> None:
+    io = FakeAgentIO()
+    core = RobotAgentCore(
+        agent_id="main",
+        spec=AgentSpec(
+            type="robot_agent",
+            robot_id="mock0",
+            settings={"mode": "direct", "skill_timeout_sec": 1.0},
+        ),
+        io=io,
+    )
+    first_turn = UserTurn(
+        envelope=Envelope(robot_id="mock0", agent_id="main"),
+        text="describe the scene",
+    )
+    core.bind_turn_context(
+        AgentTurnInput(turn=first_turn, snapshot=RobotSnapshot(robot_id="mock0"))
+    )
+    first_feedback = (
+        "Execution feedback for skill skill_seen:\n"
+        "- outcome: confirmed\n"
+        "- subgoal_success: True\n"
+        "- task_success: True\n"
+        "- summary: scene inspected\n"
+        "- recommended_action: report_or_continue"
+    )
+    core.runtime.state.add_tool_call(
+        "request_capability",
+        {"capability": "inspect_scene", "objective": "look"},
+        first_feedback,
+    )
+
+    second_turn = UserTurn(
+        envelope=Envelope(robot_id="mock0", agent_id="main"),
+        text="describe the scene again",
+    )
+    core.bind_turn_context(
+        AgentTurnInput(turn=second_turn, snapshot=RobotSnapshot(robot_id="mock0"))
+    )
+    core._current_tool_call_start = len(core.runtime.state.tool_calls)
+
+    async def submit_and_resolve(skill: SkillIntent) -> None:
+        io.skills.append(skill)
+        core.resolve_skill(skill.skill_id, "new inspect_scene completed")
+
+    io.submit_skill = submit_and_resolve  # type: ignore[method-assign]
+
+    result = asyncio.run(
+        core.request_capability(
+            "inspect_scene", "look again", slots={"question": "look again"}
+        )
+    )
+
+    assert result == "new inspect_scene completed"
+    assert [skill.name for skill in io.skills] == ["inspect_scene"]
+
+
+def test_robot_agent_core_does_not_reuse_failed_perception_within_same_turn() -> None:
+    io = FakeAgentIO()
+    core = RobotAgentCore(
+        agent_id="main",
+        spec=AgentSpec(
+            type="robot_agent",
+            robot_id="mock0",
+            settings={"mode": "direct", "skill_timeout_sec": 1.0},
+        ),
+        io=io,
+    )
+    turn = UserTurn(
+        envelope=Envelope(robot_id="mock0", agent_id="main"),
+        text="describe the scene",
+    )
+    core.bind_turn_context(
+        AgentTurnInput(turn=turn, snapshot=RobotSnapshot(robot_id="mock0"))
+    )
+    core._current_tool_call_start = len(core.runtime.state.tool_calls)
+    failed_feedback = (
+        "Execution feedback for skill skill_timeout:\n"
+        "- outcome: failed\n"
+        "- subgoal_success: False\n"
+        "- task_success: False\n"
+        "- summary: skill timed out\n"
+        "- failure_reason: skill timed out\n"
+        "- recommended_action: reobserve"
+    )
+    core.runtime.state.add_tool_call(
+        "request_capability",
+        {"capability": "inspect_scene", "objective": "look"},
+        failed_feedback,
+    )
+
+    async def submit_and_resolve(skill: SkillIntent) -> None:
+        io.skills.append(skill)
+        core.resolve_skill(skill.skill_id, "retry inspect_scene completed")
+
+    io.submit_skill = submit_and_resolve  # type: ignore[method-assign]
+
+    result = asyncio.run(
+        core.request_capability(
+            "inspect_scene", "retry look", slots={"question": "retry look"}
+        )
+    )
+
+    assert result == "retry inspect_scene completed"
+    assert [skill.name for skill in io.skills] == ["inspect_scene"]
+
+
 def test_robot_agent_core_does_not_report_failed_skill_as_completed() -> None:
     from tests.conftest import FakeProvider
 

@@ -6,6 +6,7 @@ from typing import Any, Literal, Protocol
 from hey_robot.agents.runtime.execution_feedback import (
     parse_execution_feedback_response,
 )
+from hey_robot.agents.runtime.grounding import is_perception_skill_name
 from hey_robot.agents.types import RobotSnapshot
 from hey_robot.media import LocalMediaStore, MediaResolver
 from hey_robot.protocol import ImageRef, RobotStatus, SkillResult
@@ -277,6 +278,25 @@ def status_feedback_from_result(
                 "backend": backend,
                 "camera_issue": camera_issue,
                 "robot_state": status.state if status is not None else None,
+            },
+        )
+    if is_perception_skill_name(result.name):
+        summary = result.summary or "perception skill completed"
+        if status is not None and status.state:
+            summary = f"{summary}; robot_state={status.state}"
+        return ExecutionFeedback(
+            skill_id=result.skill_id,
+            outcome="confirmed",
+            task_success=True,
+            subgoal_success=True,
+            confidence=0.9 if status is not None else 0.75,
+            summary=summary,
+            next_hint="report the observed scene; do not repeat the same perception skill unless the user asks or images are invalid",
+            recommended_action="report_or_continue",
+            metadata={
+                "backend": backend,
+                "robot_state": status.state if status is not None else None,
+                "perception_completed": True,
             },
         )
     task_success = (

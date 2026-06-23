@@ -79,6 +79,7 @@ class RobotAgentCore:
         self.runtime = self._build_runtime()
         self.feedback_evaluator = feedback_evaluator or self._build_feedback_evaluator()
         self._pending_skills: dict[str, asyncio.Future[str]] = {}
+        self._current_tool_call_start = 0
         self._last_contact_envelope: Envelope | None = None
         self.autonomy = AutonomyManager(
             max_events=int(self.spec.settings.get("autonomy", {}).get("max_events", 50))
@@ -132,6 +133,7 @@ class RobotAgentCore:
         self._refresh_tool_context()
         self._turn_submitted_skill_id = None
         tool_call_start = len(self.runtime.state.tool_calls)
+        self._current_tool_call_start = tool_call_start
         logger.debug(
             f"开始处理 turn：agent={self.agent_id} task_len={len(payload.turn.text)} "
             f"robot={payload.turn.envelope.robot_id} mode={self.spec.settings.get('mode', 'agent')}"
@@ -448,6 +450,12 @@ class RobotAgentCore:
     ) -> str:
         turn = getattr(self, "_current_turn", None)
         turn_metadata = dict(getattr(turn, "metadata", {}) or {})
+        duplicate_perception = self._successful_perception_result_this_turn(capability)
+        if duplicate_perception is not None:
+            logger.info(
+                f"reuse perception result in current turn: capability={capability}"
+            )
+            return duplicate_perception
         return await self.skill_gateway.submit(
             SkillGatewayRequest(
                 capability=capability,
@@ -459,6 +467,31 @@ class RobotAgentCore:
                 confirmed=confirmed,
             )
         )
+
+    def _successful_perception_result_this_turn(self, capability: str) -> str | None:
+        capability_name = (capability or "").strip()
+        if not is_perception_skill_name(capability_name):
+            return None
+        for record in reversed(
+            self.runtime.state.tool_calls[self._current_tool_call_start :]
+        ):
+            if record.name != "request_capability" or not record.success:
+                continue
+            previous_capability = str(record.arguments.get("capability") or "").strip()
+            if previous_capability != capability_name:
+                continue
+            parsed = self._parse_agent_feedback(record.result)
+            if parsed is not None and parsed.get("subgoal_success") is True:
+                return (
+                    record.result
+                    + "\n\nPerception result reused: the same perception skill already succeeded in this turn; do not call it again unless new evidence is required."
+                )
+            if parsed is None and record.result.strip():
+                return (
+                    record.result
+                    + "\n\nPerception result reused: the same perception skill already returned a result in this turn."
+                )
+        return None
 
     def resolve_skill(self, skill_id: str, result_text: str) -> bool:
         future = self._pending_skills.get(skill_id)

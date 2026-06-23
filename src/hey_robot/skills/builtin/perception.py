@@ -16,7 +16,7 @@ class InspectSceneSkill(BaseSkill):
         required_resources=("camera",),
         driver_primitives=("inspect_scene",),
         safety_level="observe",
-        timeout_sec=8.0,
+        timeout_sec=20.0,
         feedback_mode="vision",
     )
 
