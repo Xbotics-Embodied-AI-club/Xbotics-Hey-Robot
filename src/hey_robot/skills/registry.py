@@ -163,4 +163,8 @@ def _contract_to_robot_spec(spec: SkillSpec) -> RobotSkillSpec:
         interruptible=bool(spec.interruptible),
         feedback_mode=spec.feedback_mode,
         refresh_observation=bool(spec.refresh_observation),
+        capability_type=spec.capability_type,
+        goal_effects=tuple(spec.goal_effects),
+        evidence_outputs=tuple(spec.evidence_outputs),
+        cannot_satisfy=tuple(spec.cannot_satisfy),
     )

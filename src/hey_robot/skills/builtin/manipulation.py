@@ -19,6 +19,10 @@ class SetArmPoseSkill(BaseSkill):
         safety_level="motion",
         timeout_sec=12.0,
         agent_visible=False,
+        capability_type="arm_pose",
+        goal_effects=("sets_arm_named_pose",),
+        evidence_outputs=("arm_pose_action_result",),
+        cannot_satisfy=("weak_scene_observation",),
     )
 
     async def execute(self, ctx, arguments):
@@ -44,6 +48,10 @@ class MoveArmJointsSkill(BaseSkill):
         safety_level="motion",
         timeout_sec=10.0,
         agent_visible=False,
+        capability_type="arm_joint_delta",
+        goal_effects=("changes_arm_joint_positions",),
+        evidence_outputs=("arm_joint_action_result",),
+        cannot_satisfy=("weak_scene_observation",),
     )
 
     async def execute(self, ctx, arguments):
@@ -71,6 +79,10 @@ class SetGripperSkill(BaseSkill):
         # tight under normal MuJoCo load and can race a completed jaw motion.
         timeout_sec=10.0,
         agent_visible=False,
+        capability_type="gripper_control",
+        goal_effects=("changes_gripper_opening",),
+        evidence_outputs=("gripper_action_result",),
+        cannot_satisfy=("weak_scene_observation",),
     )
 
     async def execute(self, ctx, arguments):

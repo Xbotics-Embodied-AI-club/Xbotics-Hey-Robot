@@ -33,6 +33,10 @@ class MoveBaseSkill(BaseSkill):
         safety_level="motion",
         timeout_sec=8.0,
         agent_visible=False,
+        capability_type="base_move",
+        goal_effects=("changes_base_position",),
+        evidence_outputs=("base_move_action_result",),
+        cannot_satisfy=("weak_scene_observation", "base_turn_action_result"),
     )
 
     async def execute(self, ctx, arguments):
@@ -58,6 +62,10 @@ class TurnBaseSkill(BaseSkill):
         safety_level="motion",
         timeout_sec=8.0,
         agent_visible=False,
+        capability_type="base_turn",
+        goal_effects=("changes_base_orientation",),
+        evidence_outputs=("base_turn_action_result",),
+        cannot_satisfy=("weak_scene_observation", "base_move_action_result"),
     )
 
     async def execute(self, ctx, arguments):
@@ -85,6 +93,9 @@ class BaseVelocityStepSkill(BaseSkill):
         safety_level="motion",
         timeout_sec=3.0,
         agent_visible=False,
+        capability_type="base_velocity_step",
+        goal_effects=("changes_base_velocity",),
+        evidence_outputs=("base_velocity_action_result",),
     )
 
     async def execute(self, ctx, arguments):
@@ -113,6 +124,10 @@ class HumanFollowSkill(BaseSkill):
         timeout_sec=300.0,
         agent_visible=True,
         feedback_mode="vision",
+        capability_type="human_follow",
+        goal_effects=("tracks_and_follows_person",),
+        evidence_outputs=("human_follow_action_result",),
+        cannot_satisfy=("weak_scene_observation",),
     )
 
     async def execute(self, ctx, arguments):

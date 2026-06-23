@@ -1120,7 +1120,8 @@ def test_robot_agent_core_does_not_reuse_previous_turn_skill_id() -> None:
     assert first_result.metadata["skill_id"] == io.skills[0].skill_id
     assert first_result.task_finished is True
     assert second_result.metadata["skill_id"] is None
-    assert second_result.task_finished is True
+    assert second_result.reply_text == "I cannot do that."
+    assert second_result.task_finished is False
 
 
 def test_robot_agent_core_recovery_blocks_new_skill() -> None:

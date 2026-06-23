@@ -287,7 +287,7 @@ def status_feedback_from_result(
         return ExecutionFeedback(
             skill_id=result.skill_id,
             outcome="confirmed",
-            task_success=True,
+            task_success=None,
             subgoal_success=True,
             confidence=0.9 if status is not None else 0.75,
             summary=summary,

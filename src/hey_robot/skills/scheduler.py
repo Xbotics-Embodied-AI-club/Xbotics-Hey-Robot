@@ -22,6 +22,8 @@ class SkillRun:
     timeout_override_sec: float | None = None
     accepted_at: float = field(default_factory=time.time)
     started_at: float | None = None
+    action_published_at: float | None = None
+    status_received_at: float | None = None
     steps_executed: int = 0
     terminal: bool = False
     step_summaries: list[str] = field(default_factory=list)
@@ -39,7 +41,11 @@ class SkillRun:
 
     @property
     def timed_out(self) -> bool:
-        return time.time() - self.accepted_at > self.timeout_sec
+        return time.time() - self.timeout_base_at > self.timeout_sec
+
+    @property
+    def timeout_base_at(self) -> float:
+        return self.action_published_at or self.started_at or self.accepted_at
 
 
 class SkillScheduler:

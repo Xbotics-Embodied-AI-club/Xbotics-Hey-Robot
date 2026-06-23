@@ -18,6 +18,17 @@ class InspectSceneSkill(BaseSkill):
         safety_level="observe",
         timeout_sec=20.0,
         feedback_mode="vision",
+        capability_type="scene_observation",
+        goal_effects=("updates_visual_context",),
+        evidence_outputs=("weak_scene_observation",),
+        cannot_satisfy=(
+            "base_move_action_result",
+            "base_turn_action_result",
+            "gripper_action_result",
+            "arm_pose_action_result",
+            "arm_joint_action_result",
+            "marker_detection_result",
+        ),
     )
 
     async def execute(self, ctx, arguments):
@@ -50,6 +61,17 @@ class LookAroundSkill(BaseSkill):
         safety_level="observe",
         timeout_sec=30.0,
         feedback_mode="vision",
+        capability_type="scene_observation",
+        goal_effects=("updates_visual_context",),
+        evidence_outputs=("weak_scene_observation",),
+        cannot_satisfy=(
+            "base_move_action_result",
+            "base_turn_action_result",
+            "gripper_action_result",
+            "arm_pose_action_result",
+            "arm_joint_action_result",
+            "marker_detection_result",
+        ),
     )
 
     async def execute(self, ctx, arguments):
@@ -83,6 +105,10 @@ class DetectMarkerSkill(BaseSkill):
         timeout_sec=6.0,
         agent_visible=False,
         feedback_mode="vision",
+        capability_type="marker_detection",
+        goal_effects=("detects_workspace_marker",),
+        evidence_outputs=("marker_detection_result",),
+        cannot_satisfy=("weak_scene_observation",),
     )
 
     async def execute(self, ctx, arguments):

@@ -29,6 +29,10 @@ class RobotSkillSpec:
     interruptible: bool = True
     feedback_mode: FeedbackMode = "status"
     refresh_observation: bool = True
+    capability_type: str | None = None
+    goal_effects: tuple[str, ...] = ()
+    evidence_outputs: tuple[str, ...] = ()
+    cannot_satisfy: tuple[str, ...] = ()
 
     def supports(self, robot_type: str | None) -> bool:
         return (
@@ -47,6 +51,9 @@ class RobotSkillSpec:
             "success_criteria",
             "failure_modes",
             "recovery_hints",
+            "goal_effects",
+            "evidence_outputs",
+            "cannot_satisfy",
         ):
             data[key] = list(data[key])
         return data

@@ -64,6 +64,7 @@ def build_turn_prompt(
     skill_in_progress: bool = False,
     recovery_context: str | None = None,
     loop_warning: str | None = None,
+    task_contract_context: str | None = None,
 ) -> str:
     values = {
         "task": task,
@@ -75,6 +76,7 @@ def build_turn_prompt(
         ),
         "last_feedback": _block("Execution feedback", last_feedback),
         "recovery_context": _block("Recovery", recovery_context),
+        "task_contract_context": _block("Task contract", task_contract_context),
         "next_hint": _block("Hint", next_hint),
         "loop_warning": _block("Loop warning", loop_warning),
         "memory_context": _raw_block(_trim_context(memory_context, max_chars=4000)),

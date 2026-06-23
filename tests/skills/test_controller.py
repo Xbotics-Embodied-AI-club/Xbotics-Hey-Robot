@@ -307,6 +307,83 @@ def test_skill_controller_accepts_contract_and_completes_from_status(tmp_path) -
     assert results[0]["metadata"]["skill"] == "set_gripper"
 
 
+def test_skill_controller_publishes_late_success_after_timeout(tmp_path) -> None:
+    service = _service(tmp_path)
+    state = service.states["embodied_skills"]
+    envelope = Envelope(trace_id="tr1", robot_id="xlerobot")
+    intent = SkillIntent(
+        envelope=envelope,
+        skill_id="skill_timeout",
+        name="set_gripper",
+        arguments={"action": "open"},
+        objective="open gripper",
+        timeout_sec=0.01,
+    )
+
+    async def run() -> None:
+        await service._on_skill_intent(service.topics.skill_intent, intent.__dict__)
+        run = state.active_runs["skill_timeout"]
+        run.started_at = time.time() - 0.02
+        run.action_published_at = time.time() - 0.02
+        await service._expire_timed_out_runs("embodied_skills", state)
+        await service._on_status(
+            service.topics.robot_status,
+            RobotStatus(
+                envelope=envelope,
+                frame_id=9,
+                state="idle",
+                skill_id="skill_timeout",
+                success=True,
+                metrics={"last_skill_result": {"message": "opened late"}},
+            ).__dict__,
+        )
+
+    asyncio.run(run())
+
+    results = [
+        payload
+        for topic, payload in service.bus.published
+        if topic == service.topics.skill_result
+    ]  # type: ignore[attr-defined]
+    phases = [
+        payload["phase"]
+        for topic, payload in service.bus.published
+        if topic == service.topics.skill_event
+    ]  # type: ignore[attr-defined]
+
+    assert results[0]["status"] == "failed"
+    assert results[0]["failure_mode"] == "timeout"
+    assert results[-1]["status"] == "completed"
+    assert results[-1]["success"] is True
+    assert "completed" in phases
+
+
+def test_skill_run_timeout_uses_start_or_action_publish_time_not_accept_time(
+    tmp_path,
+) -> None:
+    service = _service(tmp_path)
+    state = service.states["embodied_skills"]
+    intent = SkillIntent(
+        envelope=Envelope(trace_id="tr1", robot_id="xlerobot"),
+        skill_id="skill_timing",
+        name="set_gripper",
+        arguments={"action": "open"},
+        objective="open gripper",
+        timeout_sec=1.0,
+    )
+
+    asyncio.run(service._on_skill_intent(service.topics.skill_intent, intent.__dict__))
+    run = state.active_runs["skill_timing"]
+
+    run.accepted_at = time.time() - 10.0
+    run.started_at = time.time()
+    run.action_published_at = None
+    assert run.timed_out is False
+
+    run.action_published_at = time.time() - 2.0
+    assert run.timed_out is True
+
+
 def test_skill_controller_executes_pure_plugin_skill_via_skill_runtime(
     tmp_path, monkeypatch
 ) -> None:

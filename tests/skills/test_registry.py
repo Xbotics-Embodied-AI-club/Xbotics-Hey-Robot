@@ -237,3 +237,16 @@ def test_registry_rejects_duplicate_skill_names() -> None:
     assert duplicate is not None
     with pytest.raises(ValueError, match="duplicate skill: inspect_scene"):
         registry.register(duplicate)
+
+
+def test_robot_skill_catalog_exposes_capability_semantics() -> None:
+    catalog = load_skill_registry().robot_skill_catalog()
+
+    turn_base = catalog.get("turn_base")
+    inspect_scene = catalog.get("inspect_scene")
+
+    assert turn_base.capability_type == "base_turn"
+    assert turn_base.evidence_outputs == ("base_turn_action_result",)
+    assert inspect_scene.capability_type == "scene_observation"
+    assert "base_turn_action_result" in inspect_scene.cannot_satisfy
+    assert catalog.get("detect_marker").evidence_outputs == ("marker_detection_result",)

@@ -131,6 +131,7 @@ def test_template_helpers_render_packaged_defaults_and_reject_path_escape() -> N
             skill_status_context="",
             last_feedback="",
             recovery_context="",
+            task_contract_context="",
             next_hint="",
             loop_warning="",
             memory_context="",

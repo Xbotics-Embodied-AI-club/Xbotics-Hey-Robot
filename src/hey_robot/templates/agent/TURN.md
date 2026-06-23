@@ -4,6 +4,7 @@
 {{ skill_status_context }}
 {{ last_feedback }}
 {{ recovery_context }}
+{{ task_contract_context }}
 {{ next_hint }}
 {{ loop_warning }}
 {{ memory_context }}

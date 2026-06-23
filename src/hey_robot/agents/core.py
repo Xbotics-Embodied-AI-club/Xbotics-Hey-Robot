@@ -199,12 +199,18 @@ class RobotAgentCore:
             "max_iterations",
             "empty_response",
             "provider_error",
+            "model_timeout",
+            "turn_budget_exhausted",
             "internal_protocol_response",
             "invalid_tool_protocol",
         }:
             reply_text = self._fallback_reply_for_unfinished_turn(result)
         task_finished = bool(result.task_finished)
-        if not task_finished and reply_text is not None:
+        if (
+            not task_finished
+            and reply_text is not None
+            and not bool(getattr(result, "task_evaluation_applied", False))
+        ):
             task_finished = self._final_response_finishes_task(
                 result, tool_call_start=tool_call_start
             )
@@ -361,6 +367,7 @@ class RobotAgentCore:
             provider_timeout_sec=float(
                 self.spec.settings.get("provider_timeout_sec", 300.0)
             ),
+            turn_timeout_sec=float(self.spec.settings.get("turn_timeout_sec", 120.0)),
             tool_registry=tool_registry,
             permission_mode=self.spec.settings.get("permission_mode", "autonomous"),
             hooks=[RobotSafetyHook(self._status_snapshot_for_safety)]

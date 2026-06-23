@@ -47,6 +47,7 @@ class _SkillControllerState:
     latest_observation: RobotObservation | None = None
     latest_status: RobotStatus | None = None
     last_scheduler_decision: dict[str, Any] | None = None
+    recently_finished_runs: dict[str, tuple[SkillRun, float, str | None]] | None = None
 
     @property
     def active_runs(self) -> dict[str, SkillRun]:
@@ -292,6 +293,10 @@ class SkillControllerService:
                 )
             run = state.active_runs.get(status.skill_id or "")
             if run is None or run.terminal:
+                if status.skill_id and status.success is True:
+                    handled = await self._handle_late_success_status(state, status)
+                    if handled:
+                        continue
                 if status.skill_id:
                     logger.warning(
                         "skill_status_trace ignored "
@@ -299,6 +304,7 @@ class SkillControllerService:
                         f"reason={'missing_run' if run is None else 'terminal_run'}"
                     )
                 continue
+            run.status_received_at = time.time()
             future = run.pending_status
             if future is not None and not future.done():
                 logger.info(
@@ -448,6 +454,7 @@ class SkillControllerService:
         final_summary = self._completion_summary(run, summary) if success else summary
         run.terminal = True
         state.scheduler.remove(intent.skill_id)
+        self._remember_finished_run(state, run, failure_mode)
         phase = "completed" if success else "failed"
         await self._publish_event(
             intent,
@@ -487,6 +494,72 @@ class SkillControllerService:
             },
             severity="info" if success else "warn",
         )
+
+    def _remember_finished_run(
+        self,
+        state: _SkillControllerState,
+        run: SkillRun,
+        failure_mode: str | None,
+    ) -> None:
+        if state.recently_finished_runs is None:
+            state.recently_finished_runs = {}
+        now = time.time()
+        state.recently_finished_runs[run.intent.skill_id] = (run, now, failure_mode)
+        for skill_id, (_run, finished_at, _failure_mode) in list(
+            state.recently_finished_runs.items()
+        ):
+            if now - finished_at > 5.0:
+                state.recently_finished_runs.pop(skill_id, None)
+
+    async def _handle_late_success_status(
+        self, state: _SkillControllerState, status: RobotStatus
+    ) -> bool:
+        if state.recently_finished_runs is None or not status.skill_id:
+            return False
+        item = state.recently_finished_runs.get(status.skill_id)
+        if item is None:
+            return False
+        run, finished_at, failure_mode = item
+        if failure_mode != "timeout" or time.time() - finished_at > 2.0:
+            return False
+        run.status_received_at = time.time()
+        step_summary = self._status_step_summary(status)
+        if step_summary:
+            run.step_summaries.append(step_summary)
+        logger.warning(
+            "skill_status_trace late_success_after_timeout "
+            f"robot={status.envelope.robot_id} skill_id={status.skill_id} "
+            f"frame={status.frame_id}"
+        )
+        policy_id = next(
+            policy_id
+            for policy_id, item_state in self.states.items()
+            if item_state is state
+        )
+        await self._publish_event(
+            run.intent,
+            "completed",
+            progress=1.0,
+            summary=step_summary or "late success after timeout",
+            policy_id=policy_id,
+            frame_id=status.frame_id,
+            steps_executed=run.steps_executed,
+            contract=run.contract,
+            execution_plan=run.execution_plan,
+            metadata={"late_success_after_timeout": True},
+        )
+        await self._publish_result(
+            run.intent,
+            "completed",
+            True,
+            step_summary or "late success after timeout",
+            frame_id=status.frame_id,
+            steps_executed=run.steps_executed,
+            contract=run.contract,
+            run=run,
+        )
+        state.recently_finished_runs.pop(status.skill_id, None)
+        return True
 
     async def _invoke_robot_skill(
         self,
@@ -541,6 +614,7 @@ class SkillControllerService:
             f"age_sec={max(0.0, time.time() - run.accepted_at):.3f}"
         )
         await self.bus.publish(self.topics.robot_action, to_payload(action))
+        run.action_published_at = time.time()
         await self.events.publish(
             RuntimeEvent.make(
                 EventKind.POLICY_ACTION,

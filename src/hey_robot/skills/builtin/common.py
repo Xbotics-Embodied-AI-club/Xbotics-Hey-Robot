@@ -36,6 +36,10 @@ def spec(
     agent_visible: bool = True,
     feedback_mode: str = "status",
     refresh_observation: bool = True,
+    capability_type: str | None = None,
+    goal_effects: tuple[str, ...] = (),
+    evidence_outputs: tuple[str, ...] = (),
+    cannot_satisfy: tuple[str, ...] = (),
 ) -> SkillSpec:
     return SkillSpec(
         name=name,
@@ -57,6 +61,10 @@ def spec(
         agent_visible=agent_visible,
         feedback_mode=feedback_mode,
         refresh_observation=refresh_observation,
+        capability_type=capability_type,
+        goal_effects=goal_effects,
+        evidence_outputs=evidence_outputs,
+        cannot_satisfy=cannot_satisfy,
     )
 
 

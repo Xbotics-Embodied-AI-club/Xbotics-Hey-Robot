@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, cast
 
 import numpy as np
@@ -42,6 +43,13 @@ from hey_robot.agents.runtime.response_policy import (
 )
 from hey_robot.agents.runtime.state import AgentState
 from hey_robot.agents.runtime.tool_executor import ToolExecutor
+from hey_robot.agents.task_contract import (
+    EvaluationResult,
+    EvidenceLedger,
+    TaskContract,
+    TaskEvidenceEvaluator,
+    build_task_contract,
+)
 from hey_robot.agents.tools.registry import ToolRegistry
 from hey_robot.capability.catalog.resolver import CapabilityResolver
 from hey_robot.providers import (
@@ -82,6 +90,7 @@ class AgentRunSpec:
     allowed_tools: set[str] | None = None
     max_iterations: int | None = None
     provider_timeout_sec: float | None = None
+    turn_timeout_sec: float | None = None
     message_window: MessageWindowPolicy | None = None
     payload: AgentRuntimeInput | None = None
 
@@ -106,6 +115,7 @@ class AgentRuntimeResult:
     task_finished: bool = False
     stop_reason: str = "completed"
     tool_success: bool | None = None
+    task_evaluation_applied: bool = False
 
 
 @dataclass
@@ -116,6 +126,30 @@ class _ExecutedToolCall:
     args: dict[str, Any]
     result: str
     success: bool
+
+
+@dataclass
+class TurnBudget:
+    total_sec: float
+    started_at: float = field(default_factory=time.monotonic)
+
+    @property
+    def elapsed_sec(self) -> float:
+        return max(0.0, time.monotonic() - self.started_at)
+
+    @property
+    def remaining_sec(self) -> float:
+        return max(0.0, self.total_sec - self.elapsed_sec)
+
+    @property
+    def reserve_sec(self) -> float:
+        return min(2.0, max(0.02, self.total_sec * 0.1))
+
+    def provider_timeout(self, configured_timeout_sec: float) -> float | None:
+        remaining = self.remaining_sec - self.reserve_sec
+        if remaining <= 0:
+            return None
+        return max(0.001, min(configured_timeout_sec, remaining))
 
 
 class AgentRuntime:
@@ -135,6 +169,7 @@ class AgentRuntime:
         capability_resolver: CapabilityResolver | None = None,
         prompt_templates: AgentPromptTemplates | None = None,
         provider_timeout_sec: float = 300.0,
+        turn_timeout_sec: float | None = None,
         runtime_hooks: list[AgentRuntimeHook] | None = None,
         message_window_policy: MessageWindowPolicy | None = None,
     ) -> None:
@@ -153,6 +188,11 @@ class AgentRuntime:
         self.agent_run_recorder = agent_run_recorder
         self.memory: Any | None = None
         self.provider_timeout_sec = max(5.0, float(provider_timeout_sec))
+        self.turn_timeout_sec = (
+            max(0.001, float(turn_timeout_sec))
+            if turn_timeout_sec is not None
+            else None
+        )
         self.runtime_hooks = list(runtime_hooks or [])
         self.message_window_policy = message_window_policy or MessageWindowPolicy()
 
@@ -213,9 +253,20 @@ class AgentRuntime:
         last_tool_result: AgentRuntimeResult | None = None
         perception_guard_attempted = False
         tools_used: list[str] = []
+        task_contract = build_task_contract(payload.task)
+        evidence_ledger = EvidenceLedger()
+        self._seed_observation_evidence(task_contract, evidence_ledger)
+        self._record_task_contract(task_contract)
+        self._record_task_evidence(evidence_ledger)
         max_iterations = spec.max_iterations or self.max_iterations
         provider_timeout_sec = max(
             5.0, float(spec.provider_timeout_sec or self.provider_timeout_sec)
+        )
+        turn_timeout_sec = spec.turn_timeout_sec or self.turn_timeout_sec
+        turn_budget = (
+            TurnBudget(total_sec=float(turn_timeout_sec))
+            if turn_timeout_sec is not None and turn_timeout_sec > 0
+            else None
         )
 
         iterations = 0
@@ -230,11 +281,31 @@ class AgentRuntime:
                     messages, spec.message_window or self.message_window_policy
                 )
                 validate_provider_messages(messages_for_model)
+                request_timeout_sec = provider_timeout_sec
+                if turn_budget is not None:
+                    budget_timeout = turn_budget.provider_timeout(provider_timeout_sec)
+                    if budget_timeout is None:
+                        result = AgentRuntimeResult(
+                            tool="wait",
+                            args={
+                                "reason": "turn budget exhausted",
+                                "remaining_sec": turn_budget.remaining_sec,
+                            },
+                            result="turn budget exhausted before next model call",
+                            reason="turn_budget_exhausted",
+                            stop_reason="turn_budget_exhausted",
+                            task_finished=False,
+                            tool_success=False,
+                        )
+                        return await self._finish_run(
+                            result, messages, tools_used, hook_context
+                        )
+                    request_timeout_sec = budget_timeout
                 response = await asyncio.wait_for(
                     self._request_provider(
                         messages_for_model, allowed_tools=spec.allowed_tools
                     ),
-                    timeout=provider_timeout_sec,
+                    timeout=request_timeout_sec,
                 )
             except TimeoutError:
                 response = ReasoningResponse(
@@ -284,12 +355,17 @@ class AgentRuntime:
                 )
             decision = decide_response(response)
             if decision.action == "provider_error":
+                stop_reason = (
+                    "model_timeout"
+                    if getattr(response, "error_kind", None) == "timeout"
+                    else "provider_error"
+                )
                 result = AgentRuntimeResult(
                     tool="wait",
                     args={"reason": decision.content},
                     result=decision.content,
                     reason=decision.reason,
-                    stop_reason="provider_error",
+                    stop_reason=stop_reason,
                 )
                 hook_context.final_result = result
                 await self._emit_runtime_hook("after_iteration", hook_context)
@@ -374,13 +450,45 @@ class AgentRuntime:
                         )
                         if guarded is not None:
                             last_tool_result = guarded
+                            evidence_ledger.add_tool_result(
+                                tool=guarded.tool,
+                                args=guarded.args,
+                                result=guarded.result,
+                                success=bool(guarded.tool_success),
+                            )
+                            self._record_task_evidence(evidence_ledger)
                             continue
+                    evaluation = self._evaluate_final_candidate(
+                        task_contract, evidence_ledger, content
+                    )
+                    if not evaluation.can_finalize:
+                        feedback = evaluation.feedback_for_agent(task_contract)
+                        if iterations < max_iterations:
+                            messages.append(
+                                ReasoningMessage(role="user", content=feedback)
+                            )
+                            continue
+                        result = AgentRuntimeResult(
+                            tool="wait",
+                            args={"reason": "task evidence incomplete"},
+                            result=feedback,
+                            reason="task_evidence_incomplete",
+                            task_finished=False,
+                            stop_reason="task_evidence_incomplete",
+                            tool_success=False,
+                            task_evaluation_applied=True,
+                        )
+                        return await self._finish_run(
+                            result, messages, tools_used, hook_context
+                        )
                     result = self._text_response_result(
                         tool="final_response",
                         args={},
                         result=content,
                         reason="text_response",
                         stop_reason="text_response",
+                        task_finished=evaluation.goal_satisfied,
+                        task_evaluation_applied=True,
                     )
                     return await self._finish_run(
                         result, messages, tools_used, hook_context
@@ -418,6 +526,13 @@ class AgentRuntime:
                 tools_used.append(tool)
 
                 self.state.add_tool_call(tool, args, tool_result_text, success=success)
+                evidence_ledger.add_tool_result(
+                    tool=tool,
+                    args=args,
+                    result=tool_result_text,
+                    success=success,
+                )
+                self._record_task_evidence(evidence_ledger)
                 last_tool_result = AgentRuntimeResult(
                     tool_call_id=executed.tool_call_id,
                     tool=tool,
@@ -471,6 +586,17 @@ class AgentRuntime:
                 except ValueError:
                     tool_spec = None
                 if tool_spec is not None and tool_spec.result_policy == "return_direct":
+                    evaluation = self._evaluate_final_candidate(
+                        task_contract, evidence_ledger, tool_result_text
+                    )
+                    if not evaluation.can_finalize and iterations < max_iterations:
+                        messages.append(
+                            ReasoningMessage(
+                                role="user",
+                                content=evaluation.feedback_for_agent(task_contract),
+                            )
+                        )
+                        continue
                     runtime_result = self._text_response_result(
                         tool_call_id=executed.tool_call_id,
                         tool=tool,
@@ -478,7 +604,9 @@ class AgentRuntime:
                         result=tool_result_text,
                         reason=reason,
                         stop_reason="text_response",
+                        task_finished=evaluation.goal_satisfied,
                         tool_success=success,
+                        task_evaluation_applied=True,
                     )
                     return await self._finish_run(
                         runtime_result, messages, tools_used, hook_context
@@ -517,14 +645,33 @@ class AgentRuntime:
                     return await self._finish_run(
                         runtime_result, messages, tools_used, hook_context
                     )
+                evaluation = self._evaluate_final_candidate(
+                    task_contract, evidence_ledger, synthesized_reply
+                )
+                if not evaluation.can_finalize:
+                    runtime_result = AgentRuntimeResult(
+                        tool_call_id=last_tool_result.tool_call_id,
+                        tool=last_tool_result.tool,
+                        args=last_tool_result.args,
+                        result=evaluation.feedback_for_agent(task_contract),
+                        reason="task_evidence_incomplete",
+                        task_finished=False,
+                        stop_reason="max_iterations_after_tool_result",
+                        tool_success=True,
+                        task_evaluation_applied=True,
+                    )
+                    return await self._finish_run(
+                        runtime_result, messages, tools_used, hook_context
+                    )
                 runtime_result = self._text_response_result(
                     tool="final_response",
                     args={},
                     result=synthesized_reply,
                     reason="post_tool_final_answer",
-                    task_finished=False,
+                    task_finished=evaluation.goal_satisfied,
                     stop_reason="text_response",
                     tool_success=True,
+                    task_evaluation_applied=True,
                 )
                 return await self._finish_run(
                     runtime_result, messages, tools_used, hook_context
@@ -533,14 +680,33 @@ class AgentRuntime:
             if fallback_reply and looks_like_internal_agent_protocol(fallback_reply):
                 fallback_reply = ""
             if fallback_reply:
+                evaluation = self._evaluate_final_candidate(
+                    task_contract, evidence_ledger, fallback_reply
+                )
+                if not evaluation.can_finalize:
+                    runtime_result = AgentRuntimeResult(
+                        tool_call_id=last_tool_result.tool_call_id,
+                        tool=last_tool_result.tool,
+                        args=last_tool_result.args,
+                        result=evaluation.feedback_for_agent(task_contract),
+                        reason="task_evidence_incomplete",
+                        task_finished=False,
+                        stop_reason="max_iterations_after_tool_result",
+                        tool_success=True,
+                        task_evaluation_applied=True,
+                    )
+                    return await self._finish_run(
+                        runtime_result, messages, tools_used, hook_context
+                    )
                 runtime_result = self._text_response_result(
                     tool="final_response",
                     args={},
                     result=fallback_reply,
                     reason="required_final_answer_from_tool_result",
-                    task_finished=False,
+                    task_finished=evaluation.goal_satisfied,
                     stop_reason="text_response",
                     tool_success=True,
+                    task_evaluation_applied=True,
                 )
                 return await self._finish_run(
                     runtime_result, messages, tools_used, hook_context
@@ -792,6 +958,7 @@ class AgentRuntime:
         )
 
     def _initial_messages(self, payload: AgentRuntimeInput) -> list[ReasoningMessage]:
+        task_contract = build_task_contract(payload.task)
         prompt = build_turn_prompt(
             templates=self.prompt_templates,
             task=payload.task,
@@ -803,6 +970,7 @@ class AgentRuntime:
             skill_in_progress=payload.skill_in_progress,
             recovery_context=payload.recovery_context,
             loop_warning=self.state.loop_warning_context(),
+            task_contract_context=self._task_contract_context(task_contract),
         )
         images = [ReasoningImage(data=image) for image in payload.images]
         return [
@@ -811,6 +979,124 @@ class AgentRuntime:
             ),
             ReasoningMessage(role="user", content=prompt, images=images),
         ]
+
+    def _task_contract_context(self, contract: TaskContract) -> str:
+        lines = [
+            f"task_type: {contract.task_type}",
+            f"user_goal: {contract.user_goal}",
+        ]
+        if contract.required_capability is not None:
+            lines.append(
+                f"required_capability_type: {contract.required_capability.type}"
+            )
+            if contract.required_capability.constraints:
+                lines.append(
+                    "required_capability_constraints: "
+                    + json.dumps(
+                        contract.required_capability.constraints,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
+                )
+        if contract.completion_evidence_required:
+            lines.append(
+                "completion_evidence_required: "
+                + ", ".join(contract.completion_evidence_required)
+            )
+        if contract.allowed_supporting_capabilities:
+            lines.append(
+                "supporting_capabilities: "
+                + ", ".join(contract.allowed_supporting_capabilities)
+            )
+        lines.append(
+            "final_response_rule: final-answer only when required evidence is present, or after a concrete safety/capability refusal."
+        )
+        return "\n".join(lines)
+
+    def _evaluate_final_candidate(
+        self,
+        contract: TaskContract,
+        ledger: EvidenceLedger,
+        content: str,
+    ) -> EvaluationResult:
+        evaluation = TaskEvidenceEvaluator().evaluate(contract, ledger)
+        if evaluation.can_finalize:
+            self._record_task_evaluation(contract, ledger, evaluation, content)
+            return evaluation
+        lowered = str(content or "").lower()
+        refusal_markers = (
+            "cannot",
+            "can't",
+            "unable",
+            "failed",
+            "not safe",
+            "无法",
+            "不能",
+            "失败",
+            "不安全",
+            "没有成功",
+        )
+        if contract.required_capability is not None and any(
+            marker in lowered for marker in refusal_markers
+        ):
+            refusal_evaluation = EvaluationResult(
+                can_finalize=True,
+                goal_satisfied=False,
+                missing_evidence=evaluation.missing_evidence,
+                reason=(
+                    "final candidate reports a concrete safety or capability refusal"
+                ),
+            )
+            self._record_task_evaluation(contract, ledger, refusal_evaluation, content)
+            return refusal_evaluation
+        self._record_task_evaluation(contract, ledger, evaluation, content)
+        return evaluation
+
+    def _record_task_contract(self, contract: TaskContract) -> None:
+        if self.agent_run_recorder is None:
+            return
+        self.agent_run_recorder.record_task_contract(contract.to_dict())
+
+    def _record_task_evidence(self, ledger: EvidenceLedger) -> None:
+        if self.agent_run_recorder is None:
+            return
+        self.agent_run_recorder.record_task_evidence(ledger.to_dict())
+
+    def _record_task_evaluation(
+        self,
+        contract: TaskContract,
+        ledger: EvidenceLedger,
+        evaluation: EvaluationResult,
+        final_candidate: str | None,
+    ) -> None:
+        if self.agent_run_recorder is None:
+            return
+        self.agent_run_recorder.record_task_evaluation(
+            contract=contract.to_dict(),
+            ledger=ledger.to_dict(),
+            evaluation=evaluation.to_dict(),
+            final_candidate=final_candidate,
+        )
+
+    def _seed_observation_evidence(
+        self, contract: TaskContract, ledger: EvidenceLedger
+    ) -> None:
+        if (
+            contract.required_capability is None
+            or contract.required_capability.type != "scene_observation"
+        ):
+            return
+        for record in self.state.tool_calls:
+            if not is_perception_evidence_record(
+                record.name, record.arguments, success=record.success
+            ):
+                continue
+            ledger.add_tool_result(
+                tool=record.name,
+                args=record.arguments,
+                result=record.result,
+                success=record.success,
+            )
 
     async def _request_provider(
         self,
@@ -1027,6 +1313,7 @@ class AgentRuntime:
         tool_call_id: str = "",
         task_finished: bool = False,
         tool_success: bool | None = None,
+        task_evaluation_applied: bool = False,
     ) -> AgentRuntimeResult:
         if self._looks_like_unexecuted_tool_protocol(result):
             return AgentRuntimeResult(
@@ -1048,6 +1335,7 @@ class AgentRuntime:
             task_finished=task_finished,
             stop_reason=stop_reason,
             tool_success=tool_success,
+            task_evaluation_applied=task_evaluation_applied,
         )
 
     @staticmethod

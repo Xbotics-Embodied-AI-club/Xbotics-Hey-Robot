@@ -27,6 +27,10 @@ class SkillSpec:
     agent_visible: bool = True
     feedback_mode: str = "status"
     refresh_observation: bool = True
+    capability_type: str | None = None
+    goal_effects: tuple[str, ...] = ()
+    evidence_outputs: tuple[str, ...] = ()
+    cannot_satisfy: tuple[str, ...] = ()
 
 
 class SkillCatalog:
