@@ -36,7 +36,6 @@ class ResourceInspection(TypedDict):
 
 class DeploymentInspection(TypedDict):
     deployment: str
-    mode: str
     robots: list[str]
     agents: list[str]
     channels: list[str]
@@ -60,7 +59,6 @@ class DeploymentRunner:
     def inspect(self) -> DeploymentInspection:
         return {
             "deployment": self.config.deployment.id,
-            "mode": self.config.deployment.mode,
             "robots": sorted(self.config.robots),
             "agents": sorted(self.config.agents),
             "channels": sorted(self.config.channels),
@@ -131,8 +129,8 @@ class DeploymentRunner:
                         "human-follow", human_follow.start, human_follow.stop
                     )
                 )
-        if self.config.policies:
-            skills = SkillControllerService(self.config, robot_service=robot)
+        if any(spec.enabled for spec in self.config.policies.values()):
+            skills = SkillControllerService(self.config)
             services.append(
                 ManagedService("skill-controller", skills.start, skills.stop)
             )

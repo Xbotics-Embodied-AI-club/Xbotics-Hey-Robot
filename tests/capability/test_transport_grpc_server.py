@@ -96,7 +96,7 @@ def test_vla_executor_runs_lerobot_client(monkeypatch) -> None:
                 "model_path": "org/policy",
                 "policy_type": "pi05",
                 "arm_port": "COM5",
-                "camera_source": "camera_observation",
+                "camera_config": {"camera1": {"device_id": 0}},
             }
         ),
     )
@@ -197,7 +197,7 @@ def test_vla_executor_defaults_to_project_calibration_dir() -> None:
                 "policy_type": "pi05",
                 "arm_port": "COM5",
                 "task_prompt": "Pick up object.",
-                "camera_source": "camera_observation",
+                "camera_config": {"camera1": {"device_id": 0}},
             }
         ),
     )
@@ -206,7 +206,7 @@ def test_vla_executor_defaults_to_project_calibration_dir() -> None:
 
     assert config["calibration_dir"] == DEFAULT_ARM_CALIBRATION_DIR
     assert config["robot_id"] == "robot_arm"
-    assert config["camera_source"] == "camera_observation"
+    assert config["camera_source"] == "opencv"
 
 
 def test_vla_executor_base_config_uses_payload_objective_and_infers_arm_side() -> None:
@@ -218,7 +218,7 @@ def test_vla_executor_base_config_uses_payload_objective_and_infers_arm_side() -
                 "policy_name": "org/policy",
                 "policy_type": "pi05",
                 "arm_port": "/dev/arm_right",
-                "camera_source": "camera_observation",
+                "camera_config": {"camera1": {"device_id": 0}},
             }
         ),
     )
@@ -236,7 +236,7 @@ def test_vla_executor_base_config_uses_payload_objective_and_infers_arm_side() -
     assert config["arm_side"] == "right"
 
 
-def test_vla_executor_missing_config_depends_on_camera_source() -> None:
+def test_vla_executor_requires_camera_config() -> None:
     executor = LeRobotVLAExecutor(
         "arm_vla",
         _spec(
@@ -254,12 +254,6 @@ def test_vla_executor_missing_config_depends_on_camera_source() -> None:
     missing_with_camera = executor._missing_config(executor._base_config({}))
     assert "camera_config" in missing_with_camera
 
-    config = executor._base_config({})
-    config["camera_source"] = "camera_observation"
-    config["camera_config"] = {}
-
-    assert "camera_config" not in executor._missing_config(config)
-
 
 def test_vla_executor_reports_missing_dependency(monkeypatch) -> None:
     executor = LeRobotVLAExecutor(
@@ -271,7 +265,7 @@ def test_vla_executor_reports_missing_dependency(monkeypatch) -> None:
                 "policy_type": "pi05",
                 "arm_port": "COM5",
                 "task_prompt": "Pick up object.",
-                "camera_source": "camera_observation",
+                "camera_config": {"camera1": {"device_id": 0}},
             }
         ),
     )
@@ -331,7 +325,7 @@ def test_vla_executor_reports_policy_server_unavailable(monkeypatch) -> None:
                 "policy_type": "pi05",
                 "arm_port": "COM5",
                 "task_prompt": "Pick up object.",
-                "camera_source": "camera_observation",
+                "camera_config": {"camera1": {"device_id": 0}},
             }
         ),
     )
@@ -393,7 +387,7 @@ def test_vla_executor_reports_control_loop_failure(monkeypatch) -> None:
                 "policy_type": "pi05",
                 "arm_port": "COM5",
                 "task_prompt": "Pick up object.",
-                "camera_source": "camera_observation",
+                "camera_config": {"camera1": {"device_id": 0}},
             }
         ),
     )
@@ -450,7 +444,7 @@ def test_vla_capability_servicer_health_execute_cancel() -> None:
                         "model_path": "org/policy",
                         "arm_port": "COM5",
                         "task_prompt": "Pick up cup",
-                        "camera_source": "camera_observation",
+                        "camera_config": {"camera1": {"device_id": 0}},
                     }
                 }
             }

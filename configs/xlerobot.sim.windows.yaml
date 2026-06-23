@@ -3,13 +3,11 @@
 
 deployment:
   id: xlerobot.sim.windows
-  mode: local
   bus:
     type: nats
     url: nats://127.0.0.1:4222
     options:
       robot_publish_hz: 2.0
-      robot_action_log_every_steps: 1
       robot_status_log_every_frames: 5
 
 logging:
@@ -180,56 +178,16 @@ robots:
       viewer:
         enabled: false
 
-capability_services:
-  arm_vla:
-    type: vla_service
-    enabled: true
-    robot_id: sim_robot
-    skill_names:
-      - vla_manipulation
-    resources:
-      - arm
-      - gripper
-      - camera
-    timeout_sec: 30
-    settings:
-      policy_runtime: fake
-      policy_type: act
-      policy_model_path: ""
-      policy_host: "127.0.0.1"
-      policy_port: 5555
-      device: cpu
-      task_prompt: "Pick up the object."
-      arm: right
-      cameras:
-        - front
-        - right_wrist
-      camera_key_map:
-        front: camera1
-        right_wrist: camera2
-      fps: 25
-      execution_time: 10
-      action_mode: absolute_joint_position_rad
-      action_horizon: 16
+capability_services: {}
 
 policies:
   embodied_skills:
-    type: skill
     enabled: true
     robot_id: sim_robot
-    device: skill-runtime
     freq_hz: 1.0
-    settings:
-      codec: skill
-      body: xlerobot
-      default_step_cm: 20.0
-      default_turn_deg: 30.0
-      max_step_cm: 80.0
-      max_turn_deg: 120.0
 
 agents:
   main:
-    type: robot_agent
     enabled: true
     robot_id: sim_robot
     policy_id: embodied_skills
@@ -248,8 +206,6 @@ agents:
           extra_body:
             thinking:
               type: enabled
-        feedback:
-          type: deterministic
         scene_captioner:
           type: dashscope
           model_env: DASHSCOPE_MODEL

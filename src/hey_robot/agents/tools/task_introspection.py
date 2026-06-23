@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
 
@@ -161,57 +160,6 @@ def recovery_options(ctx: Any) -> list[dict[str, Any]]:
             }
         ],
     )
-
-
-def summarize_task(ctx: Any) -> str:
-    task = current_task_snapshot(ctx)
-    if task is None:
-        return "No active task is tracked for this episode."
-    lines = [
-        f"Current task: {task.get('root_task') or 'unknown'}",
-        f"Status: {task.get('status') or 'unknown'}",
-        f"Robot: {task.get('robot_id') or 'unknown'}",
-    ]
-    attempts = [item for item in task.get("attempts", []) if isinstance(item, dict)]
-    if attempts:
-        latest = attempts[-1]
-        lines.append(
-            f"Latest attempt: {latest.get('text') or latest.get('objective') or 'unknown'}"
-        )
-        lines.append(f"Latest attempt status: {latest.get('status') or 'unknown'}")
-        if latest.get("skill_id"):
-            lines.append(f"Latest skill: {latest['skill_id']}")
-    if task.get("failure_reason"):
-        lines.append(f"Failure reason: {task['failure_reason']}")
-    feedback = last_execution_feedback_snapshot(ctx)
-    if feedback:
-        lines.append(f"Last feedback: {feedback.get('summary') or 'available'}")
-        if feedback.get("next_hint"):
-            lines.append(f"Next hint: {feedback['next_hint']}")
-    recovery = recovery_snapshot(ctx)
-    if recovery:
-        lines.append(
-            f"Recovery: {recovery.get('summary') or recovery.get('strategy') or 'required'}"
-        )
-    recent_tools = (
-        ctx.runtime_state.recent_tool_context(limit=4)
-        if getattr(ctx, "runtime_state", None)
-        else ""
-    )
-    if isinstance(recent_tools, str) and recent_tools.strip():
-        lines.append(recent_tools)
-    loop_warning = (
-        ctx.runtime_state.loop_warning_context(limit=6)
-        if getattr(ctx, "runtime_state", None)
-        else ""
-    )
-    if isinstance(loop_warning, str) and loop_warning.strip():
-        lines.append(loop_warning)
-    return "\n".join(lines)
-
-
-def json_dump(payload: Any) -> str:
-    return json.dumps(payload, ensure_ascii=False)
 
 
 def _enrich_recovery(recovery: dict[str, Any]) -> dict[str, Any]:

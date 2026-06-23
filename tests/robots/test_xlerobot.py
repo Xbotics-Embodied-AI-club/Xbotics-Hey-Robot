@@ -4,9 +4,7 @@ import time
 from types import SimpleNamespace
 
 from hey_robot.config import DeploymentConfig
-from hey_robot.perception.codecs import CodecRegistry
-from hey_robot.policies import ConservativeSkillPlanner
-from hey_robot.protocol import Envelope, RobotObservation, SkillIntent
+from hey_robot.protocol import Envelope, SkillIntent
 from hey_robot.robots import RobotManager, get_embodiment_profile
 from hey_robot.robots.base import RobotDriverContext
 from hey_robot.robots.classic.primitives import SUPPORTED_CLASSIC_PRIMITIVES
@@ -83,90 +81,12 @@ def test_robot_manager_supports_explicit_family_environment_driver_identity() ->
     assert isinstance(driver, XLeRobotSimDriver)
 
 
-def test_skill_codec_emits_metadata_action() -> None:
-    codec = CodecRegistry().get("skill")
-    envelope = Envelope(robot_id="xlerobot")
-    observation = RobotObservation(
-        envelope=envelope, frame_id=1, raw={"driver": "xlerobot"}
-    )
-    skill = SkillIntent(envelope=envelope, skill_id="cmd1", objective="forward 20 cm")
-
-    action = codec.policy_output_to_action(
-        RobotSkillAction("move_base", {"direction": "forward", "distance_cm": 20}),
-        observation,
-        skill,
-    )
-
-    assert action.values == []
-    assert action.metadata["action_type"] == "skill"
-    assert action.metadata["skill"] == {
-        "name": "move_base",
-        "arguments": {"direction": "forward", "distance_cm": 20},
-        "safety_level": "normal",
-        "expected_duration_sec": None,
-    }
-
-
-def test_skill_planner_maps_atomic_skills() -> None:
-    planner = ConservativeSkillPlanner(default_step_cm=20.0, default_turn_deg=30.0)
-
-    assert planner.plan("forward 30 cm") == RobotSkillAction(
-        "move_base",
-        {"direction": "forward", "distance_cm": 30.0},
-        expected_duration_sec=1.0,
-    )
-    assert planner.plan("backward 10 cm") == RobotSkillAction(
-        "move_base",
-        {"direction": "backward", "distance_cm": 10.0},
-        expected_duration_sec=1.0,
-    )
-    assert planner.plan("往左边移动 10 厘米") == RobotSkillAction(
-        "move_base",
-        {"direction": "left", "distance_cm": 10.0},
-        expected_duration_sec=1.0,
-    )
-    assert planner.plan("turn right 45 deg") == RobotSkillAction(
-        "turn_base",
-        {"direction": "right", "angle_deg": 45.0},
-        expected_duration_sec=1.0,
-    )
-    assert planner.plan("stop") == RobotSkillAction("stop_motion")
-    assert planner.plan("open gripper") == RobotSkillAction(
-        "set_gripper", {"action": "open"}
-    )
-    assert planner.plan("move arm to pose pregrasp_table") == RobotSkillAction(
-        "set_arm_pose", {"pose_name": "pregrasp_table"}
-    )
-    assert planner.plan("look ahead") == RobotSkillAction(
-        "inspect_scene", {"question": "look ahead"}, safety_level="observe"
-    )
-    assert planner.plan("pick up cup") == RobotSkillAction(
-        "inspect_scene", {"question": "pick up cup"}
-    )
-
-
 def test_skill_planner_maps_chinese_forward_motion() -> None:
     assert SkillPlanner().plan("往前走10cm") == RobotSkillAction(
         "move_base",
         {"direction": "forward", "distance_cm": 10.0},
         expected_duration_sec=1.0,
     )
-
-
-def test_skill_observation_codec_keeps_raw_status() -> None:
-    codec = CodecRegistry().get("skill")
-    observation = RobotObservation(
-        envelope=Envelope(robot_id="xlerobot"),
-        frame_id=7,
-        raw={"state": "idle", "arm_status": {"success": True}},
-    )
-    skill = SkillIntent(envelope=observation.envelope, objective="inspect scene")
-
-    policy_input = codec.observation_to_policy_input(observation, skill)
-
-    assert policy_input["frame_id"] == 7
-    assert policy_input["task"] == "inspect scene"
-    assert policy_input["raw"]["arm_status"]["success"] is True
 
 
 def test_xlerobot_deployment_uses_native_skill_policy() -> None:
@@ -185,14 +105,8 @@ def test_xlerobot_deployment_uses_native_skill_policy() -> None:
         config.robots["xlerobot"].settings["components"]["arm"]["type"] == "so101_arm"
     )
     assert "vla" not in config.robots["xlerobot"].settings["components"]
-    assert "arm_vla" in config.capability_services
-    arm_vla = config.capability_services["arm_vla"]
-    assert arm_vla.type == "vla_service"
-    assert arm_vla.robot_id == "xlerobot"
-    assert arm_vla.skill_names == ("vla_manipulation",)
-    assert config.policies["embodied_skills"].type == "skill"
-    assert config.policies["embodied_skills"].settings["codec"] == "skill"
-    assert config.policies["embodied_skills"].settings["body"] == "xlerobot"
+    assert config.capability_services == {}
+    assert config.policies["embodied_skills"].freq_hz == 1.0
 
 
 def test_xlerobot_hardware_config_supports_multi_arm_and_multi_camera_shape() -> None:

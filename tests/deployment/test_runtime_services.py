@@ -7,8 +7,7 @@ from hey_robot.channels import ChannelContext, WebChannel
 from hey_robot.config import ChannelSpec, DeploymentConfig
 from hey_robot.events import EventKind, RuntimeEvent
 from hey_robot.media import LocalMediaStore
-from hey_robot.perception import CodecRegistry
-from hey_robot.protocol import Envelope, RobotAction, RobotObservation, SkillIntent
+from hey_robot.protocol import Envelope, RobotAction, SkillIntent
 from hey_robot.robots import RobotManager, RobotRuntime, RobotSafetyError
 from hey_robot.skills import RobotSkillAction
 
@@ -88,20 +87,6 @@ def test_runner_builds_services_when_configured(tmp_path) -> None:
     assert "task-supervisor" in service_names
     assert "agent:main" in service_names
     assert "gateway" in service_names
-
-
-def test_codec_registry_converts_simple_action() -> None:
-    codec = CodecRegistry().get("mock")
-    envelope = Envelope(robot_id="mock0")
-    observation = RobotObservation(envelope=envelope, frame_id=1, proprioception=[1.0])
-    skill = SkillIntent(envelope=envelope, skill_id="cmd1", objective="move")
-
-    policy_input = codec.observation_to_policy_input(observation, skill)
-    action = codec.policy_output_to_action([0.1, 0.2], observation, skill)
-
-    assert policy_input["task"] == "move"
-    assert action.skill_id == "cmd1"
-    assert action.values == [0.1, 0.2]
 
 
 def test_robot_manager_supports_mock_and_rejects_unknown() -> None:

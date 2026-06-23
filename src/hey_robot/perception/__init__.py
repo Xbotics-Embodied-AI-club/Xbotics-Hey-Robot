@@ -1,8 +1,3 @@
-from hey_robot.perception.camera_observation import (
-    CameraObservationConsumer,
-    CameraObservationSnapshot,
-)
-from hey_robot.perception.codecs import CodecRegistry, ObservationActionCodec
 from hey_robot.perception.human_follow import (
     Detection,
     FollowController,
@@ -25,14 +20,10 @@ from hey_robot.perception.scene import (
 from hey_robot.perception.service import PerceptionService, PerceptionSnapshot
 
 __all__ = [
-    "CameraObservationConsumer",
-    "CameraObservationSnapshot",
-    "CodecRegistry",
     "Detection",
     "DeterministicSceneCaptioner",
     "DriverObservation",
     "FollowController",
-    "ObservationActionCodec",
     "ObservationAsset",
     "ObservationPipeline",
     "ObservationSchema",

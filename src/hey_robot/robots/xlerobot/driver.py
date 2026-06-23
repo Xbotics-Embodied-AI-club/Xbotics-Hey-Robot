@@ -2,10 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import TYPE_CHECKING, Any, Protocol
-
-if TYPE_CHECKING:
-    from hey_robot.capability.vla.io_adapter import VLAIOAdapter
+from typing import Any, Protocol
 
 from hey_robot.logging import HeyRobotLogger
 from hey_robot.perception import DriverObservation, ObservationAsset
@@ -654,22 +651,6 @@ class XLeRobotDriver:
         return all(
             bool((diagnostics.get(service) or {}).get("ok"))
             for service in ("base", "arm", "camera")
-        )
-
-    def create_vla_io_adapter(self, **settings: Any) -> VLAIOAdapter:
-        from hey_robot.robots.xlerobot.real_vla_io_adapter import (
-            RealRobotVLAIOAdapter,
-        )
-
-        camera_devices_raw = settings.get("camera_devices", {}) or {}
-        camera_devices = {str(k): int(v) for k, v in dict(camera_devices_raw).items()}
-        return RealRobotVLAIOAdapter(
-            self.client,  # type: ignore[arg-type]
-            arm_name=str(settings.get("arm", "arm")),
-            camera_devices=camera_devices,
-            camera_width=int(settings.get("camera_width", 640)),
-            camera_height=int(settings.get("camera_height", 480)),
-            camera_fps=int(settings.get("camera_fps", 30)),
         )
 
     @staticmethod

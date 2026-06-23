@@ -63,6 +63,69 @@ channels:
 | `domain` | 国内飞书用 `feishu`，国际版 Lark 用 `lark` |
 | `media_root` | 飞书图片和文件落地目录 |
 
+## 首次获取用户 open_id
+
+项目使用飞书消息事件中的 `event.sender.sender_id.open_id` 识别发送者。这个值通常以 `ou_` 开头，并且与当前飞书应用相关。
+
+首次接入时，可以暂时保留：
+
+```yaml
+allow_from:
+  - "*"
+```
+
+启动系统并用需要授权的飞书账号给机器人发送一条私聊消息，然后查询运行时记录：
+
+```bash
+rg -o '"sender_id"\s*:\s*"ou_[^"]+"' \
+  runtime/xlerobot.real.ubuntu/episodes \
+  -g '*.jsonl' -g '*.json'
+```
+
+或者查询身份绑定文件：
+
+```bash
+rg 'feishu:sender:ou_' \
+  runtime/xlerobot.real.ubuntu/identity/bindings.json
+```
+
+也可以在飞书开放平台的 `im.message.receive_v1` 事件记录中找到：
+
+```text
+event.sender.sender_id.open_id
+```
+
+获得 `ou_xxx` 后，可配置静态身份绑定：
+
+```yaml
+identity:
+  bindings:
+    "feishu:sender:ou_xxxxxxxxxxxxx": owner
+```
+
+系统还支持动态绑定。通过 Web API 创建绑定码：
+
+```bash
+curl -X POST http://127.0.0.1:8080/identity/binding \
+  -H 'Content-Type: application/json' \
+  -d '{"sender_id":"web-user","chat_id":"web"}'
+```
+
+然后在飞书中发送：
+
+```text
+绑定 ABC123
+```
+
+绑定成功后，系统会把发送者的 open_id 持久化到 `runtime/xlerobot.real.ubuntu/identity/bindings.json`。此时建议将 `allow_from: ["*"]` 改为可信 open_id 白名单。
+
+不要混淆以下标识：
+
+- 用户 open_id：通常以 `ou_` 开头，本项目身份绑定需要这个值。
+- 群聊 chat_id：通常以 `oc_` 开头。
+- 机器人自身的 open_id：用于判断群聊中的 @对象，不是用户身份。
+- `user_id`、`union_id`：不是当前配置所使用的发送者标识。
+
 ## 验证是否接通
 
 启动系统后，日志应出现：

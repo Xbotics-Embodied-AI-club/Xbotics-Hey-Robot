@@ -3,7 +3,6 @@ from hey_robot.agents.runtime.audit import ToolAuditLogger, ToolAuditRecord
 from hey_robot.agents.runtime.execution_feedback import AgentExecutionFeedbackResult
 from hey_robot.agents.runtime.permissions import PermissionDecision, PermissionManager
 from hey_robot.agents.runtime.prompts import AgentPromptTemplates, AgentTemplateLoader
-from hey_robot.agents.runtime.providers import ToolProviderInfo
 from hey_robot.agents.runtime.registry import ToolSpec
 from hey_robot.agents.runtime.runner import (
     AgentRunResult,
@@ -37,7 +36,6 @@ __all__ = [
     "ToolCallRecord",
     "ToolExecutionResult",
     "ToolExecutor",
-    "ToolProviderInfo",
     "ToolRegistry",
     "ToolSpec",
 ]

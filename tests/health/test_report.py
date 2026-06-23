@@ -74,10 +74,8 @@ robots:
     type: mock
 policies:
   skills:
-    type: skill
     robot_id: mock0
-    settings:
-      codec: skill
+    freq_hz: 10.0
 skills:
   enabled:
     - inspect_scene

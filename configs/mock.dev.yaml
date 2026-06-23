@@ -1,13 +1,11 @@
 # Main mock development deployment for autonomous runtime and channel integration.
 deployment:
   id: mock-dev
-  mode: local
   bus:
     type: nats
     url: nats://127.0.0.1:4222
     options:
       robot_publish_hz: 10.0
-      robot_action_log_every_steps: 1
       robot_status_log_every_frames: 5
 
 logging:
@@ -145,22 +143,12 @@ capability_services: {}
 
 policies:
   embodied_skills:
-    type: skill
     enabled: true
     robot_id: mock0
-    device: skill-runtime
     freq_hz: 10.0
-    settings:
-      codec: skill
-      body: xlerobot
-      default_step_cm: 20.0
-      default_turn_deg: 30.0
-      max_step_cm: 80.0
-      max_turn_deg: 120.0
 
 agents:
   main:
-    type: robot_agent
     enabled: true
     robot_id: mock0
     policy_id: embodied_skills
@@ -178,8 +166,6 @@ agents:
           base_url_env: DEEPSEEK_BASE_URL
           temperature: 0.0
           max_tokens: 1024
-        feedback:
-          type: deterministic
       execution_feedback:
         backend: status
         media_root: runtime/mock.dev/media

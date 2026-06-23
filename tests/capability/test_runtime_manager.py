@@ -114,6 +114,38 @@ def test_capability_runtime_allows_global_service_when_robot_id_not_specified() 
     assert spec.robot_id == ""
 
 
+def test_capability_runtime_routes_vla_service_to_grpc_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "hey_robot.capability.transport.grpc.client.grpc.aio.insecure_channel",
+        lambda target: target,
+    )
+    monkeypatch.setattr(
+        "hey_robot.capability.transport.grpc.client.capability_pb2_grpc.CapabilityServiceStub",
+        lambda _channel: object(),
+    )
+    config = DeploymentConfig.from_dict(
+        {
+            "capability_services": {
+                "arm_vla": {
+                    "type": "vla_service",
+                    "enabled": True,
+                    "robot_id": "xlerobot",
+                    "target": "127.0.0.1:9090",
+                    "skill_names": ["vla_manipulation"],
+                }
+            }
+        }
+    )
+
+    runtime = CapabilityRuntime(config)
+    match = runtime.service_for("vla_manipulation", "xlerobot")
+
+    assert match is not None
+    assert isinstance(match[2], GrpcCapabilityClient)
+
+
 def test_mock_capability_client_records_execution_and_cancel() -> None:
     runtime = CapabilityRuntime(_config())
     match = runtime.service_for("set_gripper", "xlerobot")

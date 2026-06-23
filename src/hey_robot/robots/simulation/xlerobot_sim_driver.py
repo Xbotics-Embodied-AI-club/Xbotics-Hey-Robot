@@ -5,14 +5,11 @@ import contextlib
 import math
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 
 from hey_robot.logging import HeyRobotLogger
-
-if TYPE_CHECKING:
-    from hey_robot.capability.vla.io_adapter import VLAIOAdapter
 from hey_robot.perception import DriverObservation, ObservationAsset
 from hey_robot.protocol import Envelope, RobotAction, RobotStatus
 from hey_robot.robots.base import RobotCapabilities, RobotDriverContext, RobotHealth
@@ -579,15 +576,6 @@ class XLeRobotSimDriver:
             "cameras_available": sorted(self._camera_names),
         }
         return base
-
-    def create_vla_io_adapter(self, **settings: Any) -> VLAIOAdapter:
-        """Return a :class:`SimVLAIOAdapter` wired to this simulation driver."""
-        from hey_robot.robots.simulation.sim_vla_io_adapter import SimVLAIOAdapter
-
-        return SimVLAIOAdapter(
-            self,
-            arm=str(settings.get("arm", "right")),
-        )
 
     # ---- internal simulation helpers ----
 

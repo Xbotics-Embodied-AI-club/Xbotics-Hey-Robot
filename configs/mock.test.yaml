@@ -1,7 +1,6 @@
 # Minimal mock deployment used by tests and lightweight smoke checks.
 deployment:
   id: mock-test
-  mode: local
   bus:
     type: nats
     url: nats://127.0.0.1:4222
@@ -125,22 +124,12 @@ capability_services: {}
 
 policies:
   embodied_skills:
-    type: skill
     enabled: true
     robot_id: mock0
-    device: skill-runtime
     freq_hz: 10.0
-    settings:
-      codec: skill
-      body: xlerobot
-      default_step_cm: 20.0
-      default_turn_deg: 30.0
-      max_step_cm: 80.0
-      max_turn_deg: 120.0
 
 agents:
   main:
-    type: robot_agent
     enabled: true
     robot_id: mock0
     policy_id: embodied_skills

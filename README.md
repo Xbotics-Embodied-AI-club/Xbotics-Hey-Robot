@@ -220,7 +220,6 @@ tests/                      单元测试和集成测试
 
 ## 文档
 
-- [代码视角系统解读](docs/overview/code-based-system-analysis-zh.md)
 - [运行时形态](docs/overview/runtime-shape.md)
 - [系统架构](docs/architecture/system-architecture.md)
 - [Agent 与 Skill 边界](docs/architecture/agent-skill-boundaries.md)

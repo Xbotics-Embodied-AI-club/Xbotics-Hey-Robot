@@ -1,18 +1,6 @@
 from __future__ import annotations
 
-from hey_robot.config import DeploymentConfig, RobotSpec
-
-
-def robot_spec_family(spec: RobotSpec) -> str:
-    return spec.robot_family
-
-
-def robot_spec_environment(spec: RobotSpec) -> str:
-    return spec.robot_environment
-
-
-def robot_spec_driver_kind(spec: RobotSpec) -> str:
-    return spec.driver_kind
+from hey_robot.config import DeploymentConfig
 
 
 def resolve_robot_family(

@@ -3,7 +3,6 @@
 
 deployment:
   id: xlerobot.real.ubuntu
-  mode: local
   bus:
     type: nats
     url: nats://127.0.0.1:4222
@@ -11,7 +10,6 @@ deployment:
       robot_publish_hz: 2.0
       camera_stream_hz: 15.0
       human_follow_service_enabled: true
-      robot_action_log_every_steps: 1
       robot_status_log_every_frames: 30
 
 logging:
@@ -282,59 +280,16 @@ robots:
     safety:
       max_abs_action: null
 
-capability_services:
-  arm_vla:
-    type: vla_service
-    enabled: true
-    robot_id: xlerobot
-    skill_names:
-      - vla_manipulation
-    resources:
-      - arm
-      - gripper
-      - camera
-    timeout_sec: 30
-    settings:
-      policy_runtime: groot_zmq
-      policy_host: "127.0.0.1"
-      policy_port: 5555
-      task_prompt: "Pick up the object."
-      arm: arm
-      cameras:
-        - front
-        - wrist
-      camera_devices:
-        front: 0
-        wrist: 1
-      camera_width: 640
-      camera_height: 480
-      camera_fps: 30
-      camera_key_map:
-        front: camera1
-        wrist: camera2
-      fps: 25
-      execution_time: 30
-      action_mode: absolute_joint_position_rad
-      action_horizon: 16
+capability_services: {}
 
 policies:
   embodied_skills:
-    type: skill
     enabled: true
     robot_id: xlerobot
-    device: skill-runtime
     freq_hz: 1.0
-    settings:
-      codec: skill
-      body: xlerobot
-      default_step_cm: 20.0
-      default_turn_deg: 30.0
-      max_step_cm: 80.0
-      max_turn_deg: 120.0
 
 agents:
   main:
-    type: robot_agent
     enabled: true
     robot_id: xlerobot
     policy_id: embodied_skills
@@ -353,12 +308,6 @@ agents:
           extra_body:
             thinking:
               type: enabled
-        feedback:
-          type: dashscope
-          model_env: DASHSCOPE_MODEL
-          api_key_env: DASHSCOPE_API_KEY
-          temperature: 0.0
-          max_tokens: 256
         scene_captioner:
           type: dashscope
           model_env: DASHSCOPE_MODEL

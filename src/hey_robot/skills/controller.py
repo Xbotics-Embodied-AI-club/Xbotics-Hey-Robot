@@ -4,8 +4,7 @@ import asyncio
 import math
 import time
 from dataclasses import dataclass
-from types import SimpleNamespace
-from typing import Any, Protocol
+from typing import Any
 
 from hey_robot.bus.factory import create_bus_client
 from hey_robot.capability.runtime import (
@@ -19,8 +18,6 @@ from hey_robot.events.bus import BusEventPublisher
 from hey_robot.human_follow import HumanFollowServiceClient
 from hey_robot.logging import HeyRobotLogger
 from hey_robot.media import LocalMediaStore, MediaResolver
-from hey_robot.perception import CodecRegistry, ObservationActionCodec
-from hey_robot.policies.runtime import PolicyRuntime, build_policy_runtime
 from hey_robot.protocol import (
     RobotObservation,
     RobotStatus,
@@ -43,21 +40,12 @@ from hey_robot.skills.scheduler import SkillRun, SkillScheduler
 logger = HeyRobotLogger(name="skill")
 
 
-class SkillPolicyRuntime(Protocol):
-    @property
-    def control_period_sec(self) -> float: ...
-
-    async def close(self) -> None: ...
-
-
 @dataclass
 class _SkillControllerState:
     spec: PolicySpec
-    codec: ObservationActionCodec
     scheduler: SkillScheduler
     latest_observation: RobotObservation | None = None
     latest_status: RobotStatus | None = None
-    runtime: SkillPolicyRuntime | None = None
     last_scheduler_decision: dict[str, Any] | None = None
 
     @property
@@ -66,13 +54,11 @@ class _SkillControllerState:
 
 
 class SkillControllerService:
-    def __init__(self, config: DeploymentConfig, *, robot_service: Any = None) -> None:
+    def __init__(self, config: DeploymentConfig) -> None:
         self.config = config
-        self._robot_service = robot_service
         self.topics = Topics()
         self.bus = create_bus_client(config.deployment.bus)
         self.events = BusEventPublisher(self.bus, self.topics)
-        self.codecs = CodecRegistry()
         self.media_resolver = MediaResolver(
             LocalMediaStore(
                 config.resources.media_root, max_items=config.resources.media_max_items
@@ -93,7 +79,6 @@ class SkillControllerService:
         self.states = {
             policy_id: _SkillControllerState(
                 spec=spec,
-                codec=self.codecs.get(str(spec.settings.get("codec", spec.type))),
                 scheduler=SkillScheduler(self.contracts),
             )
             for policy_id, spec in config.policies.items()
@@ -109,28 +94,9 @@ class SkillControllerService:
         )
 
     async def start(self) -> None:
-        if self._robot_service is not None:
-            for service_id, svc_spec in self.config.capability_services.items():
-                if svc_spec.type != "vla_service" or not svc_spec.enabled:
-                    continue
-                robot_id = svc_spec.robot_id
-                if not robot_id:
-                    continue
-                driver = self._robot_service.get(robot_id)
-                if driver is None:
-                    continue
-                io = driver.create_vla_io_adapter(**svc_spec.settings)
-                if io is not None:
-                    self.capabilities.set_vla_io_adapter(io)
-                    logger.info(
-                        f"VLA I/O adapter injected service={service_id} robot={robot_id}"
-                    )
-                    break
         await self.bus.connect()
         if self.human_follow is not None:
             await self.human_follow.start()
-        for policy_id, state in self.states.items():
-            state.runtime = self._load_policy_runtime(policy_id, state)
         await self.bus.subscribe([self.topics.robot_observation], self._on_observation)
         await self.bus.subscribe([self.topics.skill_intent], self._on_skill_intent)
         await self.bus.subscribe([self.topics.robot_status], self._on_status)
@@ -143,15 +109,10 @@ class SkillControllerService:
 
     async def stop(self) -> None:
         self._stop.set()
-        tasks = []
         for state in self.states.values():
-            if state.runtime is not None:
-                tasks.append(state.runtime.close())
             for run in state.active_runs.values():
                 if run.task is not None:
                     run.task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
         await self.bus.close()
 
     async def _on_observation(self, _topic: str, payload: dict[str, Any]) -> None:
@@ -389,9 +350,7 @@ class SkillControllerService:
         await asyncio.sleep(0)
 
     async def _skill_loop(self, policy_id: str, state: _SkillControllerState) -> None:
-        runtime = state.runtime or self._load_policy_runtime(policy_id, state)
-        state.runtime = runtime
-        period = getattr(runtime, "control_period_sec", 0.05)
+        period = 1.0 / max(float(state.spec.freq_hz), 0.1)
         while not self._stop.is_set():
             await self._skill_loop_step(policy_id, state)
             await asyncio.sleep(period)
@@ -572,14 +531,6 @@ class SkillControllerService:
             notes=("Recorded from actual skill execution.",),
         )
         action = skill_action.to_robot_action(action_intent)
-        predictor = getattr(state.runtime, "predict", None)
-        if callable(predictor):
-            await predictor(
-                SimpleNamespace(
-                    observation=state.latest_observation,
-                    intent=action_intent,
-                )
-            )
         future: asyncio.Future[RobotStatus] = asyncio.get_running_loop().create_future()
         run.pending_status = future
         run.current_step = name
@@ -698,17 +649,6 @@ class SkillControllerService:
                 failure_mode="timeout",
                 error="skill timed out",
             )
-
-    def _load_policy_runtime(
-        self, policy_id: str, state: _SkillControllerState
-    ) -> PolicyRuntime:
-        return build_policy_runtime(
-            policy_id,
-            state.spec,
-            config=self.config,
-            codec=state.codec,
-            media_resolver=self.media_resolver,
-        )
 
     async def _publish_event(
         self,

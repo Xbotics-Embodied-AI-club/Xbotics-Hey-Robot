@@ -57,7 +57,6 @@ class HealthReportService:
             findings.extend(self._robot_component_reports(robot_id=robot_id))
             findings.extend(self._diagnostic_script_reports(robot_id=robot_id))
             findings.extend(self._audio_reports())
-            findings.extend(self._model_reports(robot_id=robot_id))
             findings.extend(self._recent_task_reports(robot_id=robot_id))
         if not findings:
             component = f"robot.{robot_id}" if robot_id else "deployment"
@@ -356,35 +355,6 @@ class HealthReportService:
                 metadata={"devices": outputs[:5]},
             ),
         ]
-        return reports
-
-    def _model_reports(self, *, robot_id: str | None) -> list[HealthReport]:
-        reports: list[HealthReport] = []
-        for policy_id, policy in self.config.policies.items():
-            if robot_id and policy.robot_id != robot_id:
-                continue
-            paths = []
-            if policy.model_path:
-                paths.append(policy.model_path)
-            for key, value in policy.settings.items():
-                if key.endswith(("model_path", "model_dir")):
-                    paths.append(str(value))
-            for raw_path in paths:
-                path = Path(raw_path)
-                ok = path.exists()
-                reports.append(
-                    HealthReport(
-                        component=f"model.{policy_id}",
-                        status="ok" if ok else "missing",
-                        severity="info" if ok else "warning",
-                        evidence=str(path),
-                        fix_hint=None
-                        if ok
-                        else "Download the model or update the policy model path.",
-                        source="model.config",
-                        metadata={"policy_id": policy_id, "robot_id": policy.robot_id},
-                    )
-                )
         return reports
 
 

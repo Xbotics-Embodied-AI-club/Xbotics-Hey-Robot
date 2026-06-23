@@ -27,7 +27,7 @@ def test_inspect_episode_cli_prints_materialized_summary(
                 "media": {"root": str(runtime / "media")},
             },
             "robots": {"mock0": {"type": "mock"}},
-            "agents": {"main": {"type": "robot_agent", "robot_id": "mock0"}},
+            "agents": {"main": {"robot_id": "mock0"}},
         }
     )
     config_path = tmp_path / "deployment.yaml"
@@ -45,7 +45,6 @@ def test_inspect_episode_cli_prints_materialized_summary(
                 "    type: mock",
                 "agents:",
                 "  main:",
-                "    type: robot_agent",
                 "    robot_id: mock0",
             ]
         ),

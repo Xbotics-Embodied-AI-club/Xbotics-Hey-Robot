@@ -236,7 +236,7 @@ class LeRobotVLAExecutor:
             )
             if not config.get(key)
         ]
-        if config.get("camera_source") != "camera_observation" and (
+        if (
             not isinstance(config.get("camera_config"), dict)
             or not config["camera_config"]
         ):

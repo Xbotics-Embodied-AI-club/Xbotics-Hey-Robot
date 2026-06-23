@@ -64,7 +64,6 @@ def main() -> None:
     robots = ", ".join(sorted(config.robots)) or "(无)"
     agents = ", ".join(sorted(config.agents)) or "(无)"
     channels = ", ".join(sorted(config.channels)) or "(无)"
-    out.append(f"  {_pad_cjk('模式', kw)}{config.deployment.mode}")
     out.append(f"  {_pad_cjk('机器人', kw)}{robots}")
     out.append(f"  {_pad_cjk('智能体', kw)}{agents}")
     out.append(f"  {_pad_cjk('通道', kw)}{channels}")

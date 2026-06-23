@@ -15,11 +15,21 @@ class BusSpec:
     options: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class DeploymentSpec:
     id: str = "local"
-    mode: str = "local"
     bus: BusSpec = field(default_factory=BusSpec)
+
+    def __init__(
+        self,
+        id: str = "local",
+        bus: BusSpec | None = None,
+        *,
+        mode: str | None = None,
+    ) -> None:
+        del mode
+        object.__setattr__(self, "id", id)
+        object.__setattr__(self, "bus", bus or BusSpec())
 
 
 @dataclass(frozen=True)
@@ -113,34 +123,64 @@ class RobotSpec:
 
 @dataclass(frozen=True)
 class PolicySpec:
-    type: str
     robot_id: str
     enabled: bool = True
-    model_path: str | None = None
-    device: str = "cuda"
     freq_hz: float = 20.0
-    settings: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class CapabilityServiceSpec:
     type: str
     robot_id: str
     enabled: bool = True
     target: str | None = None
     skill_names: tuple[str, ...] = ()
-    resources: tuple[str, ...] = ()
     timeout_sec: float = 30.0
     settings: dict[str, Any] = field(default_factory=dict)
 
+    def __init__(
+        self,
+        type: str,
+        robot_id: str,
+        enabled: bool = True,
+        target: str | None = None,
+        skill_names: tuple[str, ...] = (),
+        timeout_sec: float = 30.0,
+        settings: dict[str, Any] | None = None,
+        *,
+        resources: tuple[str, ...] | None = None,
+    ) -> None:
+        del resources
+        object.__setattr__(self, "type", type)
+        object.__setattr__(self, "robot_id", robot_id)
+        object.__setattr__(self, "enabled", enabled)
+        object.__setattr__(self, "target", target)
+        object.__setattr__(self, "skill_names", skill_names)
+        object.__setattr__(self, "timeout_sec", timeout_sec)
+        object.__setattr__(self, "settings", dict(settings or {}))
 
-@dataclass(frozen=True)
+
+@dataclass(frozen=True, init=False)
 class AgentSpec:
-    type: str = "robot_agent"
     enabled: bool = True
     robot_id: str | None = None
     policy_id: str | None = None
     settings: dict[str, Any] = field(default_factory=dict)
+
+    def __init__(
+        self,
+        enabled: bool = True,
+        robot_id: str | None = None,
+        policy_id: str | None = None,
+        settings: dict[str, Any] | None = None,
+        *,
+        type: str | None = None,
+    ) -> None:
+        del type
+        object.__setattr__(self, "enabled", enabled)
+        object.__setattr__(self, "robot_id", robot_id)
+        object.__setattr__(self, "policy_id", policy_id)
+        object.__setattr__(self, "settings", dict(settings or {}))
 
 
 @dataclass(frozen=True)
@@ -177,7 +217,6 @@ class DeploymentConfig:
         bus_data = deployment_data.get("bus", {}) or {}
         deployment = DeploymentSpec(
             id=deployment_data.get("id", "local"),
-            mode=deployment_data.get("mode", "local"),
             bus=BusSpec(
                 type=bus_data.get("type", "nats"),
                 url=bus_data.get("url", "nats://127.0.0.1:4222"),
@@ -306,29 +345,9 @@ class DeploymentConfig:
             },
             policies={
                 name: PolicySpec(
-                    type=(value or {}).get("type", name),
                     robot_id=(value or {}).get("robot_id", ""),
                     enabled=bool((value or {}).get("enabled", True)),
-                    model_path=(value or {}).get("model_path"),
-                    device=(value or {}).get("device", "cuda"),
                     freq_hz=float((value or {}).get("freq_hz", 20.0)),
-                    settings={
-                        **dict((value or {}).get("settings", {}) or {}),
-                        **{
-                            key: val
-                            for key, val in (value or {}).items()
-                            if key
-                            not in {
-                                "type",
-                                "robot_id",
-                                "enabled",
-                                "model_path",
-                                "device",
-                                "freq_hz",
-                                "settings",
-                            }
-                        },
-                    },
                 )
                 for name, value in (data.get("policies", {}) or {}).items()
             },
@@ -340,9 +359,6 @@ class DeploymentConfig:
                     target=(value or {}).get("target"),
                     skill_names=tuple(
                         str(item) for item in (value or {}).get("skill_names", ()) or ()
-                    ),
-                    resources=tuple(
-                        str(item) for item in (value or {}).get("resources", ()) or ()
                     ),
                     timeout_sec=float((value or {}).get("timeout_sec", 30.0)),
                     settings={
@@ -368,7 +384,6 @@ class DeploymentConfig:
             },
             agents={
                 name: AgentSpec(
-                    type=(value or {}).get("type", "robot_agent"),
                     enabled=bool((value or {}).get("enabled", True)),
                     robot_id=(value or {}).get("robot_id"),
                     policy_id=(value or {}).get("policy_id"),

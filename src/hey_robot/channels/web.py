@@ -403,17 +403,6 @@ class WebChannel:
         )
         return envelope
 
-    def _html_response(self, page: str) -> Any:
-        from fastapi.responses import HTMLResponse
-
-        return HTMLResponse(
-            self._page_html(page),
-            headers={
-                "Cache-Control": "no-store",
-                "Pragma": "no-cache",
-            },
-        )
-
     def _chat_html_response(self) -> Any:
         from fastapi.responses import HTMLResponse
 
@@ -441,9 +430,6 @@ class WebChannel:
                 "Pragma": "no-cache",
             },
         )
-
-    def _page_html(self, page: str) -> str:
-        return frontend_root().joinpath("interaction", page).read_text(encoding="utf-8")
 
     def _access_urls(self) -> list[str]:
         if self._cached_access_urls is not None:

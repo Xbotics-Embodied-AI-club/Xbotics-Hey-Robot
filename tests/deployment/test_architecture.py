@@ -26,14 +26,12 @@ def test_deployment_config_loads_new_topology() -> None:
     assert config.agents["main"].robot_id == "mock0"
 
 
-def test_policy_settings_load_from_current_mock_config() -> None:
+def test_skill_controller_settings_load_from_current_mock_config() -> None:
     config = DeploymentConfig.from_yaml("configs/mock.test.yaml")
 
     policy = config.policies["embodied_skills"]
-    assert policy.type == "skill"
     assert policy.robot_id == "mock0"
-    assert policy.settings["codec"] == "skill"
-    assert policy.settings["body"] == "xlerobot"
+    assert policy.freq_hz == 10.0
     assert config.skills.mode == "bringup"
     assert config.skills.enabled[0] == "inspect_scene"
     assert "human_follow" in config.skills.enabled

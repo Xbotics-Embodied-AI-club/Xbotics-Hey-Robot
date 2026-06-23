@@ -12,17 +12,14 @@ import pytest
 from hey_robot.config import DeploymentConfig
 from hey_robot.episode import RobotEpisodeStateStore
 from hey_robot.events.bus import BusEventPublisher
-from hey_robot.policies.runtime import PolicyRuntimeOutput
 from hey_robot.protocol import (
     Envelope,
-    RobotAction,
     RobotObservation,
     RobotStatus,
     SkillEvent,
     SkillIntent,
 )
 from hey_robot.protocol.messages import from_payload
-from hey_robot.skills import RobotSkillAction
 from hey_robot.skills.base import (
     BaseSkill,
     SkillResult as PluginSkillResult,
@@ -34,39 +31,18 @@ from hey_robot.skills.controller import SkillControllerService
 class FakeBus:
     def __init__(self) -> None:
         self.published: list[tuple[str, dict]] = []
+        self.published_event = asyncio.Event()
 
     async def publish(self, topic: str, payload: dict) -> None:
         self.published.append((topic, payload))
+        self.published_event.set()
 
-
-class FakeRuntime:
-    @property
-    def control_period_sec(self) -> float:
-        return 0.001
-
-    def __init__(self) -> None:
-        self.predicted_skill_ids: list[str] = []
-        self.predicted = asyncio.Event()
-
-    async def predict(self, payload) -> PolicyRuntimeOutput:
-        self.predicted_skill_ids.append(payload.intent.skill_id)
-        self.predicted.set()
-        if payload.intent.name:
-            return PolicyRuntimeOutput(
-                action=RobotSkillAction(
-                    payload.intent.name, dict(payload.intent.arguments)
-                ).to_robot_action(payload.intent)
-            )
-        return PolicyRuntimeOutput(
-            action=RobotAction(
-                envelope=payload.intent.envelope,
-                values=[0.0],
-                skill_id=payload.intent.skill_id,
-            )
-        )
-
-    async def close(self) -> None:
-        return None
+    async def wait_until(self, predicate) -> None:
+        while not predicate(self.published):
+            self.published_event.clear()
+            if predicate(self.published):
+                return
+            await asyncio.wait_for(self.published_event.wait(), timeout=1.0)
 
 
 def _service(tmp_path) -> SkillControllerService:
@@ -246,7 +222,6 @@ def test_skill_controller_routes_mock_inspect_scene_to_robot_runtime(
 ) -> None:
     service = _mock_xlerobot_service(tmp_path)
     state = service.states["embodied_skills"]
-    state.runtime = FakeRuntime()
     state.latest_observation = RobotObservation(
         envelope=Envelope(robot_id="mock0"),
         frame_id=1,
@@ -460,7 +435,6 @@ def test_skill_controller_executes_human_follow_as_plugin_skill(
 
     service = _service(tmp_path)
     state = service.states["embodied_skills"]
-    state.runtime = FakeRuntime()
     state.latest_observation = RobotObservation(
         envelope=Envelope(robot_id="xlerobot"),
         frame_id=1,
@@ -884,8 +858,6 @@ def test_skill_controller_interrupts_all_active_runs_before_emergency_stop(
 def test_skill_loop_advances_all_non_conflicting_active_runs(tmp_path) -> None:
     service = _service(tmp_path)
     state = service.states["embodied_skills"]
-    runtime = FakeRuntime()
-    state.runtime = runtime
     state.latest_observation = RobotObservation(
         envelope=Envelope(robot_id="xlerobot"), frame_id=1
     )
@@ -905,9 +877,18 @@ def test_skill_loop_advances_all_non_conflicting_active_runs(tmp_path) -> None:
         await service._on_skill_intent(service.topics.skill_intent, camera.__dict__)
         await service._on_skill_intent(service.topics.skill_intent, gripper.__dict__)
         loop_task = asyncio.create_task(service._skill_loop("embodied_skills", state))
-        while len(runtime.predicted_skill_ids) < 2:
-            runtime.predicted.clear()
-            await asyncio.wait_for(runtime.predicted.wait(), timeout=1.0)
+        await service.bus.wait_until(
+            lambda published: (
+                len(
+                    [
+                        payload
+                        for topic, payload in published
+                        if topic == service.topics.robot_action
+                    ]
+                )
+                >= 2
+            )
+        )
         service._stop.set()
         await loop_task
 
@@ -918,14 +899,12 @@ def test_skill_loop_advances_all_non_conflicting_active_runs(tmp_path) -> None:
         for topic, payload in service.bus.published
         if topic == service.topics.robot_action
     ]  # type: ignore[attr-defined]
-    assert runtime.predicted_skill_ids == ["skill1", "skill2"]
     assert [action["skill_id"] for action in actions] == ["skill1", "skill2"]
 
 
 def test_skill_controller_times_out_run_and_records_scheduler_failure(tmp_path) -> None:
     service = _service(tmp_path)
     state = service.states["embodied_skills"]
-    state.runtime = FakeRuntime()
     state.latest_observation = RobotObservation(
         envelope=Envelope(robot_id="xlerobot"), frame_id=3
     )
@@ -1115,7 +1094,6 @@ def test_skill_controller_rejects_turn_base_without_angle(
 def test_skill_controller_times_out_without_latest_observation(tmp_path) -> None:
     service = _service(tmp_path)
     state = service.states["embodied_skills"]
-    state.runtime = FakeRuntime()
     state.latest_observation = None
     envelope = Envelope(trace_id="tr1", robot_id="xlerobot")
     intent = SkillIntent(
@@ -1260,40 +1238,19 @@ class TestObserveRunDuplicateCompletion:
         )
 
         async def interleaved() -> None:
-            state.runtime = FakeRuntime()
             await service._on_skill_intent(service.topics.skill_intent, motion.__dict__)
             await service._on_skill_intent(
                 service.topics.skill_intent, observe.__dict__
             )
-            # Yield during base execution so the camera status can complete concurrently.
-            predict_barrier = asyncio.Event()
-            status_done = asyncio.Event()
-
-            class YieldingRuntime:
-                @property
-                def control_period_sec(self) -> float:
-                    return 0.001
-
-                async def predict(self, payload):
-                    if payload.intent.skill_id == "motion1":
-                        predict_barrier.set()
-                        await asyncio.wait_for(status_done.wait(), timeout=2.0)
-                    return PolicyRuntimeOutput(
-                        action=RobotAction(
-                            envelope=envelope,
-                            values=[0.0],
-                            skill_id=payload.intent.skill_id,
-                        )
-                    )
-
-                async def close(self) -> None:
-                    return None
-
-            state.runtime = YieldingRuntime()
             state.latest_observation = RobotObservation(envelope=envelope, frame_id=2)
 
             async def send_status() -> None:
-                await predict_barrier.wait()
+                await service.bus.wait_until(
+                    lambda published: any(
+                        topic == service.topics.robot_action
+                        for topic, _payload in published
+                    )
+                )
                 await service._on_status(
                     service.topics.robot_status,
                     RobotStatus(
@@ -1304,7 +1261,6 @@ class TestObserveRunDuplicateCompletion:
                         success=True,
                     ).__dict__,
                 )
-                status_done.set()
 
             await asyncio.gather(
                 service._skill_loop_step_for_test("embodied_skills", state),
@@ -1340,7 +1296,6 @@ class TestObserveRunDuplicateCompletion:
 def test_skill_loop_waits_for_robot_status_before_completing_run(tmp_path) -> None:
     service = _service(tmp_path)
     state = service.states["embodied_skills"]
-    state.runtime = FakeRuntime()
     state.latest_observation = RobotObservation(
         envelope=Envelope(robot_id="xlerobot"), frame_id=2
     )
@@ -1378,100 +1333,6 @@ def test_skill_loop_waits_for_robot_status_before_completing_run(tmp_path) -> No
         == "completed_without_pending_action"
         for payload in scheduler_events
     )
-
-
-class TestStaleSnapshotAfterInterrupt:
-    """Bug: _skill_loop_step iterates a snapshot of runs. When predict() yields
-    during normal execution, _interrupt_active can process the same run
-    (publish "interrupted" + pop from active_runs). The loop then resumes and
-    publishes robot_action for the already-interrupted skill without checking
-    the terminal flag 鈥?the robot executes a cancelled action."""
-
-    def test_loop_publishes_action_for_already_interrupted_skill(
-        self, tmp_path
-    ) -> None:
-        service = _service(tmp_path)
-        state = service.states["embodied_skills"]
-        state.latest_observation = RobotObservation(
-            envelope=Envelope(robot_id="xlerobot"), frame_id=1
-        )
-        envelope = Envelope(trace_id="tr1", robot_id="xlerobot")
-        intent = SkillIntent(
-            envelope=envelope,
-            skill_id="skill1",
-            name="set_gripper",
-            arguments={"action": "open"},
-            objective="open",
-        )
-
-        async def race() -> None:
-            predict_barrier = asyncio.Event()
-            interrupt_done = asyncio.Event()
-
-            class YieldingRuntime:
-                @property
-                def control_period_sec(self) -> float:
-                    return 0.001
-
-                async def predict(self, payload):
-                    predict_barrier.set()
-                    await asyncio.wait_for(interrupt_done.wait(), timeout=2.0)
-                    return PolicyRuntimeOutput(
-                        action=RobotAction(
-                            envelope=envelope,
-                            values=[0.0],
-                            skill_id=payload.intent.skill_id,
-                        )
-                    )
-
-                async def close(self) -> None:
-                    return None
-
-            state.runtime = YieldingRuntime()
-            await service._on_skill_intent(service.topics.skill_intent, intent.__dict__)
-
-            async def send_interrupt() -> None:
-                await predict_barrier.wait()
-                interrupt = SkillIntent(
-                    envelope=envelope,
-                    skill_id="skill_int",
-                    name="stop_motion",
-                    objective="stop now",
-                    interrupt=True,
-                )
-                await service._on_skill_intent(
-                    service.topics.skill_intent, interrupt.__dict__
-                )
-                interrupt_done.set()
-
-            await asyncio.gather(
-                service._skill_loop_step_for_test("embodied_skills", state),
-                send_interrupt(),
-            )
-
-        asyncio.run(race())
-
-        # skill1 was interrupted mid-execution, but the loop still published a
-        # robot_action for it after the interrupt completed.
-        robot_actions = [
-            p
-            for t, p in service.bus.published  # type: ignore[attr-defined]
-            if t == service.topics.robot_action and p.get("skill_id") == "skill1"  # type: ignore[attr-defined]
-        ]
-        interrupt_results = [
-            p
-            for t, p in service.bus.published  # type: ignore[attr-defined]
-            if t == service.topics.skill_result
-            and p.get("skill_id") == "skill1"  # type: ignore[attr-defined]
-            and p.get("failure_mode") == "interrupted"
-        ]
-        # Fix: terminal check after predict() skips the already-interrupted skill
-        assert len(interrupt_results) == 1, (
-            f"expected 1 interrupt result, got {len(interrupt_results)}"
-        )
-        assert len(robot_actions) == 0, (
-            f"robot_action should NOT be published after interrupt, got {len(robot_actions)}"
-        )
 
 
 class TestOnSkillIntentExceptionScope:

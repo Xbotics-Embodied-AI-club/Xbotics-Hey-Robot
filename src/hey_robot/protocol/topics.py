@@ -13,7 +13,6 @@ class Topics:
     skill_event: str = "skill.event"
     skill_result: str = "skill.result"
     robot_observation: str = "robot.observation"
-    camera_observation: str = "camera.observation"
     robot_status: str = "robot.status"
     robot_action: str = "robot.action"
     runtime_event: str = "runtime.event"

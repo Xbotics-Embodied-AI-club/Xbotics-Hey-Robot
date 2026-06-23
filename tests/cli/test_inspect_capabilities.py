@@ -16,7 +16,6 @@ robots:
     type: mock
 agents:
   main:
-    type: robot_agent
     robot_id: mock0
 """,
         encoding="utf-8",
