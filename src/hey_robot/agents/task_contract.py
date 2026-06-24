@@ -287,6 +287,23 @@ def infer_required_capability_type(text: str) -> str | None:
         text, ("joint", "关节", "shoulder", "elbow", "wrist")
     ) and _contains_any(text, ("转", "move", "rotate", "度")):
         return "arm_joint_delta"
+    if _contains_any(text, ("arm", "机械臂", "末端", "夹爪")) and _contains_any(
+        text,
+        (
+            "raise",
+            "lower",
+            "lift",
+            "up",
+            "down",
+            "抬高",
+            "降低",
+            "上抬",
+            "下压",
+            "升高",
+            "微调",
+        ),
+    ):
+        return "arm_joint_delta"
     if _contains_any(
         text, ("left", "right", "turn", "左转", "右转", "转向", "往左", "往右")
     ):

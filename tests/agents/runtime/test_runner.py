@@ -301,6 +301,54 @@ def test_agent_runtime_does_not_treat_perception_as_forward_motion_completion() 
     assert "base_move_action_result" in result.result
 
 
+def test_agent_runtime_does_not_treat_perception_as_arm_raise_completion() -> None:
+    provider = FakeProvider(
+        [
+            {
+                "tool": "request_capability",
+                "args": {
+                    "capability": "move_arm_joints",
+                    "objective": "raise the arm endpoint",
+                    "slots": {"joints": [{"name": "shoulder_lift", "delta": 0.15}]},
+                },
+                "reason": "try arm adjustment",
+            },
+            {
+                "tool": "request_capability",
+                "args": {
+                    "capability": "inspect_scene",
+                    "objective": "check the arm endpoint",
+                    "slots": {},
+                },
+                "reason": "inspect after failure",
+            },
+            "我已经看了一下当前画面。",
+        ]
+    )
+    runtime = AgentRuntime(provider, max_iterations=3)
+
+    def submit_capability(
+        capability: str, objective: str, slots: dict[str, Any] | None = None
+    ) -> str:
+        del objective, slots
+        if capability == "move_arm_joints":
+            raise RuntimeError("arm joint command rejected")
+        return "scene inspected"
+
+    runtime.register_tool(
+        "request_capability",
+        submit_capability,
+        safety_level="motion",
+    )
+
+    result = asyncio.run(runtime.step(_payload("机械臂末端抬高一些")))
+
+    assert result.tool == "final_response"
+    assert result.stop_reason == "text_response"
+    assert result.task_finished is False
+    assert result.task_evaluation_applied is True
+
+
 def test_agent_runtime_does_not_treat_wrong_motion_capability_as_turn_completion() -> (
     None
 ):

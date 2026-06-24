@@ -8,6 +8,7 @@ import pytest
 
 from hey_robot.agents.core import RobotAgentCore
 from hey_robot.agents.perception_query import SceneEvidence
+from hey_robot.agents.runtime import AgentRuntimeResult
 from hey_robot.agents.skill_state import SkillPhase, SkillStateMachine
 from hey_robot.agents.turn_policy import RobotTurnPolicy
 from hey_robot.agents.types import AgentTurnInput, RobotSnapshot
@@ -1178,6 +1179,60 @@ def test_robot_agent_core_does_not_report_failed_skill_as_completed() -> None:
 
     assert result.reply_text == "动作执行未成功：skill timed out"
     assert result.task_finished is False
+
+
+def test_robot_agent_core_sanitizes_non_final_text_response() -> None:
+    from tests.conftest import FakeProvider
+
+    core = RobotAgentCore(
+        agent_id="main",
+        spec=AgentSpec(type="robot_agent", settings={}),
+        io=FakeAgentIO(),
+        provider=FakeProvider("unused"),
+    )
+
+    reply = core._reply_text_from_runtime_result(
+        AgentRuntimeResult(
+            tool="propose_capability",
+            args={"capability": "move_arm_joints"},
+            result=(
+                "ToolUnavailable: propose_capability is not available in this "
+                "execution context"
+            ),
+            stop_reason="text_response",
+            tool_success=False,
+            task_finished=True,
+        )
+    )
+
+    assert reply == "当前运行环境不支持这个工具或能力，所以我没有继续执行动作。"
+    assert "ToolUnavailable" not in reply
+
+
+def test_robot_agent_core_replaces_internal_final_response_narration() -> None:
+    from tests.conftest import FakeProvider
+
+    core = RobotAgentCore(
+        agent_id="main",
+        spec=AgentSpec(type="robot_agent", settings={}),
+        io=FakeAgentIO(),
+        provider=FakeProvider("unused"),
+    )
+
+    reply = core._reply_text_from_runtime_result(
+        AgentRuntimeResult(
+            tool="final_response",
+            args={},
+            result='用户说"继续"，回顾一下之前的进展，然后决定下一步。',
+            stop_reason="text_response",
+            tool_success=None,
+            task_finished=True,
+        )
+    )
+
+    assert reply is not None
+    assert "用户说" not in reply
+    assert "回顾一下之前的进展" not in reply
 
 
 def test_robot_agent_core_does_not_reuse_previous_turn_skill_id() -> None:

@@ -46,6 +46,10 @@ def looks_like_internal_user_reply(text: str) -> bool:
         return True
     if lowered.startswith("execution feedback for skill "):
         return True
+    if normalized.startswith(("用户说", "用户表示")):
+        return True
+    if "回顾一下之前的进展" in normalized:
+        return True
     if lowered.startswith("issued "):
         return True
     if "subgoal_success:" in lowered or "task_success:" in lowered:
@@ -181,12 +185,16 @@ def _clean_user_text(text: str) -> str:
     if value.startswith("任务监督告警："):
         detail = value.split("：", 1)[1].strip()
         return f"任务监督发现异常：{detail}。我会先暂停继续动作，避免扩大问题。"
+    if lowered.startswith("consecutivemotionblocked:"):
+        return "为了避免连续动作带来风险，我需要先重新观察当前画面，再继续执行。"
     if lowered.startswith("toolunavailable:") or (
         "not available in this execution context" in lowered
     ):
         return "当前运行环境不支持这个工具或能力，所以我没有继续执行动作。"
     if "capability not available" in lowered or "capability unavailable" in lowered:
         return "当前机器人不支持这个能力，所以我没有继续执行动作。"
+    if lowered == "arm moved to pregrasp":
+        return "机械臂已经切换到预抓取位姿。"
     if lowered.startswith("unknown named pose:"):
         pose_name = value.split(":", 1)[1].strip() or "requested"
         return f"当前没有名为“{_pose_display_name(pose_name)}”的已验证姿态，所以我没有移动机械臂。"

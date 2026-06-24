@@ -55,3 +55,11 @@ def test_task_contract_requires_detector_for_marker_check() -> None:
     assert contract.required_capability is not None
     assert contract.required_capability.type == "marker_detection"
     assert contract.completion_evidence_required == ("marker_detection_result",)
+
+
+def test_task_contract_treats_arm_raise_as_arm_joint_delta() -> None:
+    contract = build_task_contract("机械臂末端抬高一些")
+
+    assert contract.required_capability is not None
+    assert contract.required_capability.type == "arm_joint_delta"
+    assert contract.completion_evidence_required == ("arm_joint_action_result",)

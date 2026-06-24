@@ -46,6 +46,7 @@ from hey_robot.robots.identity import resolve_robot_family
 from hey_robot.skills.base import SkillCatalog
 from hey_robot.skills.registry import registry_from_config
 from hey_robot.templates.loader import TemplateStore
+from hey_robot.user_reply import present_tool_result_for_user
 
 logger = HeyRobotLogger(name="core")
 
@@ -195,7 +196,7 @@ class RobotAgentCore:
             f"runtime 执行完成：agent={self.agent_id} tool={result.tool} "
             f"task_finished={result.task_finished} stop_reason={result.stop_reason}"
         )
-        reply_text = result.result if result.stop_reason == "text_response" else None
+        reply_text = self._reply_text_from_runtime_result(result)
         if (
             reply_text is None
             and result.stop_reason == "max_iterations_after_tool_result"
@@ -812,6 +813,28 @@ class RobotAgentCore:
         if not cleaned or looks_like_internal_agent_protocol(cleaned):
             return None
         return cleaned
+
+    def _reply_text_from_runtime_result(self, result: Any) -> str | None:
+        if result.stop_reason != "text_response":
+            return None
+        text = str(result.result or "").strip()
+        if result.tool == "final_response":
+            if text and not self._looks_like_internal_final_response(text):
+                return text
+            return self._fallback_reply_for_unfinished_turn(result)
+        return present_tool_result_for_user(
+            tool=str(result.tool or ""),
+            args=dict(result.args or {}),
+            result=text,
+            success=result.tool_success,
+        ) or self._fallback_reply_for_unfinished_turn(result)
+
+    @staticmethod
+    def _looks_like_internal_final_response(text: str) -> bool:
+        normalized = " ".join(str(text or "").strip().split())
+        return normalized.startswith(("用户说", "用户表示")) or (
+            "回顾一下之前的进展" in normalized
+        )
 
     def _current_envelope(self):
         return self._current_turn.envelope

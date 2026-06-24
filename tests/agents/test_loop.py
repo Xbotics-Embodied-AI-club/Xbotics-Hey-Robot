@@ -1213,6 +1213,80 @@ def test_robot_agent_service_confirmed_pending_confirmation_restores_objective(
     assert skills[0]["objective"] == expected_objective
 
 
+def test_robot_agent_service_confirmed_pending_confirmation_reports_motion_guard(
+    tmp_path,
+) -> None:
+
+    class FakeBus:
+        def __init__(self) -> None:
+            self.published: list[tuple[str, dict]] = []
+
+        async def publish(self, topic: str, payload: dict) -> None:
+            self.published.append((topic, payload))
+
+    config = DeploymentConfig.from_dict(
+        {
+            "agents": {
+                "main": {
+                    "type": "robot_agent",
+                    "robot_id": "mock0",
+                    "settings": {"mode": "direct"},
+                }
+            },
+            "robots": {"mock0": {"type": "mock"}},
+        }
+    )
+    service = RobotAgentService(config, agent_id="main", episode_dir=tmp_path)
+    fake_bus = FakeBus()
+    service.bus = fake_bus  # type: ignore[assignment]
+    service.events = BusEventPublisher(fake_bus, service.topics)  # type: ignore[arg-type]
+
+    async def blocked_request_capability(*_args: object, **_kwargs: object) -> str:
+        raise RuntimeError(
+            "ConsecutiveMotionBlocked: last capability 'move_base' was also a "
+            "motion/actuation skill. Run inspect_scene first."
+        )
+
+    service.core.request_capability = blocked_request_capability  # type: ignore[method-assign]
+    service.task_runtime.store_pending_confirmation(
+        "s1",
+        {
+            "proposal_id": "proposal_blocked",
+            "capability": "move_base",
+            "objective": "向左移动10cm",
+            "slots": {"direction": "left", "distance_cm": 10},
+            "prompt": "确认向左移动10cm吗？",
+        },
+    )
+    turn = UserTurn(
+        envelope=Envelope(
+            trace_id="tr_confirm_blocked",
+            episode_id="s1",
+            agent_id="main",
+            robot_id="mock0",
+        ),
+        text="可以",
+    )
+
+    asyncio.run(service._handle_user_turn_locked(turn))
+
+    replies = [
+        payload
+        for topic, payload in fake_bus.published
+        if topic == service.topics.agent_reply
+    ]
+    task = service.task_runtime.task_runs.load_active("s1")
+
+    assert replies
+    assert (
+        replies[-1]["text"]
+        == "为了避免连续动作带来风险，我需要先重新观察当前画面，再继续执行。"
+    )
+    assert "ConsecutiveMotionBlocked" not in replies[-1]["text"]
+    assert task is not None
+    assert task.status == "active"
+
+
 def test_robot_agent_service_declined_pending_confirmation_does_not_create_task(
     tmp_path,
 ) -> None:
