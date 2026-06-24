@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import types
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -10,7 +11,7 @@ from hey_robot.agents.injection import RobotTurnInjector
 from hey_robot.agents.interaction import classify_user_interaction
 from hey_robot.agents.loop import RobotAgentLoop
 from hey_robot.agents.perception_query import SceneEvidence
-from hey_robot.agents.robot_agent import RobotAgentService
+from hey_robot.agents.robot_agent import RobotAgentService, _suppress_user_visible_reply
 from hey_robot.agents.task_run import TaskAttempt, TaskRun
 from hey_robot.agents.task_runtime import TaskRunManager
 from hey_robot.agents.types import RobotSnapshot
@@ -178,6 +179,7 @@ def test_status_feedback_fails_unsuccessful_get_robot_status() -> None:
     )
     status = RobotStatus(
         envelope=Envelope(robot_id="mock0"),
+        skill_id="cmd1",
         frame_id=10,
         state="acting",
         success=False,
@@ -726,14 +728,22 @@ def test_robot_agent_service_motion_turn_uses_request_capability_tool_call(
     assert intents
     assert intents[0]["name"] == "move_base"
     assert intents[0]["arguments"] == {"direction": "forward", "distance_cm": 10.0}
-    assert replies[-1]["text"] == "Moved forward about 10.0 cm."
+    assert replies[-1]["text"] == "motion completed"
     assert replies[-1]["metadata"]["source"] == "final_response"
-    assert provider.last_messages is not None
-    assert any(
-        message.tool_name == "request_capability"
-        for message in provider.last_messages
-        if message.role == "tool"
+    assert provider.responses == ["Moved forward about 10.0 cm."]
+
+
+def test_robot_agent_suppresses_empty_response_wait_reply() -> None:
+    result = types.SimpleNamespace(
+        tool="wait", metadata={"stop_reason": "empty_response"}
     )
+
+    assert _suppress_user_visible_reply(result) is True
+
+    command_result = types.SimpleNamespace(
+        tool="request_capability", metadata={"stop_reason": "command_router"}
+    )
+    assert _suppress_user_visible_reply(command_result) is False
 
 
 def test_robot_agent_service_publishes_skill_boundary_progress_reply(tmp_path) -> None:
@@ -1092,6 +1102,53 @@ def test_robot_agent_service_interrupt_publishes_interrupt_skill(tmp_path) -> No
     assert skills
     assert skills[0]["skill_id"] == "cmd1"
     assert skills[0]["metadata"]["mode"] == "interrupt"
+    assert skills[0]["interrupt"] is True
+
+
+def test_robot_agent_service_emergency_stop_publishes_interrupt_skill(
+    tmp_path,
+) -> None:
+    class FakeBus:
+        def __init__(self) -> None:
+            self.published: list[tuple[str, dict]] = []
+
+        async def publish(self, topic: str, payload: dict) -> None:
+            self.published.append((topic, payload))
+
+    config = DeploymentConfig.from_dict(
+        {
+            "agents": {
+                "main": {
+                    "type": "robot_agent",
+                    "robot_id": "mock0",
+                    "settings": {"mode": "direct"},
+                }
+            },
+            "robots": {"mock0": {"type": "mock"}},
+        }
+    )
+    service = RobotAgentService(config, agent_id="main", episode_dir=tmp_path)
+    fake_bus = FakeBus()
+    service.bus = fake_bus  # type: ignore[assignment]
+    turn = UserTurn(
+        envelope=Envelope(
+            trace_id="tr1", episode_id="s1", agent_id="main", robot_id="mock0"
+        ),
+        text="紧急停止",
+    )
+
+    handled = asyncio.run(service._handle_busy_turn(turn, active_skill_id="cmd1"))
+    skills = [
+        payload
+        for topic, payload in fake_bus.published
+        if topic == service.topics.skill_intent
+    ]
+
+    assert handled is True
+    assert skills
+    assert skills[0]["skill_id"] == "cmd1"
+    assert skills[0]["metadata"]["mode"] == "emergency_stop"
+    assert skills[0]["metadata"]["intent"]["kind"] == "emergency_stop"
     assert skills[0]["interrupt"] is True
 
 

@@ -273,6 +273,45 @@ class TaskRecoveryPlanner:
         failure_mode = str(
             result.failure_mode or result.metadata.get("failure_mode") or ""
         ).lower()
+        capability_error = _capability_unavailable_reason(result, failure_mode)
+        if capability_error is not None:
+            return RecoveryPlaybook(
+                RecoveryStrategy.CLARIFY,
+                capability_error,
+                severity="operator_required",
+                actions=(
+                    RecoveryAction.HOLD_TASK,
+                    RecoveryAction.REQUEST_CLARIFICATION,
+                ),
+                operator_required=True,
+                retryable=False,
+                metadata={
+                    "skill_id": result.skill_id,
+                    "status": result.status,
+                    "failure_mode": failure_mode or None,
+                    "failure_class": "capability_unavailable",
+                    "recovery_hints": hints,
+                },
+            ).decision()
+        parameter_error = _parameter_error_reason(result, failure_mode)
+        if parameter_error is not None:
+            return RecoveryPlaybook(
+                RecoveryStrategy.CLARIFY,
+                parameter_error,
+                severity="operator_required",
+                actions=(
+                    RecoveryAction.HOLD_TASK,
+                    RecoveryAction.REQUEST_CLARIFICATION,
+                ),
+                retryable=False,
+                metadata={
+                    "skill_id": result.skill_id,
+                    "status": result.status,
+                    "failure_mode": failure_mode or None,
+                    "failure_class": "parameter_error",
+                    "recovery_hints": hints,
+                },
+            ).decision()
         if "battery" in failure_mode:
             return RecoveryPlaybook(
                 RecoveryStrategy.ASK_OPERATOR,
@@ -428,6 +467,102 @@ class TaskRecoveryPlanner:
                 "recovery_hints": hints,
             },
         ).decision()
+
+
+def _capability_unavailable_reason(
+    result: SkillResult, failure_mode: str
+) -> str | None:
+    text = _failure_text(result, failure_mode)
+    if not any(
+        marker in text
+        for marker in (
+            "capability not available",
+            "capability unavailable",
+            "toolunavailable:",
+            "not available in this execution context",
+            "unsupported capability",
+            "unknown capability",
+        )
+    ):
+        return None
+    capability = str(
+        result.name
+        or result.metadata.get("capability")
+        or result.metadata.get("tool")
+        or result.skill_id
+        or ""
+    ).strip()
+    if capability:
+        return f"当前环境不支持“{capability}”这个能力，不能直接重试。请换一个已支持的动作或让我先查看可用能力。"
+    return "当前环境不支持这个能力，不能直接重试。请换一个已支持的动作或让我先查看可用能力。"
+
+
+def _parameter_error_reason(result: SkillResult, failure_mode: str) -> str | None:
+    text = _failure_text(result, failure_mode)
+    if not any(
+        marker in text
+        for marker in (
+            "unknown named pose",
+            "invalid pose",
+            "unknown pose",
+            "invalid joint",
+            "unknown joint",
+            "invalid parameter",
+            "bad parameter",
+        )
+    ):
+        return None
+    pose_name = _extract_unknown_pose_name(result)
+    if pose_name:
+        return (
+            f"当前没有名为“{_pose_display_name(pose_name)}”的已验证姿态，"
+            "所以不能直接重试。请指定一个已支持的姿态，或让我回到安全姿态。"
+        )
+    joint_name = _extract_named_value(
+        result,
+        markers=("unknown joint:", "invalid joint:"),
+    )
+    if joint_name:
+        return f"当前没有名为“{joint_name}”的已验证关节，所以不能直接重试。请提供有效关节名称或改用已支持的姿态。"
+    return "上一次失败是参数错误，不能直接重试。请提供一个新的有效参数或选择安全姿态。"
+
+
+def _extract_unknown_pose_name(result: SkillResult) -> str | None:
+    return _extract_named_value(result, markers=("unknown named pose:",))
+
+
+def _extract_named_value(
+    result: SkillResult, *, markers: tuple[str, ...]
+) -> str | None:
+    for value in (result.error, result.summary, result.metadata.get("failure_reason")):
+        text = str(value or "").strip()
+        lowered = text.lower()
+        for marker in markers:
+            if marker in lowered:
+                index = lowered.index(marker) + len(marker)
+                return text[index:].strip().split()[0].strip("。，,.;:") or None
+    return None
+
+
+def _failure_text(result: SkillResult, failure_mode: str) -> str:
+    return " ".join(
+        str(part or "")
+        for part in (
+            failure_mode,
+            result.error,
+            result.summary,
+            result.metadata.get("failure_reason"),
+            result.metadata.get("result"),
+        )
+    ).lower()
+
+
+def _pose_display_name(pose_name: str) -> str:
+    return {
+        "pre_grasp": "预抓取",
+        "home": "home",
+        "safe": "安全",
+    }.get(pose_name, pose_name)
 
 
 def _matching_health_report(

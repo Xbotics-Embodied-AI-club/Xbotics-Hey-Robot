@@ -7,6 +7,7 @@ from hey_robot.notifications import (
     notification_severity,
     should_deliver_notification,
 )
+from hey_robot.notifications.presentation import present_notification_text
 from hey_robot.protocol import AgentReply, Envelope
 
 
@@ -46,3 +47,24 @@ def test_notification_presentation_helpers_cover_defaults_and_filtering() -> Non
 
     assert notification_severity(invalid) == "info"
     assert notification_kind(invalid) == "notification"
+
+
+def test_internal_execution_feedback_failure_not_leaked_to_user() -> None:
+    text = present_notification_text("last execution feedback failed")
+
+    assert "last execution feedback failed" not in text
+    assert "没有被系统可靠确认" in text
+
+
+def test_skill_timeout_presented_as_confirmation_timeout() -> None:
+    text = present_notification_text("active skill timed out after 12.0s")
+
+    assert "timed out" not in text
+    assert "动作确认超时" in text
+
+
+def test_task_watchdog_prefix_is_removed_from_notification_text() -> None:
+    text = present_notification_text("任务监督告警：robot status stale for 34.6s")
+
+    assert text == "robot status stale for 34.6s"
+    assert "任务监督告警" not in text

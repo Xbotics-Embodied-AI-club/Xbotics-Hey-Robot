@@ -258,10 +258,10 @@ def test_status_feedback_completed_without_status() -> None:
     feedback = status_feedback_from_result(result, None)
 
     assert feedback.outcome == "confirmed"
-    assert feedback.task_success is False
+    assert feedback.task_success is True
     assert feedback.subgoal_success is True
     assert feedback.confidence == 0.6
-    assert feedback.next_hint == "continue with the next useful step"
+    assert feedback.next_hint == "report task result if done"
 
 
 def test_status_feedback_completed_with_unsuccessful_get_robot_status() -> None:
@@ -270,6 +270,7 @@ def test_status_feedback_completed_with_unsuccessful_get_robot_status() -> None:
     )
     status = RobotStatus(
         envelope=Envelope(robot_id="mock0"),
+        skill_id="cmd1",
         state="error",
         success=False,
         error="arm stuck",
@@ -308,8 +309,26 @@ def test_status_feedback_completed_status_success_none() -> None:
     status = RobotStatus(envelope=Envelope(robot_id="mock0"), state="idle")
     feedback = status_feedback_from_result(result, status)
 
-    assert feedback.task_success is False
+    assert feedback.task_success is True
     assert feedback.confidence == 0.75
+
+
+def test_completed_action_with_heartbeat_status_does_not_force_false() -> None:
+    result = SkillResult(
+        envelope=Envelope(robot_id="mock0"),
+        skill_id="cmd1",
+        name="set_gripper",
+        status="completed",
+        summary="gripper opened",
+    )
+    status = RobotStatus(envelope=Envelope(robot_id="mock0"), state="idle")
+
+    feedback = status_feedback_from_result(result, status)
+
+    assert feedback.outcome == "confirmed"
+    assert feedback.subgoal_success is True
+    assert feedback.task_success is True
+    assert feedback.metadata["status_matched_skill"] is False
 
 
 # _feedback_from_parsed.

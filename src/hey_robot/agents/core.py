@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from hey_robot.agents.autonomy import AutonomyManager
+from hey_robot.agents.command_router import CommandRouter, RoutedCommand
 from hey_robot.agents.execution_feedback import (
     DefaultExecutionFeedbackEvaluator,
     ExecutionFeedbackEvaluator,
@@ -24,6 +25,7 @@ from hey_robot.agents.runtime.prompts import (
 )
 from hey_robot.agents.runtime.response_policy import looks_like_internal_agent_protocol
 from hey_robot.agents.runtime.safety import RobotSafetyHook
+from hey_robot.agents.scene_evidence import reusable_scene_evidence_result
 from hey_robot.agents.skill_gateway import SkillGateway, SkillGatewayRequest, WaitPolicy
 from hey_robot.agents.skill_state import SkillStateMachine
 from hey_robot.agents.task_safety import evaluate_user_task
@@ -78,6 +80,7 @@ class RobotAgentCore:
         self.last_next_hint: str | None = None
         self.runtime = self._build_runtime()
         self.feedback_evaluator = feedback_evaluator or self._build_feedback_evaluator()
+        self.command_router = CommandRouter()
         self._pending_skills: dict[str, asyncio.Future[str]] = {}
         self._current_tool_call_start = 0
         self._last_contact_envelope: Envelope | None = None
@@ -160,6 +163,10 @@ class RobotAgentCore:
                 },
             )
 
+        routed_command = self.command_router.route(payload.turn.text)
+        if routed_command is not None:
+            return await self._handle_routed_command(payload, routed_command)
+
         memory_context = self.memory_context_builder.build(
             task=payload.turn.text,
             task_context=payload.memory_context,
@@ -235,6 +242,61 @@ class RobotAgentCore:
                 "result": result.result,
                 "skill_id": self._turn_submitted_skill_id,
                 "stop_reason": result.stop_reason,
+            },
+        )
+
+    async def _handle_routed_command(
+        self, payload: AgentTurnInput, command: RoutedCommand
+    ) -> AgentCoreResult:
+        self.runtime.state.task = payload.turn.text
+        try:
+            result_text = await self.skill_gateway.submit(
+                SkillGatewayRequest(
+                    capability=command.capability,
+                    objective=command.objective,
+                    slots=command.slots,
+                    interrupt=command.interrupt,
+                    wait_policy=command.wait_policy,
+                    metadata={
+                        **dict(payload.turn.metadata or {}),
+                        "command_router": True,
+                    },
+                    result_prefix="command",
+                    enforce_motion_guards=command.capability
+                    not in {"stop_motion", "reset_posture"},
+                    confirmed=True,
+                )
+            )
+        except Exception as exc:
+            return AgentCoreResult(
+                reply_text=f"指令没有成功下发：{exc}",
+                skill_submitted=False,
+                task_finished=False,
+                tool="request_capability",
+                metadata={
+                    "tool": "request_capability",
+                    "capability": command.capability,
+                    "stop_reason": "command_router_failed",
+                    "error": str(exc),
+                },
+            )
+        return AgentCoreResult(
+            reply_text=command.reply_text,
+            skill_submitted=True,
+            task_finished=False,
+            tool="request_capability",
+            metadata={
+                "tool": "request_capability",
+                "args": {
+                    "capability": command.capability,
+                    "objective": command.objective,
+                    "slots": command.slots,
+                    "interrupt": command.interrupt,
+                    "wait_policy": command.wait_policy,
+                },
+                "result": result_text,
+                "skill_id": self._turn_submitted_skill_id,
+                "stop_reason": "command_router",
             },
         )
 
@@ -476,29 +538,11 @@ class RobotAgentCore:
         )
 
     def _successful_perception_result_this_turn(self, capability: str) -> str | None:
-        capability_name = (capability or "").strip()
-        if not is_perception_skill_name(capability_name):
-            return None
-        for record in reversed(
-            self.runtime.state.tool_calls[self._current_tool_call_start :]
-        ):
-            if record.name != "request_capability" or not record.success:
-                continue
-            previous_capability = str(record.arguments.get("capability") or "").strip()
-            if previous_capability != capability_name:
-                continue
-            parsed = self._parse_agent_feedback(record.result)
-            if parsed is not None and parsed.get("subgoal_success") is True:
-                return (
-                    record.result
-                    + "\n\nPerception result reused: the same perception skill already succeeded in this turn; do not call it again unless new evidence is required."
-                )
-            if parsed is None and record.result.strip():
-                return (
-                    record.result
-                    + "\n\nPerception result reused: the same perception skill already returned a result in this turn."
-                )
-        return None
+        return reusable_scene_evidence_result(
+            self.runtime.state.tool_calls[self._current_tool_call_start :],
+            capability,
+            parse_feedback=self._parse_agent_feedback,
+        )
 
     def resolve_skill(self, skill_id: str, result_text: str) -> bool:
         future = self._pending_skills.get(skill_id)
@@ -749,12 +793,18 @@ class RobotAgentCore:
         reason = str(result.result or result.reason or result.stop_reason or "").strip()
         if result.stop_reason == "provider_error":
             return f"模型服务这次没有成功返回可用结果：{reason}"
+        if result.stop_reason == "model_timeout":
+            return "模型服务这次没有在限定时间内返回可用结果。当前不会继续执行新的动作，请稍后重试。"
+        if result.stop_reason == "turn_budget_exhausted":
+            return "这次任务处理超时，当前不会继续执行新的动作。建议先重新观察或重试。"
         if result.stop_reason in {
             "internal_protocol_response",
             "invalid_tool_protocol",
         }:
             return "我已经收到上一步执行结果，但还没有形成可靠的最终结论，会继续根据最新观测推进任务。"
-        return "我这次没有成功形成可执行动作或最终答复，请换一种更具体的说法再试。"
+        return (
+            "这次没有形成可靠的动作或最终答复，当前不会继续执行新的动作。请稍后重试。"
+        )
 
     @staticmethod
     def _safe_tool_result_reply(text: str) -> str | None:

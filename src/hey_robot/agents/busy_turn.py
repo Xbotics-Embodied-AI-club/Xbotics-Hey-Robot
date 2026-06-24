@@ -99,7 +99,7 @@ class BusyTurnHandler:
             )
         )
 
-        if intent.kind == "interrupt":
+        if intent.kind in {"interrupt", "emergency_stop"}:
             await self.publish_skill_event(
                 SkillEvent(
                     envelope=turn.envelope,
@@ -118,7 +118,7 @@ class BusyTurnHandler:
                     objective=turn.text,
                     metadata={
                         **dict(turn.metadata),
-                        "mode": "interrupt",
+                        "mode": intent.kind,
                         "source": "agent.busy_turn",
                         "intent": intent.to_dict(),
                     },
@@ -139,7 +139,7 @@ class BusyTurnHandler:
             )
             return True
 
-        if intent.kind in {"correction", "follow_up"}:
+        if intent.kind in {"correction", "follow_up", "retry", "reset"}:
             await self.publish_reply(
                 AgentReply(
                     envelope=turn.envelope,
@@ -171,7 +171,7 @@ class BusyTurnHandler:
         active_skill_id: str,
     ) -> UserInteractionIntent:
         del active_skill_id
-        if intent.kind in {"interrupt", "read_only"}:
+        if intent.kind in {"interrupt", "emergency_stop", "read_only"}:
             return intent
         if task is None:
             return (

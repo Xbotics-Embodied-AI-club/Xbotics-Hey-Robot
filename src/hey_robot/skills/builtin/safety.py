@@ -16,7 +16,7 @@ class StopMotionSkill(BaseSkill):
         required_resources=("base", "arm"),
         driver_primitives=("stop_motion",),
         safety_level="stop",
-        timeout_sec=3.0,
+        timeout_sec=8.0,
         feedback_mode="none",
         capability_type="stop_motion",
         goal_effects=("stops_robot_motion",),

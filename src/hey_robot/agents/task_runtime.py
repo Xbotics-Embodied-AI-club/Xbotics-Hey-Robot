@@ -298,19 +298,36 @@ class TaskRunManager:
         ):
             task_text = existing_task.root_task or task_text
         task_run = None
+        recovery_resume_blocked = False
         if episode_id:
-            task_run = self.task_runs.ensure_active(
-                episode_id=episode_id,
-                task=task_text,
-                agent_id=turn.envelope.agent_id,
-                robot_id=turn.envelope.robot_id,
+            recovery_resume_allowed = (
+                existing_task is not None
+                and existing_task.status in {"recovering", "paused"}
+                and intent is not None
+                and _should_resume_recovery_on_intent(existing_task, intent)
             )
+            recovery_resume_blocked = (
+                existing_task is not None
+                and existing_task.status in {"recovering", "paused"}
+                and intent is not None
+                and intent.kind in {"follow_up", "retry"}
+                and not recovery_resume_allowed
+            )
+            if recovery_resume_blocked:
+                task_run = existing_task
+            else:
+                task_run = self.task_runs.ensure_active(
+                    episode_id=episode_id,
+                    task=task_text,
+                    agent_id=turn.envelope.agent_id,
+                    robot_id=turn.envelope.robot_id,
+                )
             if (
                 task_run is not None
                 and existing_task is not None
                 and existing_task.status in {"recovering", "paused"}
                 and intent is not None
-                and intent.kind == "follow_up"
+                and recovery_resume_allowed
             ):
                 recovery_resume_guidance = self._resume_guidance_for_task(existing_task)
                 resumed = self.resume_episode_task(episode_id)
@@ -332,9 +349,10 @@ class TaskRunManager:
                 intent=turn.intent,
                 metadata=turn_metadata,
             )
+        injection_intent = None if recovery_resume_blocked else intent
         injected = injector.inject(
             turn=turn,
-            intent=intent,
+            intent=injection_intent,
             task=task_run,
             snapshot=snapshot,
         )
@@ -575,7 +593,7 @@ class TaskRunManager:
         if not episode_id:
             return task
         metadata = dict(result.metadata or {})
-        self.task_runs.bind_skill_trace_metadata(
+        traced = self.task_runs.bind_skill_trace_metadata(
             episode_id,
             skill_id=result.skill_id,
             status=result.status,
@@ -583,7 +601,7 @@ class TaskRunManager:
             summary=result.summary,
             metadata=metadata,
         )
-        return task
+        return traced or task
 
     def observe_execution_feedback(
         self,
@@ -1014,14 +1032,41 @@ def _task_text_from_turn(turn: UserTurn) -> str:
 def _should_reuse_existing_task(*, turn: UserTurn, intent: Any) -> bool:  # noqa: ARG001
     if intent is None:
         return False
-    return intent.kind in {"follow_up", "correction", "interrupt"}
+    return intent.kind in {"follow_up", "correction", "interrupt", "retry"}
+
+
+def _should_resume_recovery_on_intent(task: TaskRun, intent: Any) -> bool:
+    if intent.kind not in {"follow_up", "retry"}:
+        return False
+    recovery = task.recovery if isinstance(task.recovery, dict) else None
+    metadata = recovery.get("metadata") if isinstance(recovery, dict) else None
+    if isinstance(metadata, dict):
+        if metadata.get("retryable") is False:
+            return False
+        decision_metadata = metadata.get("metadata")
+        if (
+            isinstance(decision_metadata, dict)
+            and decision_metadata.get("failure_class") == "parameter_error"
+        ):
+            return False
+    return True
 
 
 def _intent_from_turn_metadata(turn: UserTurn):
     from hey_robot.agents.interaction import UserInteractionIntent
 
+    quick_action = str(turn.metadata.get("quick_action") or "").strip().lower()
+    if quick_action == "retry_skill":
+        return UserInteractionIntent(
+            kind="retry", urgency="safe_boundary", target="last_failed_skill"
+        )
     raw = turn.metadata.get("_interaction_intent")
     if not isinstance(raw, dict):
+        text = " ".join(str(turn.text or "").lower().split())
+        if text in {"retry", "try again", "重试", "再试一次", "重新试一下"}:
+            return UserInteractionIntent(
+                kind="retry", urgency="safe_boundary", target="last_failed_skill"
+            )
         return None
     kind = raw.get("kind")
     if not kind:

@@ -370,7 +370,7 @@ class RobotAgentService:
             result=result,
             baseline_frame_id=prepared.baseline_frame_id,
         )
-        if result.reply_text:
+        if result.reply_text and not _suppress_user_visible_reply(result):
             await self.publish_reply(
                 AgentReply(
                     envelope=prepared.turn.envelope,
@@ -864,6 +864,14 @@ def _confirmed_capability_failure_reply(capability: str) -> str:
     if capability == "human_follow":
         return "跟随模式没有成功启动，我会保持原地。"
     return "这个动作没有成功启动。"
+
+
+def _suppress_user_visible_reply(result) -> bool:
+    metadata = getattr(result, "metadata", {}) or {}
+    return (
+        getattr(result, "tool", None) == "wait"
+        and metadata.get("stop_reason") == "empty_response"
+    )
 
 
 def _should_publish_skill_progress_reply(skill: SkillIntent) -> bool:

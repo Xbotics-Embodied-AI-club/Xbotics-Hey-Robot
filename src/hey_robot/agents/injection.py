@@ -29,6 +29,7 @@ class RobotTurnInjector:
             "correction",
             "interrupt",
             "follow_up",
+            "retry",
         }:
             return InjectedTurnPlan(text=turn.text, metadata={})
         root_task = task.root_task if task is not None else turn.text

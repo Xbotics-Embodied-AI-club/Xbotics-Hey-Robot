@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from hey_robot.episode import JsonlEpisodeStore
 from hey_robot.notifications.models import Notification, NotificationTarget
 from hey_robot.notifications.policy import NotificationPolicy
+from hey_robot.notifications.presentation import present_notification_text
 from hey_robot.protocol import AgentReply, Envelope
 
 ReplyPublisher = Callable[[AgentReply], Awaitable[None]]
@@ -159,7 +160,7 @@ class NotificationService:
     @staticmethod
     def _render_text(notification: Notification) -> str:
         title = notification.title.strip()
-        body = notification.body.strip()
+        body = present_notification_text(notification.body)
         if title and body:
             return f"{title}\n{body}"
         return title or body

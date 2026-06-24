@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 _INTERNAL_TOOL_TEXTS = {
@@ -167,4 +168,75 @@ def _clean_user_text(text: str) -> str:
     value = str(text or "").strip()
     if value.lower() in {"none", "null"}:
         return ""
+    summary = _summary_line(value)
+    if summary is not None:
+        return _clean_user_text(summary)
+    if "; robot_state=" in value:
+        value = value.split("; robot_state=", 1)[0].strip()
+    if "\r" in value:
+        value = value.replace("\r\n", "\n").replace("\r", "\n")
+    if "\n" in value:
+        value = "\n".join(line.strip() for line in value.splitlines() if line.strip())
+    lowered = value.lower()
+    if value.startswith("任务监督告警："):
+        detail = value.split("：", 1)[1].strip()
+        return f"任务监督发现异常：{detail}。我会先暂停继续动作，避免扩大问题。"
+    if lowered.startswith("toolunavailable:") or (
+        "not available in this execution context" in lowered
+    ):
+        return "当前运行环境不支持这个工具或能力，所以我没有继续执行动作。"
+    if "capability not available" in lowered or "capability unavailable" in lowered:
+        return "当前机器人不支持这个能力，所以我没有继续执行动作。"
+    if lowered.startswith("unknown named pose:"):
+        pose_name = value.split(":", 1)[1].strip() or "requested"
+        return f"当前没有名为“{_pose_display_name(pose_name)}”的已验证姿态，所以我没有移动机械臂。"
+    for marker in ("unknown joint:", "invalid joint:"):
+        if lowered.startswith(marker):
+            joint_name = value.split(":", 1)[1].strip() or "requested"
+            return f"当前没有名为“{joint_name}”的已验证关节，所以我没有移动机械臂。"
+    base_move = re.fullmatch(
+        r"base moved (?P<direction>[a-z_]+) (?P<distance>[-+]?\d+(?:\.\d+)?)cm",
+        lowered,
+    )
+    if base_move is not None:
+        direction = _direction_zh(base_move.group("direction"))
+        distance = _format_number(float(base_move.group("distance")))
+        return f"已经向{direction}移动约 {distance} 厘米。"
+    base_turn = re.fullmatch(
+        r"base turned (?P<direction>[a-z_]+) (?P<angle>[-+]?\d+(?:\.\d+)?)deg",
+        lowered,
+    )
+    if base_turn is not None:
+        direction = _direction_zh(base_turn.group("direction"))
+        angle = _format_number(float(base_turn.group("angle")))
+        return f"已经向{direction}转了约 {angle} 度。"
     return value
+
+
+def _summary_line(text: str) -> str | None:
+    for line in str(text or "").splitlines():
+        stripped = line.strip()
+        if stripped.lower().startswith("- summary:"):
+            return stripped.split(":", 1)[1].strip()
+    return None
+
+
+def _direction_zh(direction: str) -> str:
+    return {
+        "forward": "前",
+        "backward": "后",
+        "left": "左",
+        "right": "右",
+    }.get(direction, direction.replace("_", " "))
+
+
+def _format_number(value: float) -> str:
+    return str(int(value)) if value.is_integer() else f"{value:g}"
+
+
+def _pose_display_name(pose_name: str) -> str:
+    return {
+        "pre_grasp": "预抓取",
+        "home": "home",
+        "safe": "安全",
+    }.get(pose_name, pose_name)

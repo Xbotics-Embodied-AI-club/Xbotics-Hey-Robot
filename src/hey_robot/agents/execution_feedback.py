@@ -244,9 +244,11 @@ def status_feedback_from_result(
             recommended_action="inspect_or_recover",
             metadata={"backend": backend, "controller_status": result.status},
         )
-    if status is not None and status.success is False:
+    matching_status = status if status_matches_skill(status, result) else None
+    status_for_context = matching_status or status
+    if matching_status is not None and matching_status.success is False:
         summary = (
-            status.error
+            matching_status.error
             or result.summary
             or "robot status reports unsuccessful execution"
         )
@@ -260,9 +262,9 @@ def status_feedback_from_result(
             failure_reason=summary,
             next_hint="inspect the scene and choose the next action",
             recommended_action="reobserve",
-            metadata={"backend": backend, "robot_state": status.state},
+            metadata={"backend": backend, "robot_state": matching_status.state},
         )
-    camera_issue = _camera_quality_issue_from_status(status)
+    camera_issue = _camera_quality_issue_from_status(status_for_context)
     if camera_issue:
         return ExecutionFeedback(
             skill_id=result.skill_id,
@@ -277,42 +279,46 @@ def status_feedback_from_result(
             metadata={
                 "backend": backend,
                 "camera_issue": camera_issue,
-                "robot_state": status.state if status is not None else None,
+                "robot_state": status_for_context.state
+                if status_for_context is not None
+                else None,
             },
         )
     if is_perception_skill_name(result.name):
         summary = result.summary or "perception skill completed"
-        if status is not None and status.state:
-            summary = f"{summary}; robot_state={status.state}"
+        if status_for_context is not None and status_for_context.state:
+            summary = f"{summary}; robot_state={status_for_context.state}"
         return ExecutionFeedback(
             skill_id=result.skill_id,
             outcome="confirmed",
             task_success=None,
             subgoal_success=True,
-            confidence=0.9 if status is not None else 0.75,
+            confidence=0.9 if status_for_context is not None else 0.75,
             summary=summary,
             next_hint="report the observed scene; do not repeat the same perception skill unless the user asks or images are invalid",
             recommended_action="report_or_continue",
             metadata={
                 "backend": backend,
-                "robot_state": status.state if status is not None else None,
+                "robot_state": status_for_context.state
+                if status_for_context is not None
+                else None,
                 "perception_completed": True,
             },
         )
-    task_success = (
-        bool(status.success)
-        if status is not None and status.success is not None
-        else False
-    )
+    task_success = True
+    if matching_status is not None and matching_status.success is not None:
+        task_success = bool(matching_status.success)
+    elif result.success is not None:
+        task_success = bool(result.success)
     summary = result.summary or "controller completed the skill"
-    if status is not None and status.state:
-        summary = f"{summary}; robot_state={status.state}"
+    if status_for_context is not None and status_for_context.state:
+        summary = f"{summary}; robot_state={status_for_context.state}"
     return ExecutionFeedback(
         skill_id=result.skill_id,
         outcome="confirmed",
         task_success=task_success,
         subgoal_success=True,
-        confidence=0.75 if status is not None else 0.6,
+        confidence=0.75 if status_for_context is not None else 0.6,
         summary=summary,
         next_hint="continue with the next useful step"
         if not task_success
@@ -320,8 +326,20 @@ def status_feedback_from_result(
         recommended_action="report_or_continue" if task_success else "continue",
         metadata={
             "backend": backend,
-            "robot_state": status.state if status is not None else None,
+            "robot_state": status_for_context.state
+            if status_for_context is not None
+            else None,
+            "status_matched_skill": matching_status is not None,
         },
+    )
+
+
+def status_matches_skill(status: RobotStatus | None, result: SkillResult) -> bool:
+    return bool(
+        status is not None
+        and status.skill_id
+        and result.skill_id
+        and status.skill_id == result.skill_id
     )
 
 

@@ -66,6 +66,73 @@ def test_task_recovery_planner_maps_resource_busy_to_clarify() -> None:
     assert "request_clarification" in decision.actions
 
 
+def test_task_recovery_planner_marks_unknown_pose_as_non_retryable_parameter_error() -> (
+    None
+):
+    planner = TaskRecoveryPlanner()
+    decision = planner.decide(
+        task=None,
+        result=SkillResult(
+            envelope=Envelope(robot_id="mock0"),
+            skill_id="cmd1",
+            status="failed",
+            failure_mode="execution_failed",
+            summary="unknown named pose: pre_grasp",
+        ),
+        status=None,
+    )
+
+    assert decision.needed is True
+    assert decision.strategy == "clarify"
+    assert decision.retryable is False
+    assert decision.metadata["failure_class"] == "parameter_error"
+    assert "预抓取" in decision.summary
+    assert "直接重试" in decision.summary
+
+
+def test_task_recovery_planner_marks_invalid_joint_as_parameter_error() -> None:
+    planner = TaskRecoveryPlanner()
+    decision = planner.decide(
+        task=None,
+        result=SkillResult(
+            envelope=Envelope(robot_id="mock0"),
+            skill_id="cmd1",
+            status="failed",
+            failure_mode="invalid_joint",
+            error="unknown joint: wrist_yaw",
+        ),
+        status=None,
+    )
+
+    assert decision.needed is True
+    assert decision.strategy == "clarify"
+    assert decision.retryable is False
+    assert decision.metadata["failure_class"] == "parameter_error"
+    assert "wrist_yaw" in decision.summary
+
+
+def test_task_recovery_planner_marks_capability_unavailable_as_non_retryable() -> None:
+    planner = TaskRecoveryPlanner()
+    decision = planner.decide(
+        task=None,
+        result=SkillResult(
+            envelope=Envelope(robot_id="mock0"),
+            skill_id="cmd1",
+            name="human_follow",
+            status="failed",
+            failure_mode="capability_not_available",
+            error="capability not available: human_follow",
+        ),
+        status=None,
+    )
+
+    assert decision.needed is True
+    assert decision.strategy == "clarify"
+    assert decision.retryable is False
+    assert decision.metadata["failure_class"] == "capability_unavailable"
+    assert "human_follow" in decision.summary
+
+
 def test_task_recovery_planner_uses_scene_risk_for_reobserve() -> None:
     planner = TaskRecoveryPlanner()
     task = TaskRun(

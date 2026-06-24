@@ -30,6 +30,7 @@ class AgentRuntimeHookContext:
     response: Any | None = None
     tool_results: list[Any] = field(default_factory=list)
     final_result: Any | None = None
+    turn_trace: dict[str, Any] | None = None
 
 
 class AgentRuntimeHook:

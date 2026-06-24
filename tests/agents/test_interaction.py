@@ -15,6 +15,19 @@ def test_busy_turn_classifier_handles_chinese_interrupts_and_corrections() -> No
     assert _classify("不是这个，往左一点") == "correction"
 
 
+def test_busy_turn_classifier_has_specific_retry_reset_and_emergency_kinds() -> None:
+    retry = classify_user_interaction("再试一次", robot_busy=True)
+    reset = classify_user_interaction("复位", robot_busy=True)
+    emergency = classify_user_interaction("紧急停止", robot_busy=True)
+
+    assert retry.kind == "retry"
+    assert retry.target == "last_failed_skill"
+    assert reset.kind == "reset"
+    assert reset.target == "robot_posture"
+    assert emergency.kind == "emergency_stop"
+    assert emergency.urgency == "immediate"
+
+
 def test_interpret_pending_confirmation_reply_accepts_json_and_dict() -> None:
     assert (
         interpret_pending_confirmation_reply('{"action":"confirm"}').action == "confirm"

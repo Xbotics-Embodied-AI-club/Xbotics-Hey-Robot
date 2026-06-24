@@ -83,6 +83,15 @@ class AgentRunRecorder:
             },
         )
 
+    def record_turn_trace(self, trace: dict[str, Any]) -> None:
+        self._append_jsonl(
+            "turn_traces.jsonl",
+            {
+                "timestamp": time.time(),
+                "trace": trace,
+            },
+        )
+
     def _append_jsonl(self, filename: str, payload: dict[str, Any]) -> None:
         self.agent_run_dir.mkdir(parents=True, exist_ok=True)
         path = self.agent_run_dir / filename

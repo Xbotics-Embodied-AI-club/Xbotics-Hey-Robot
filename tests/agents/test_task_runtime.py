@@ -180,6 +180,187 @@ def test_task_runtime_new_non_quick_turn_still_supersedes_previous_task(
     assert cancelled.metadata["superseded_by"] == "bring me the bottle"
 
 
+def test_task_runtime_retry_quick_action_reuses_existing_task(tmp_path) -> None:
+    runtime = _runtime(tmp_path)
+    episode_id = "ep1"
+    runtime.task_runs.ensure_active(
+        episode_id=episode_id,
+        task="pick the cup",
+        agent_id="main",
+        robot_id="mock0",
+    )
+    retry_turn = UserTurn(
+        envelope=Envelope(
+            trace_id="tr3", episode_id=episode_id, agent_id="main", robot_id="mock0"
+        ),
+        text="重试",
+        metadata={"quick_action": "retry_skill"},
+    )
+
+    built = runtime.build_turn(
+        turn=retry_turn,
+        snapshot=RobotSnapshot(robot_id="mock0"),
+        history=[],
+        recovery_context=None,
+        context_builder=RobotContextBuilder(),
+        injector=RobotTurnInjector(),
+    )
+
+    tasks = runtime.task_runs.list_for_episode(episode_id)
+
+    assert built.task is not None
+    assert built.task.root_task == "pick the cup"
+    assert [task.status for task in tasks] == ["active"]
+    assert "Continue the active robot task: pick the cup" in built.turn.text
+
+
+def test_task_runtime_retry_on_recovering_task_resumes_recovery_context(
+    tmp_path,
+) -> None:
+    runtime = _runtime(tmp_path)
+    episode_id = "ep1"
+    runtime.task_runs.ensure_active(
+        episode_id=episode_id,
+        task="pick the cup",
+        agent_id="main",
+        robot_id="mock0",
+    )
+    runtime.task_runs.set_recovery(
+        episode_id,
+        strategy="retry_with_adjustment",
+        summary="grip slipped",
+        metadata={"needed": True},
+    )
+    retry_turn = UserTurn(
+        envelope=Envelope(
+            trace_id="tr4", episode_id=episode_id, agent_id="main", robot_id="mock0"
+        ),
+        text="再试一次",
+    )
+
+    built = runtime.build_turn(
+        turn=retry_turn,
+        snapshot=RobotSnapshot(robot_id="mock0"),
+        history=[],
+        recovery_context=runtime.recovery_context(episode_id),
+        context_builder=RobotContextBuilder(),
+        injector=RobotTurnInjector(),
+    )
+
+    task = runtime.task_runs.load_active(episode_id)
+
+    assert task is not None
+    assert task.root_task == "pick the cup"
+    assert task.status == "active"
+    assert built.recovery_context is None
+    assert (
+        built.turn.metadata["_recovery_resume"]["strategy"] == "retry_with_adjustment"
+    )
+    assert "Recovery strategy: retry_with_adjustment" in built.turn.text
+
+
+def test_task_runtime_retry_after_parameter_error_keeps_recovery_blocked(
+    tmp_path,
+) -> None:
+    runtime = _runtime(tmp_path)
+    episode_id = "ep1"
+    runtime.task_runs.ensure_active(
+        episode_id=episode_id,
+        task="机械臂切换到预抓取位姿",
+        agent_id="main",
+        robot_id="mock0",
+    )
+    runtime.task_runs.set_recovery(
+        episode_id,
+        strategy="clarify",
+        summary="当前没有名为“预抓取”的已验证姿态，所以不能直接重试。",
+        metadata={
+            "retryable": False,
+            "metadata": {"failure_class": "parameter_error"},
+        },
+    )
+    retry_turn = UserTurn(
+        envelope=Envelope(
+            trace_id="tr4", episode_id=episode_id, agent_id="main", robot_id="mock0"
+        ),
+        text="重试",
+    )
+
+    built = runtime.build_turn(
+        turn=retry_turn,
+        snapshot=RobotSnapshot(robot_id="mock0"),
+        history=[],
+        recovery_context=runtime.recovery_context(episode_id),
+        context_builder=RobotContextBuilder(),
+        injector=RobotTurnInjector(),
+    )
+
+    task = runtime.task_runs.load_active(episode_id)
+
+    assert task is not None
+    assert task.status == "recovering"
+    assert built.block_actuation is True
+    assert "_recovery_resume" not in built.turn.metadata
+    assert "Continue the active robot task" not in built.turn.text
+
+
+def test_task_runtime_late_completed_result_clears_previous_skill_failure(
+    tmp_path,
+) -> None:
+    runtime = _runtime(tmp_path)
+    episode_id = "ep1"
+    runtime.task_runs.ensure_active(
+        episode_id=episode_id,
+        task="open gripper",
+        agent_id="main",
+        robot_id="mock0",
+    )
+    runtime.task_runs.bind_skill(episode_id, "skill1", "open gripper")
+    envelope = Envelope(
+        trace_id="tr1", episode_id=episode_id, agent_id="main", robot_id="mock0"
+    )
+
+    failed = runtime.observe_skill_result(
+        SkillResult(
+            envelope=envelope,
+            skill_id="skill1",
+            name="set_gripper",
+            status="failed",
+            success=False,
+            summary="skill timed out after 3s",
+            failure_mode="timeout",
+            error="skill timed out",
+        )
+    )
+    assert failed is not None
+    assert failed.status == "recovering"
+    assert failed.failure_reason == "skill timed out"
+    assert failed.attempts[-1].status == "failed"
+    assert failed.attempts[-1].metadata["failure_summary"] == "skill timed out"
+
+    completed = runtime.observe_skill_result(
+        SkillResult(
+            envelope=envelope,
+            skill_id="skill1",
+            name="set_gripper",
+            status="completed",
+            success=True,
+            summary="gripper opened late",
+            metadata={"late_success_after_timeout": True},
+        )
+    )
+
+    assert completed is not None
+    assert completed.status == "feedback_pending"
+    assert completed.failure_reason is None
+    assert completed.recovery is None
+    assert completed.attempts[-1].status == "completed"
+    assert completed.attempts[-1].success is True
+    assert "failure_summary" not in completed.attempts[-1].metadata
+    assert completed.skill_trace[-1]["status"] == "completed"
+    assert completed.skill_trace[-1]["success"] is True
+
+
 def test_task_runtime_result_text_for_agent_includes_recovery_continuation_after_successful_resume_step(
     tmp_path,
 ) -> None:

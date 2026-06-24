@@ -8,8 +8,11 @@ from typing import Any, cast
 from hey_robot.channels.base import ChannelContext, InboundHandler
 from hey_robot.events import RuntimeEvent
 from hey_robot.frontend_paths import frontend_root
+from hey_robot.logging import HeyRobotLogger
 from hey_robot.protocol import AgentReply, Envelope, UserTurn
 from hey_robot.protocol.messages import to_payload
+
+logger = HeyRobotLogger(name="web")
 
 HistoryPayload = dict[str, Any]
 HistoryProvider = Callable[[Envelope, int], HistoryPayload | Any]
@@ -333,6 +336,7 @@ class WebChannel:
         )
         self._server = uvicorn.Server(config)
         self._server_task = asyncio.create_task(self._server.serve())
+        self._log_startup_urls()
 
     async def send(self, reply: AgentReply) -> None:
         payload = to_payload(reply)
@@ -466,6 +470,19 @@ class WebChannel:
             return None
         scored = sorted(urls, key=self._access_url_rank)
         return scored[0]
+
+    def _log_startup_urls(self) -> None:
+        listen_url = self._format_url(self.host)
+        primary_url = self._primary_access_url() or listen_url
+        urls = self._access_urls()
+        if listen_url not in urls:
+            urls = [listen_url, *urls]
+        logger.info(
+            "Web channel started: "
+            f"listen={listen_url} chat={primary_url}/chat "
+            f"tasks={primary_url}/tasks admin={primary_url}/admin "
+            f"access_urls={', '.join(urls)}"
+        )
 
     @staticmethod
     def _access_url_rank(url: str) -> tuple[int, str]:

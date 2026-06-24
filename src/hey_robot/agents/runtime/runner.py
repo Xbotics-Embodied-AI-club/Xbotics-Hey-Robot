@@ -13,6 +13,7 @@ from hey_robot.agents.runtime.agent_run import AgentRunRecorder
 from hey_robot.agents.runtime.audit import ToolAuditLogger
 from hey_robot.agents.runtime.grounding import (
     is_perception_evidence_record,
+    is_perception_skill_name,
     needs_perception_grounding,
 )
 from hey_robot.agents.runtime.hooks import (
@@ -49,6 +50,7 @@ from hey_robot.agents.task_contract import (
     TaskContract,
     TaskEvidenceEvaluator,
     build_task_contract,
+    capability_type_for_name,
 )
 from hey_robot.agents.tools.registry import ToolRegistry
 from hey_robot.capability.catalog.resolver import CapabilityResolver
@@ -259,6 +261,14 @@ class AgentRuntime:
         self._record_task_contract(task_contract)
         self._record_task_evidence(evidence_ledger)
         max_iterations = spec.max_iterations or self.max_iterations
+        turn_trace: dict[str, Any] = {
+            "trace_id": "",
+            "task": payload.task,
+            "model_calls": [],
+            "tool_calls": [],
+            "skills": [],
+            "final": {},
+        }
         provider_timeout_sec = max(
             5.0, float(spec.provider_timeout_sec or self.provider_timeout_sec)
         )
@@ -273,9 +283,10 @@ class AgentRuntime:
         while iterations < max_iterations:
             iterations += 1
             hook_context = AgentRuntimeHookContext(
-                iteration=iterations, messages=messages
+                iteration=iterations, messages=messages, turn_trace=turn_trace
             )
             await self._emit_runtime_hook("before_iteration", hook_context)
+            model_started_at = time.time()
             try:
                 messages_for_model = apply_message_window(
                     messages, spec.message_window or self.message_window_policy
@@ -330,6 +341,16 @@ class AgentRuntime:
                     runtime_result=result,
                     error=result.result,
                 )
+            model_duration_ms = int((time.time() - model_started_at) * 1000)
+            turn_trace["model_calls"].append(
+                {
+                    "iteration": iterations,
+                    "duration_ms": model_duration_ms,
+                    "finish_reason": response.finish_reason,
+                    "error_kind": getattr(response, "error_kind", None),
+                    "tool_call_count": len(response.tool_calls),
+                }
+            )
             hook_context.response = response
             await self._emit_runtime_hook("after_model_response", hook_context)
             try:
@@ -360,6 +381,19 @@ class AgentRuntime:
                     if getattr(response, "error_kind", None) == "timeout"
                     else "provider_error"
                 )
+                if last_tool_result is not None and last_tool_result.tool_success:
+                    fallback_result = self._successful_tool_fallback_result(
+                        last_tool_result,
+                        messages=messages,
+                        task_contract=task_contract,
+                        evidence_ledger=evidence_ledger,
+                        reason=f"{stop_reason}_after_successful_tool",
+                        stop_reason=f"{stop_reason}_after_tool_result",
+                    )
+                    if fallback_result is not None:
+                        return await self._finish_run(
+                            fallback_result, messages, tools_used, hook_context
+                        )
                 result = AgentRuntimeResult(
                     tool="wait",
                     args={"reason": decision.content},
@@ -524,6 +558,24 @@ class AgentRuntime:
                 tool_result_text = executed.result
                 success = executed.success
                 tools_used.append(tool)
+                turn_trace["tool_calls"].append(
+                    {
+                        "name": tool,
+                        "capability": str(args.get("capability") or "")
+                        if isinstance(args, dict)
+                        else "",
+                        "success": bool(success),
+                        "tool_call_id": executed.tool_call_id,
+                    }
+                )
+                if tool == "request_capability":
+                    turn_trace["skills"].append(
+                        {
+                            "name": str(args.get("capability") or ""),
+                            "status": "completed" if success else "failed",
+                            "tool_call_id": executed.tool_call_id,
+                        }
+                    )
 
                 self.state.add_tool_call(tool, args, tool_result_text, success=success)
                 evidence_ledger.add_tool_result(
@@ -560,6 +612,15 @@ class AgentRuntime:
                 if continuation_guidance:
                     messages.append(
                         ReasoningMessage(role="user", content=continuation_guidance)
+                    )
+                direct_completion = self._single_step_action_completion_result(
+                    tool_result=last_tool_result,
+                    task_contract=task_contract,
+                    evidence_ledger=evidence_ledger,
+                )
+                if direct_completion is not None:
+                    return await self._finish_run(
+                        direct_completion, messages, tools_used, hook_context
                     )
                 if self.agent_run_recorder is not None:
                     self.agent_run_recorder.record_decision(
@@ -757,6 +818,16 @@ class AgentRuntime:
         tools_used: list[str],
         hook_context: AgentRuntimeHookContext,
     ) -> AgentRunResult:
+        if hook_context.turn_trace is not None:
+            hook_context.turn_trace["final"] = {
+                "tool": result.tool,
+                "stop_reason": result.stop_reason,
+                "task_finished": bool(result.task_finished),
+                "tool_success": result.tool_success,
+            }
+            result.args = {**dict(result.args), "_turn_trace": hook_context.turn_trace}
+            if self.agent_run_recorder is not None:
+                self.agent_run_recorder.record_turn_trace(hook_context.turn_trace)
         hook_context.final_result = result
         await self._emit_runtime_hook("after_iteration", hook_context)
         final_content = (
@@ -782,6 +853,65 @@ class AgentRuntime:
         for hook in self.runtime_hooks:
             method = getattr(hook, method_name)
             await method(context)
+
+    def _successful_tool_fallback_result(
+        self,
+        result: AgentRuntimeResult,
+        *,
+        messages: list[ReasoningMessage],
+        task_contract: TaskContract,
+        evidence_ledger: EvidenceLedger,
+        reason: str,
+        stop_reason: str,
+    ) -> AgentRuntimeResult | None:
+        fallback_reply = self._final_answer_from_tool_result(result)
+        if fallback_reply and (
+            looks_like_internal_agent_protocol(fallback_reply)
+            or looks_like_internal_user_reply(fallback_reply)
+        ):
+            fallback_reply = ""
+        if fallback_reply:
+            evaluation = self._evaluate_final_candidate(
+                task_contract, evidence_ledger, fallback_reply
+            )
+            if not evaluation.can_finalize:
+                return AgentRuntimeResult(
+                    tool_call_id=result.tool_call_id,
+                    tool=result.tool,
+                    args=result.args,
+                    result=evaluation.feedback_for_agent(task_contract),
+                    reason="task_evidence_incomplete",
+                    task_finished=False,
+                    stop_reason=stop_reason,
+                    tool_success=True,
+                    task_evaluation_applied=True,
+                )
+            return self._text_response_result(
+                tool="final_response",
+                args={},
+                result=fallback_reply,
+                reason=reason,
+                task_finished=evaluation.goal_satisfied,
+                stop_reason="text_response",
+                tool_success=True,
+                task_evaluation_applied=True,
+            )
+        fallback = (result.result or "").strip()
+        if fallback:
+            fallback = f"动作或工具已执行，但模型总结超时。最近结果：{fallback}"
+        else:
+            fallback = "动作或工具已执行，但模型总结超时。当前不会继续执行新的动作。"
+        messages.append(ReasoningMessage(role="user", content=fallback))
+        return AgentRuntimeResult(
+            tool_call_id=result.tool_call_id,
+            tool=result.tool,
+            args=result.args,
+            result=fallback,
+            reason=reason,
+            task_finished=False,
+            stop_reason=stop_reason,
+            tool_success=True,
+        )
 
     async def _synthesize_final_answer_after_tool(
         self,
@@ -820,6 +950,46 @@ class AgentRuntime:
             if error:
                 return f"这个动作没有成功提交：{error}"
         return None
+
+    def _single_step_action_completion_result(
+        self,
+        *,
+        tool_result: AgentRuntimeResult,
+        task_contract: TaskContract,
+        evidence_ledger: EvidenceLedger,
+    ) -> AgentRuntimeResult | None:
+        if tool_result.tool != "request_capability" or not tool_result.tool_success:
+            return None
+        capability = str(tool_result.args.get("capability") or "").strip()
+        if not capability or is_perception_skill_name(capability):
+            return None
+        if task_contract.required_capability is None:
+            return None
+        actual_type = capability_type_for_name(capability, evidence_ledger.semantics)
+        if actual_type != task_contract.required_capability.type:
+            return None
+        feedback = _execution_feedback_fields(tool_result.result)
+        if feedback.get("subgoal_success") is not True:
+            return None
+        if feedback.get("task_success") is not True:
+            return None
+        summary = str(feedback.get("summary") or "").strip()
+        reply = self._final_answer_from_tool_result(tool_result) or summary
+        if not reply or looks_like_internal_user_reply(reply):
+            reply = "动作已经完成。"
+        evaluation = self._evaluate_final_candidate(
+            task_contract, evidence_ledger, reply
+        )
+        return self._text_response_result(
+            tool="final_response",
+            args={},
+            result=reply,
+            reason="single_step_action_completed",
+            task_finished=evaluation.goal_satisfied,
+            stop_reason="text_response",
+            tool_success=True,
+            task_evaluation_applied=True,
+        )
 
     def _internal_protocol_retry_guidance(
         self,
@@ -1364,6 +1534,36 @@ def _json_object(text: str) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def _execution_feedback_fields(text: str) -> dict[str, Any]:
+    stripped = (text or "").strip()
+    if not stripped.startswith("Execution feedback for skill "):
+        return {}
+    parsed: dict[str, Any] = {}
+    for line in stripped.splitlines()[1:]:
+        line = line.strip()
+        if not line.startswith("- "):
+            continue
+        key, sep, value = line[2:].partition(":")
+        if not sep:
+            continue
+        parsed[key.strip()] = _parse_feedback_scalar(value.strip())
+    return parsed
+
+
+def _parse_feedback_scalar(value: str) -> Any:
+    lowered = value.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    if lowered == "none":
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return value
 
 
 def _perception_reply_from_payload(payload: dict[str, Any]) -> str | None:

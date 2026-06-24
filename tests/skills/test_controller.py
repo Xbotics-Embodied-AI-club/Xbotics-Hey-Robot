@@ -350,12 +350,23 @@ def test_skill_controller_publishes_late_success_after_timeout(tmp_path) -> None
         for topic, payload in service.bus.published
         if topic == service.topics.skill_event
     ]  # type: ignore[attr-defined]
+    scheduler_states = [
+        payload
+        for topic, payload in service.bus.published
+        if topic == service.topics.runtime_event
+        and payload["kind"] == "skill_scheduler.state"
+    ]  # type: ignore[attr-defined]
 
     assert results[0]["status"] == "failed"
     assert results[0]["failure_mode"] == "timeout"
     assert results[-1]["status"] == "completed"
     assert results[-1]["success"] is True
     assert "completed" in phases
+    assert scheduler_states[-1]["payload"]["last_decision"]["phase"] == "completed"
+    assert (
+        scheduler_states[-1]["payload"]["last_decision"]["reason"]
+        == "late_success_after_timeout"
+    )
 
 
 def test_skill_run_timeout_uses_start_or_action_publish_time_not_accept_time(
@@ -1289,6 +1300,46 @@ class TestInterruptActiveResilience:
         # Fix: active run preserved 鈥?contract resolution happens before popping
         assert "skill1" in service.states["embodied_skills"].active_runs
         assert len(service.states["embodied_skills"].active_runs) == 1
+
+    def test_reset_posture_interrupt_keeps_reset_target(self, tmp_path) -> None:
+        service = _service(tmp_path)
+        envelope = Envelope(trace_id="tr1", robot_id="xlerobot")
+        reset = SkillIntent(
+            envelope=envelope,
+            skill_id="reset1",
+            name="reset_posture",
+            objective="reset posture",
+            interrupt=True,
+        )
+
+        asyncio.run(
+            service._on_skill_intent(service.topics.skill_intent, reset.__dict__)
+        )
+
+        run = service.states["embodied_skills"].active_runs["reset1"]
+        assert run.skill_name == "reset_posture"
+        assert run.intent.name == "reset_posture"
+        assert run.timeout_sec == 15.0
+
+    def test_pure_interrupt_uses_stop_motion_contract_timeout(self, tmp_path) -> None:
+        service = _service(tmp_path)
+        envelope = Envelope(trace_id="tr1", robot_id="xlerobot")
+        interrupt = SkillIntent(
+            envelope=envelope,
+            skill_id="interrupt1",
+            name="interrupt",
+            objective="interrupt active skill",
+            interrupt=True,
+        )
+
+        asyncio.run(
+            service._on_skill_intent(service.topics.skill_intent, interrupt.__dict__)
+        )
+
+        run = service.states["embodied_skills"].active_runs["interrupt1"]
+        assert run.skill_name == "stop_motion"
+        assert run.intent.name == "stop_motion"
+        assert run.timeout_sec == 8.0
 
 
 class TestObserveRunDuplicateCompletion:

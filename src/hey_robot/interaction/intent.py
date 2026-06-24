@@ -17,6 +17,19 @@ def classify_user_interaction(
     text: str, *, robot_busy: bool = False
 ) -> UserInteractionIntent:
     normalized = " ".join((text or "").lower().split())
+    compact = normalized.replace(" ", "")
+    if compact in {"retry", "tryagain", "重试", "再试一次", "重新试一下"}:
+        return UserInteractionIntent(
+            kind="retry", urgency="safe_boundary", target="last_failed_skill"
+        )
+    if compact in {"reset", "复位", "重置"}:
+        return UserInteractionIntent(
+            kind="reset", urgency="immediate", target="robot_posture"
+        )
+    if compact in {"emergencystop", "estop", "急停", "紧急停止"}:
+        return UserInteractionIntent(
+            kind="emergency_stop", urgency="immediate", target="robot"
+        )
     interrupt_markers = {
         "stop",
         "halt",

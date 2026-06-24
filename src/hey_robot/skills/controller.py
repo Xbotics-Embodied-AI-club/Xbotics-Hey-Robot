@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from hey_robot.bus.factory import create_bus_client
@@ -129,7 +129,7 @@ class SkillControllerService:
             return
         policy_id, state = state_item
         if intent.interrupt:
-            await self._interrupt_active(policy_id, state, intent)
+            await self._handle_interrupting_intent(policy_id, state, intent)
             return
         try:
             await self._accept_skill(policy_id, state, intent)
@@ -522,7 +522,9 @@ class SkillControllerService:
         run, finished_at, failure_mode = item
         if failure_mode != "timeout" or time.time() - finished_at > 2.0:
             return False
+        run.terminal = True
         run.status_received_at = time.time()
+        run.steps_executed = max(run.steps_executed, 1)
         step_summary = self._status_step_summary(status)
         if step_summary:
             run.step_summaries.append(step_summary)
@@ -557,6 +559,19 @@ class SkillControllerService:
             steps_executed=run.steps_executed,
             contract=run.contract,
             run=run,
+        )
+        await self._publish_scheduler_state(
+            policy_id,
+            state,
+            phase="completed",
+            intent=run.intent,
+            contract=run.contract,
+            decision={
+                "reason": "late_success_after_timeout",
+                "previous_failure_mode": failure_mode,
+                "error": None,
+            },
+            severity="info",
         )
         state.recently_finished_runs.pop(status.skill_id, None)
         return True
@@ -974,13 +989,47 @@ class SkillControllerService:
             return max(1.0, duration_ms / 1000.0 + 1.0)
         return 0.0
 
-    async def _interrupt_active(
+    async def _handle_interrupting_intent(
+        self, policy_id: str, state: _SkillControllerState, intent: SkillIntent
+    ) -> None:
+        if intent.name == "interrupt":
+            stop_contract = self.plugin_skill_catalog.resolve(
+                "stop_motion",
+                robot_type=self._robot_type(state.spec.robot_id),
+            )
+        else:
+            self.plugin_skill_catalog.resolve(
+                intent.name,
+                robot_type=self._robot_type(state.spec.robot_id),
+            )
+            stop_contract = None
+        await self._interrupt_active_runs(policy_id, state, intent)
+        if intent.name == "interrupt":
+            assert stop_contract is not None
+            await self._accept_skill(
+                policy_id,
+                state,
+                SkillIntent(
+                    envelope=intent.envelope,
+                    skill_id=intent.skill_id,
+                    name="stop_motion",
+                    arguments={"emergency": True},
+                    objective=intent.objective or "interrupt active skill",
+                    interrupt=False,
+                    timeout_sec=stop_contract.timeout_sec,
+                    feedback_mode=stop_contract.feedback_mode,
+                    metadata={
+                        **dict(intent.metadata),
+                        "source": "skill_controller.interrupt",
+                    },
+                ),
+            )
+            return
+        await self._accept_skill(policy_id, state, replace(intent, interrupt=False))
+
+    async def _interrupt_active_runs(
         self, policy_id: str, state: _SkillControllerState, interrupt: SkillIntent
     ) -> None:
-        self.plugin_skill_catalog.resolve(
-            "stop_motion",
-            robot_type=self._robot_type(state.spec.robot_id),
-        )
         active_runs = [run for run in state.active_runs.values() if not run.terminal]
         for run in active_runs:
             run.terminal = True
@@ -1019,21 +1068,11 @@ class SkillControllerService:
                 },
                 severity="warn",
             )
-        stop_intent = SkillIntent(
-            envelope=interrupt.envelope,
-            skill_id=interrupt.skill_id,
-            name="stop_motion",
-            arguments={"emergency": True},
-            objective=interrupt.objective or "interrupt active skill",
-            interrupt=False,
-            timeout_sec=3.0,
-            feedback_mode="none",
-            metadata={
-                **dict(interrupt.metadata),
-                "source": "skill_controller.interrupt",
-            },
-        )
-        await self._accept_skill(policy_id, state, stop_intent)
+
+    async def _interrupt_active(
+        self, policy_id: str, state: _SkillControllerState, interrupt: SkillIntent
+    ) -> None:
+        await self._handle_interrupting_intent(policy_id, state, interrupt)
 
     @staticmethod
     def _precondition_block(

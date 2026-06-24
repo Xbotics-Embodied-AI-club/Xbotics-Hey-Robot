@@ -45,10 +45,14 @@ class TaskEpisodeRuntime:
                     attempt.metadata["completion_summary"] = (
                         result.summary or result.status
                     )
+                    attempt.metadata.pop("failure_summary", None)
+                    attempt.metadata.pop("failure_reason", None)
                     attempt.success = True
                     break
             state.status = "feedback_pending"
             state.failure_reason = None
+            state.recovery = None
+            state.paused_reason = None
         elif result.status in {"failed", "interrupted"}:
             for attempt in state.attempts:
                 if attempt.skill_id == result.skill_id:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 import pytest
@@ -157,6 +158,11 @@ class TestXLeRobotSimSkillAdapter:
 
 
 class TestXLeRobotSimDriver:
+    pytestmark = pytest.mark.skipif(
+        importlib.util.find_spec("mujoco") is None,
+        reason="requires optional sim dependency: mujoco",
+    )
+
     def test_xlerobot_model_contains_arm_mount_geometry(self) -> None:
         import mujoco
 
@@ -394,6 +400,11 @@ class TestXLeRobotSimDriver:
 
 class TestXLeRobotSimE2EFlow:
     """End-to-end: skill action to sim execution to observation to verification."""
+
+    pytestmark = pytest.mark.skipif(
+        importlib.util.find_spec("mujoco") is None,
+        reason="requires optional sim dependency: mujoco",
+    )
 
     @pytest.fixture
     def sim_context(self) -> RobotDriverContext:

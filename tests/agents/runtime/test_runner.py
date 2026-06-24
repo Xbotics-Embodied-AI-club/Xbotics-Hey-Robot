@@ -40,6 +40,61 @@ def test_agent_runtime_returns_wait_on_provider_error() -> None:
     assert result.result == "provider unavailable"
 
 
+def test_provider_timeout_after_successful_tool_returns_tool_fallback() -> None:
+    provider = FakeProvider(
+        [
+            {
+                "tool": "request_perception",
+                "args": {"question": "what do you see", "freshness": "fresh"},
+                "reason": "need fresh visual evidence",
+            },
+            ReasoningResponse(
+                content="LLM provider call timed out",
+                finish_reason="error",
+                error_kind="timeout",
+            ),
+        ]
+    )
+    runtime = AgentRuntime(provider, max_iterations=2)
+    runtime.register_tool(
+        "request_perception",
+        lambda question, freshness="fresh": json.dumps(
+            {
+                "tool": "request_perception",
+                "evidence": {
+                    "status": "ok",
+                    "summary": f"{question}: bottle on the table",
+                },
+                "freshness": freshness,
+            }
+        ),
+        read_only=True,
+        result_policy="require_final_answer",
+    )
+
+    result = asyncio.run(runtime.step(_payload("what do you see")))
+
+    assert result.tool == "final_response"
+    assert result.stop_reason == "text_response"
+    assert result.result == "what do you see: bottle on the table"
+
+
+def test_provider_timeout_without_tool_still_returns_model_timeout() -> None:
+    provider = FakeProvider(
+        ReasoningResponse(
+            content="LLM provider call timed out",
+            finish_reason="error",
+            error_kind="timeout",
+        )
+    )
+    runtime = AgentRuntime(provider, max_iterations=2)
+
+    result = asyncio.run(runtime.step(_payload()))
+
+    assert result.tool == "wait"
+    assert result.stop_reason == "model_timeout"
+
+
 def test_agent_runtime_executes_tool_then_uses_required_final_answer_policy() -> None:
     provider = FakeProvider(
         {
@@ -1095,6 +1150,140 @@ def test_agent_runtime_appends_continuation_guidance_after_successful_capability
     assert "- one_motion_one_perception:" in provider.last_messages[-1].content
 
 
+def test_agent_runtime_directly_completes_single_step_action_feedback() -> None:
+    provider = FakeProvider(
+        [
+            {
+                "tool": "request_capability",
+                "args": {
+                    "capability": "set_gripper",
+                    "objective": "open the gripper",
+                },
+                "reason": "open gripper",
+            },
+            "provider should not be called again",
+        ]
+    )
+    runtime = AgentRuntime(provider, max_iterations=4)
+
+    def complete_gripper(capability: str, objective: str) -> str:
+        del capability, objective
+        return (
+            "Execution feedback for skill skill1:\n"
+            "- outcome: confirmed\n"
+            "- subgoal_success: True\n"
+            "- task_success: True\n"
+            "- summary: gripper opened\n"
+            "- recommended_action: report_or_continue"
+        )
+
+    runtime.register_tool(
+        "request_capability", complete_gripper, safety_level="actuate"
+    )
+
+    result = asyncio.run(runtime.step(_payload("夹爪打开")))
+
+    assert result.tool == "final_response"
+    assert result.reason == "single_step_action_completed"
+    assert result.task_finished is True
+    assert result.result == "gripper opened"
+    assert provider.responses == ["provider should not be called again"]
+
+
+def test_agent_runtime_single_step_action_feedback_is_user_facing() -> None:
+    provider = FakeProvider(
+        [
+            {
+                "tool": "request_capability",
+                "args": {"capability": "move_base", "objective": "move forward"},
+                "reason": "move forward",
+            },
+            "provider should not be called again",
+        ]
+    )
+    runtime = AgentRuntime(provider, max_iterations=4)
+
+    def complete_move(capability: str, objective: str) -> str:
+        del capability, objective
+        return (
+            "Execution feedback for skill skill1:\n"
+            "- outcome: confirmed\n"
+            "- subgoal_success: True\n"
+            "- task_success: True\n"
+            "- summary: base moved forward 10.0cm; robot_state=observed\n"
+            "- recommended_action: report_or_continue"
+        )
+
+    runtime.register_tool("request_capability", complete_move, safety_level="actuate")
+
+    result = asyncio.run(runtime.step(_payload("往前走一些")))
+
+    assert result.tool == "final_response"
+    assert result.reason == "single_step_action_completed"
+    assert result.task_finished is True
+    assert result.result == "已经向前移动约 10 厘米。"
+    assert "robot_state" not in result.result
+    assert provider.responses == ["provider should not be called again"]
+
+
+def test_agent_runtime_attaches_compact_turn_trace() -> None:
+    provider = FakeProvider(
+        [
+            {
+                "tool": "request_perception",
+                "args": {"question": "what do you see", "freshness": "fresh"},
+                "reason": "need visual evidence",
+            },
+        ]
+    )
+    runtime = AgentRuntime(provider, max_iterations=1)
+
+    def perceive(question: str, freshness: str = "fresh") -> str:
+        del question
+        return json.dumps(
+            {
+                "tool": "request_perception",
+                "evidence": {"status": "ok", "summary": "desk ahead"},
+                "freshness": freshness,
+            }
+        )
+
+    runtime.register_tool(
+        "request_perception",
+        perceive,
+        read_only=True,
+        result_policy="require_final_answer",
+    )
+
+    result = asyncio.run(runtime.step(_payload("what do you see")))
+
+    trace = result.args["_turn_trace"]
+    assert trace["task"] == "what do you see"
+    assert trace["model_calls"][0]["finish_reason"] == "tool_calls"
+    assert trace["tool_calls"][0]["name"] == "request_perception"
+    assert trace["final"]["tool"] == "final_response"
+    assert trace["final"]["stop_reason"] == "text_response"
+
+
+def test_agent_runtime_persists_compact_turn_trace_when_recorder_is_enabled(
+    tmp_path,
+) -> None:
+    provider = FakeProvider("hello")
+    recorder = AgentRunRecorder(log_dir=tmp_path, agent_run_id="run1")
+    runtime = AgentRuntime(provider, max_iterations=1, agent_run_recorder=recorder)
+
+    result = asyncio.run(runtime.step(_payload("hello")))
+
+    traces = AgentRunReader(log_dir=tmp_path, agent_run_id="run1").read_jsonl(
+        "turn_traces.jsonl"
+    )
+
+    assert result.tool == "final_response"
+    assert traces
+    assert traces[-1]["trace"]["task"] == "hello"
+    assert traces[-1]["trace"]["final"]["stop_reason"] == "text_response"
+
+
 def test_agent_runtime_appends_recovery_guidance_after_failed_capability_step() -> None:
     provider = FakeProvider(
         [
@@ -1280,7 +1469,8 @@ def test_post_tool_guidance_failed_motion_injects_inspect_guidance() -> None:
     )
     runtime = AgentRuntime(provider, max_iterations=2)
 
-    def fail_move(capability: str, _objective: str) -> str:
+    def fail_move(capability: str, objective: str) -> str:
+        del objective
         raise RuntimeError(f"{capability} failed: collision detected")
 
     runtime.register_tool("request_capability", fail_move, safety_level="actuate")
@@ -1306,7 +1496,8 @@ def test_failed_capability_does_not_update_last_capability_state() -> None:
     )
     runtime = AgentRuntime(provider, max_iterations=2)
 
-    def fail_turn(capability: str, _objective: str) -> str:
+    def fail_turn(capability: str, objective: str) -> str:
+        del objective
         raise RuntimeError(f"{capability} failed: blocked")
 
     runtime.register_tool("request_capability", fail_turn, safety_level="actuate")
