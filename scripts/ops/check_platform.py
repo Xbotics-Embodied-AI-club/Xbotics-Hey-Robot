@@ -13,10 +13,12 @@ import importlib
 import json
 import platform
 import shutil
+import socket
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from hey_robot.config.model import DeploymentConfig
 
@@ -215,6 +217,7 @@ def inspect_config(config_path: str) -> dict[str, Any]:
         CheckResult(name="config_path", ok=True, detail=str(path))
     ]
     checks.extend(check_robot_platform_constraints(config))
+    checks.extend(check_config_ports(config))
     return {
         "ready": all(item.ok for item in checks),
         "path": str(path),
@@ -223,6 +226,51 @@ def inspect_config(config_path: str) -> dict[str, Any]:
         "enabled_robot_types": [r.type for r in config.robots.values() if r.enabled],
         "checks": [asdict(item) for item in checks],
     }
+
+
+def check_config_ports(config: DeploymentConfig) -> list[CheckResult]:
+    results: list[CheckResult] = []
+    bus = config.deployment.bus
+    if bus.type == "nats":
+        parsed = urlparse(bus.url)
+        host = parsed.hostname or "127.0.0.1"
+        port = int(parsed.port or 4222)
+        occupied = is_tcp_port_open(host, port)
+        results.append(
+            CheckResult(
+                name="port:nats",
+                ok=True,
+                detail=(
+                    f"{host}:{port} "
+                    + (
+                        "listening (NATS may already be running)"
+                        if occupied
+                        else "free"
+                    )
+                ),
+            )
+        )
+    web = config.channels.get("web")
+    if web and web.enabled:
+        host = str(web.settings.get("host", "127.0.0.1"))
+        port = int(web.settings.get("port", 8080))
+        probe_host = loopback_probe_host(host)
+        occupied = is_tcp_port_open(probe_host, port)
+        results.append(
+            CheckResult(
+                name="port:web",
+                ok=not occupied,
+                detail=(
+                    f"{host}:{port} "
+                    + (
+                        "already in use; stop the old Web runtime or change port"
+                        if occupied
+                        else "free"
+                    )
+                ),
+            )
+        )
+    return results
 
 
 def check_robot_platform_constraints(config: DeploymentConfig) -> list[CheckResult]:
@@ -272,6 +320,18 @@ def is_valid_serial_port(port: str, *, is_windows: bool) -> bool:
         normalized = port.upper()
         return normalized.startswith("COM") and normalized[3:].isdigit()
     return port.startswith("/dev/")
+
+
+def is_tcp_port_open(host: str, port: int, *, timeout: float = 0.2) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(timeout)
+        return sock.connect_ex((host, port)) == 0
+
+
+def loopback_probe_host(host: str) -> str:
+    if host in {"0.0.0.0", "::"}:  # noqa: S104 - probing local bind-all config
+        return "127.0.0.1"
+    return host
 
 
 if __name__ == "__main__":
