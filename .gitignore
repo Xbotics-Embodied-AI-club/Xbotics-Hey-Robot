@@ -75,3 +75,7 @@ outputs/*
 outputs/*
 runtime/*
 models/*
+
+# board-local launch helper / env (hold secrets) — never commit
+run_s600_chat.sh
+.s600_llm_env

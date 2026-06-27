@@ -298,16 +298,19 @@ agents:
       mode: autonomous
       max_iterations: 6
       providers:
+        # v1（planner 线上版）：planner 只要求 OpenAI 兼容端点，端点/模型/key 全部由环境变量提供，
+        # 配置里不写死具体网关与模型（与云端 profile 同风格）。绕开本地 oellm cache_len=4096 硬限，恢复全 8 工具。
         planner:
           type: openai_compat
-          model: Qwen3-8B
-          api_base: http://127.0.0.1:8000/v1
-          api_key: local
+          model_env: PLANNER_LLM_MODEL
+          api_base_env: PLANNER_LLM_API_BASE
+          api_key_env: PLANNER_LLM_API_KEY
           temperature: 0.0
           max_tokens: 1024
+        # 视觉仍走 S600 本地端侧；planner 让出 BPU 后由 2B 升到 4B（8B 与 whisper 同驻 BPU 装不下）。
         scene_captioner:
           type: openai_compat
-          model: Qwen3-VL-2B-Instruct
+          model: Qwen3-VL-4B-Instruct
           api_base: http://127.0.0.1:8000/v1
           api_key: local
           temperature: 0.0
