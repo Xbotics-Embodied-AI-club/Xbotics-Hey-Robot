@@ -120,11 +120,12 @@ channels:
       min_speech_sec: 0.4
       max_speech_sec: 8.0
     asr:
-      provider: sherpa_onnx
+      provider: openai
+      endpoint: http://127.0.0.1:8000/v1
+      model: whisper-medium
+      language: zh
       api_key_env: ARK_API_KEY
-      endpoint: wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream
       resource_id: volc.seedasr.sauc.duration
-      language: zh-CN
       sample_rate: 16000
       bits: 16
       channels: 1
