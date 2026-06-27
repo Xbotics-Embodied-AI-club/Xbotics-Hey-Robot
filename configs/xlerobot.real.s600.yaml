@@ -138,12 +138,12 @@ channels:
       sherpa_provider: cpu
       listen_timeout_sec: 1.6
     tts:
-      provider: doubao
+      provider: openai
       enabled: true
+      endpoint: http://127.0.0.1:8000/v1
+      resource_id: wetts-vits-zh
       api_key_env: ARK_API_KEY
-      resource_id: seed-tts-2.0
       voice_type: zh_female_vv_uranus_bigtts
-      endpoint: wss://openspeech.bytedance.com/api/v3/tts/bidirection
       encoding: pcm
       sample_rate: 16000
       output_device: null  # 使用系统默认输出设备（PulseAudio）

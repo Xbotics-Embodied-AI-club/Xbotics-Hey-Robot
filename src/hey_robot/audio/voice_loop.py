@@ -12,7 +12,7 @@ from hey_robot.audio.config import VoiceAudioConfig
 from hey_robot.audio.io import AudioPlayer, AudioRecorder, pcm16_to_wav_bytes
 from hey_robot.audio.session import VoiceRouteDecision, VoiceSessionRouter
 from hey_robot.audio.streaming_asr import SherpaStreamingVoiceEngine
-from hey_robot.audio.tts import DoubaoTTSClient
+from hey_robot.audio.tts import DoubaoTTSClient, build_tts_client
 from hey_robot.logging import HeyRobotLogger
 
 logger = HeyRobotLogger(name="voice")
@@ -27,7 +27,7 @@ class VoiceInteractionLoop:
         self.config = config
         self.recorder = AudioRecorder(config.recorder)
         self.asr = build_asr_client(config.asr)
-        self.tts = DoubaoTTSClient(config.tts)
+        self.tts = build_tts_client(config.tts)
         self.router = VoiceSessionRouter(config.activation)
         self.player = AudioPlayer(
             sample_rate=config.tts.sample_rate, output_device=config.tts.output_device
