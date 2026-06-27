@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -7,6 +8,9 @@ from typing import Any
 
 _DEFAULT_DETECTOR_MODEL = Path("models/yolo26n.pt")
 _DETECTOR_MODEL: Any | None = None
+# opt-in：设了 S600_DETECT_URL 就把人体检测交给 S600 BPU（HeyRobotModelApis /v1/detect），
+# 否则维持本地 ultralytics(CPU)。
+_REMOTE_DETECT_URL: str | None = None
 
 
 @dataclass(frozen=True)
@@ -72,9 +76,43 @@ class Target:
         return (int(x1 + vx), int(y1 + vy), int(x2 + vx), int(y2 + vy))
 
 
+def _detect_remote(image: Any) -> list[Detection]:
+    """把帧发给 S600 BPU 检测端点（/v1/detect），转成 Detection 列表。"""
+    try:
+        import cv2
+        import httpx
+        import numpy as np
+    except Exception:
+        return []
+    frame = np.asarray(image)
+    if frame.size == 0:
+        return []
+    ok, buf = cv2.imencode(".jpg", frame)
+    if not ok:
+        return []
+    try:
+        resp = httpx.post(
+            _REMOTE_DETECT_URL,
+            files={"file": ("frame.jpg", buf.tobytes(), "image/jpeg")},
+            data={"score_threshold": "0.5", "person_only": "true"},
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+    except Exception:
+        return []
+    detections: list[Detection] = []
+    for item in payload.get("detections", []):
+        x1, y1, x2, y2 = item["box"]
+        detections.append(Detection((int(x1), int(y1), int(x2), int(y2)), float(item.get("score", 0.0))))
+    return detections
+
+
 def detect_people(image: Any) -> list[Detection]:
     if image is None:
         return []
+    if _REMOTE_DETECT_URL:
+        return _detect_remote(image)
     try:
         import numpy as np
     except Exception:
@@ -104,7 +142,15 @@ def detect_people(image: Any) -> list[Detection]:
 
 
 def load_detector(model_path: str | None = None) -> None:
-    global _DETECTOR_MODEL
+    global _DETECTOR_MODEL, _REMOTE_DETECT_URL
+    remote = os.environ.get("S600_DETECT_URL", "").strip()
+    if remote:
+        # opt-in：人体检测走 S600 BPU，不加载本地 ultralytics
+        _REMOTE_DETECT_URL = (
+            remote if remote.rstrip("/").endswith("/detect") else remote.rstrip("/") + "/v1/detect"
+        )
+        _DETECTOR_MODEL = "remote-s600-bpu"
+        return
     try:
         from ultralytics import YOLO
     except Exception as exc:
