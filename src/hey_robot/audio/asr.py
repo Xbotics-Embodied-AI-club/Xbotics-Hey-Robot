@@ -303,6 +303,50 @@ class SherpaONNXASRClient:
         )
 
 
+class OpenAIASRClient:
+    """Transcribe via an OpenAI-compatible /v1/audio/transcriptions endpoint.
+
+    Routes speech recognition to a locally deployed whisper served behind an
+    OpenAI-compatible API (e.g. the RDK S600 on-device whisper-medium) instead
+    of the cloud doubao service. Conforms to the same ASRClient protocol.
+    """
+
+    def __init__(self, config: ASRConfig) -> None:
+        self.config = config
+
+    @property
+    def transcription_url(self) -> str:
+        base = self.config.endpoint.rstrip("/")
+        if base.endswith("/audio/transcriptions"):
+            return base
+        if base.endswith("/v1"):
+            return f"{base}/audio/transcriptions"
+        return f"{base}/v1/audio/transcriptions"
+
+    async def transcribe_wav(
+        self, wav_bytes: bytes, *, _filename: str = "utterance.wav"
+    ) -> str:
+        if not wav_bytes:
+            return ""
+        try:
+            import httpx
+        except ImportError as exc:  # pragma: no cover - optional dependency
+            raise ImportError(
+                "OpenAI ASR requires `httpx`. Install `hey-robot[agent]`."
+            ) from exc
+        data: dict[str, str] = {"model": self.config.model or "whisper-medium"}
+        if self.config.language:
+            data["language"] = self.config.language
+        files = {"file": (_filename, wav_bytes, "audio/wav")}
+        async with httpx.AsyncClient(timeout=self.config.timeout_sec) as client:
+            response = await client.post(self.transcription_url, data=data, files=files)
+            response.raise_for_status()
+            payload = response.json()
+        if not isinstance(payload, dict):
+            return ""
+        return str(payload.get("text", "")).strip()
+
+
 def build_asr_client(config: ASRConfig) -> ASRClient:
     return _build_single_asr_client(config.provider, config)
 
@@ -313,6 +357,8 @@ def _build_single_asr_client(provider: str, config: ASRConfig) -> ASRClient:
         return DoubaoASRClient(config)
     if normalized in {"sherpa", "sherpa_onnx", "sherpa-onnx"}:
         return SherpaONNXASRClient(config)
+    if normalized in {"openai", "openai_whisper", "whisper", "whisper_http"}:
+        return OpenAIASRClient(config)
     raise ValueError(f"unsupported ASR provider: {provider!r}")
 
 

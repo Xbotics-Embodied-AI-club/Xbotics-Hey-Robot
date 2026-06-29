@@ -144,3 +144,62 @@ def _text_chunks(text: str, *, chunk_size: int = 2000) -> list[str]:
         cleaned[index : index + chunk_size]
         for index in range(0, len(cleaned), chunk_size)
     ]
+
+
+class OpenAISpeechTTSClient:
+    """Local OpenAI-compatible /v1/audio/speech TTS (e.g. RDK S600 WeTTS).
+
+    Returns raw PCM16 frames so it drops straight into the same playback path
+    as the cloud doubao client. Conforms to the same synthesize/synthesize_stream
+    interface.
+    """
+
+    def __init__(self, config: TTSConfig) -> None:
+        self.config = config
+
+    @property
+    def speech_url(self) -> str:
+        base = self.config.endpoint.rstrip("/")
+        if base.endswith("/audio/speech"):
+            return base
+        if base.endswith("/v1"):
+            return f"{base}/audio/speech"
+        return f"{base}/v1/audio/speech"
+
+    async def synthesize(self, text: str) -> bytes:
+        chunks = [chunk async for chunk in self.synthesize_stream(text)]
+        return b"".join(chunks)
+
+    async def synthesize_stream(self, text: str) -> AsyncGenerator[bytes, None]:
+        if not self.config.enabled or not text.strip():
+            return
+        try:
+            import httpx
+        except ImportError as exc:  # pragma: no cover - optional dependency
+            raise ImportError(
+                "OpenAI TTS requires `httpx`. Install `hey-robot[agent]`."
+            ) from exc
+        payload = {"model": self.config.resource_id or "wetts-vits-zh", "input": text}
+        async with httpx.AsyncClient(timeout=self.config.timeout_sec) as client:
+            response = await client.post(self.speech_url, json=payload)
+            response.raise_for_status()
+            audio = response.content
+        pcm = _wav_to_pcm16(audio)
+        step = 3200
+        for index in range(0, len(pcm), step):
+            yield pcm[index : index + step]
+
+
+def _wav_to_pcm16(data: bytes) -> bytes:
+    import io
+    import wave
+
+    with wave.open(io.BytesIO(data), "rb") as wav:
+        return wav.readframes(wav.getnframes())
+
+
+def build_tts_client(config: TTSConfig):
+    provider = (config.provider or "").strip().lower()
+    if provider in {"openai", "openai_speech", "wetts", "local"}:
+        return OpenAISpeechTTSClient(config)
+    return DoubaoTTSClient(config)
