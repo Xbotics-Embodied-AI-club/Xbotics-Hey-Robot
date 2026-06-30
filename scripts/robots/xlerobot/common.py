@@ -18,8 +18,8 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from hey_robot.config import DeploymentConfig
-from hey_robot.robots.components import OpenCVCameraConfig
-from hey_robot.robots.xlerobot.hardware.config import (
+from hey_robot.robot_runtime.components import OpenCVCameraConfig
+from hey_robot.robot_runtime.xlerobot.hardware.config import (
     XLeRobotHardwareConfig,
     hardware_config_from_settings,
 )

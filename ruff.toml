@@ -38,10 +38,10 @@ exclude = [
   "node_modules",
   "site-packages",
   ".history",
-  "src/hey_robot/robots/components/scservo_sdk",
-  "src/hey_robot/capability/contract/v1/capability_pb2.py",
-  "src/hey_robot/capability/contract/v1/capability_pb2.pyi",
-  "src/hey_robot/capability/contract/v1/capability_pb2_grpc.py",
+  "src/hey_robot/robot_runtime/components/scservo_sdk",
+  "src/hey_robot/foundation/contract/v1/capability_pb2.py",
+  "src/hey_robot/foundation/contract/v1/capability_pb2.pyi",
+  "src/hey_robot/foundation/contract/v1/capability_pb2_grpc.py",
 ]
 
 [lint]
@@ -123,10 +123,10 @@ ignore = [
 "scripts/robots/xlerobot/*.py" = ["E402", "S314"]
 
 # gRPC servicer 方法名必须与 proto contract 一致，不能改成 Python 风格小写。
-"src/hey_robot/capability/transport/grpc/server.py" = ["N802"]
+"src/hey_robot/foundation/transport/grpc/server.py" = ["N802"]
 
 # 这是第三方协议/硬件语义映射层，字段命名需要贴近设备协议。
-"src/hey_robot/robots/components/servo_bus.py" = ["N815"]
+"src/hey_robot/robot_runtime/components/servo_bus.py" = ["N815"]
 
 # pytest 入口需要先注入 src 路径，再导入项目模块。
 "tests/conftest.py" = ["E402"]

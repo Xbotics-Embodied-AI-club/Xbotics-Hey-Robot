@@ -194,11 +194,12 @@ docs/                       architecture, operations, development docs
 frontend/views/             Web UI views
 frontend/shared/            shared Web CSS and JS
 proto/                      capability protobuf sources
-src/hey_robot/agents/       Agent runtime, loop, core, task state
-src/hey_robot/skills/       Skill registry, contracts, scheduler, builtin skills
-src/hey_robot/robots/       Robot runtime and drivers
-src/hey_robot/capability/   VLA/capability service and gRPC transport
-src/hey_robot/perception/   observation pipeline and scene understanding
+src/hey_robot/cognition/    Agentic cognition, loop, core, task state
+src/hey_robot/skill_os/     Skill registry, contracts, scheduler, builtin skills
+src/hey_robot/foundation/   VLA/VLN capability service, catalog, gRPC transport
+src/hey_robot/robot_runtime/ Robot runtime and drivers
+src/hey_robot/robot_runtime/observations/ observation pipeline and runtime snapshots
+src/hey_robot/cognition/perception/       scene understanding
 src/hey_robot/channels/     CLI / Web / Voice / Feishu channels
 tests/                      unit and integration tests
 ```

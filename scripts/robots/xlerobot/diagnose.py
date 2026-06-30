@@ -25,7 +25,7 @@ from scan_cameras import (
     scan_cameras,
 )
 
-from hey_robot.robots.xlerobot.hardware.native import NativeXLeRobotClient
+from hey_robot.robot_runtime.xlerobot.hardware.native import NativeXLeRobotClient
 
 _SEPARATOR = "─" * 60
 

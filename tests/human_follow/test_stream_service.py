@@ -8,9 +8,12 @@ import numpy as np
 
 from hey_robot.config import DeploymentConfig
 from hey_robot.human_follow.service import HumanFollowService, _Session
-from hey_robot.perception.frame_stream import decode_frame_packet, encode_frame_packet
-from hey_robot.perception.human_follow import Detection
-from hey_robot.robots.service import RobotService
+from hey_robot.robot_runtime.observations.frame_stream import (
+    decode_frame_packet,
+    encode_frame_packet,
+)
+from hey_robot.robot_runtime.service import RobotService
+from hey_robot.skill_os.perception.human_follow import Detection
 
 
 class FakeBus:

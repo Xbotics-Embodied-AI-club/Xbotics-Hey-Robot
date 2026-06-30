@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from hey_robot.agents.runtime.execution_feedback import (
+from hey_robot.cognition.runtime.execution_feedback import (
     parse_execution_feedback_response,
 )
 

@@ -8,8 +8,8 @@ from hey_robot.episode import JsonlEpisodeStore, allocate_episode
 from hey_robot.episode.scope import DEFAULT_EPISODE_DIMENSIONS
 from hey_robot.protocol import AgentReply, Envelope, UserTurn
 from hey_robot.protocol.messages import from_payload, to_payload
-from hey_robot.skills.base import SkillCatalog, SkillSpec
-from hey_robot.skills.registry import SkillRegistry
+from hey_robot.skill_os.base import SkillCatalog, SkillSpec
+from hey_robot.skill_os.registry import SkillRegistry
 
 
 def test_deployment_config_loads_new_topology() -> None:

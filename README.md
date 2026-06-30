@@ -209,11 +209,12 @@ docs/                       架构、部署、开发文档
 frontend/views/             Web 前端页面
 frontend/shared/            Web 前端公共样式和脚本
 proto/                      capability protobuf 协议源文件
-src/hey_robot/agents/       Agent runtime、主循环、核心决策、任务状态
-src/hey_robot/skills/       Skill 注册、合约、调度控制器和内置技能
-src/hey_robot/robots/       Robot runtime 和机器人驱动
-src/hey_robot/capability/   VLA/capability service 与 gRPC transport
-src/hey_robot/perception/   观察流水线和场景理解
+src/hey_robot/cognition/    Agentic cognition、主循环、核心决策、任务状态
+src/hey_robot/skill_os/     Skill 注册、合约、调度控制器和内置技能
+src/hey_robot/foundation/   VLA/VLN capability service、catalog 与 gRPC transport
+src/hey_robot/robot_runtime/ Robot runtime 和机器人驱动
+src/hey_robot/robot_runtime/observations/  观察流水线和运行时感知快照
+src/hey_robot/cognition/perception/        场景理解
 src/hey_robot/channels/     CLI / Web / 语音 / 飞书通道
 tests/                      单元测试和集成测试
 ```

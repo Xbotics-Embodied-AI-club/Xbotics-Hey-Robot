@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 
-from hey_robot.capability.transport.grpc import VLACapabilityService
 from hey_robot.config import DeploymentConfig
+from hey_robot.foundation.transport.grpc import build_capability_service
 
 
 async def async_main() -> None:
@@ -21,14 +21,13 @@ async def async_main() -> None:
     spec = config.capability_services.get(args.service_id)
     if spec is None:
         raise SystemExit(f"unknown capability service: {args.service_id}")
-    if spec.type != "vla_service":
-        raise SystemExit(
-            f"unsupported capability service type for standalone runner: {spec.type}"
-        )
 
-    service = VLACapabilityService(
-        config, service_id=args.service_id, host=args.host, port=args.port
-    )
+    try:
+        service = build_capability_service(
+            config, service_id=args.service_id, host=args.host, port=args.port
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     try:
         await service.start()
     finally:

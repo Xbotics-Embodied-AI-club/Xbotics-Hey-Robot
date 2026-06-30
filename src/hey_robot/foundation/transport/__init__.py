@@ -1,0 +1,1 @@
+"""Foundation service transport adapters."""

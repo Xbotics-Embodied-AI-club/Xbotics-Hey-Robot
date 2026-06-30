@@ -8,15 +8,15 @@ from typing import Any
 from hey_robot.bus.factory import create_bus_client
 from hey_robot.config import DeploymentConfig
 from hey_robot.logging import HeyRobotLogger
-from hey_robot.perception.frame_stream import decode_frame_packet
-from hey_robot.perception.human_follow import (
+from hey_robot.protocol import Topics
+from hey_robot.robot_runtime.observations.frame_stream import decode_frame_packet
+from hey_robot.skill_os.perception.human_follow import (
     FollowController,
     TargetTracker,
     VelocityCommand,
     detect_people,
     load_detector,
 )
-from hey_robot.protocol import Topics
 
 logger = HeyRobotLogger(name="human_follow_service")
 

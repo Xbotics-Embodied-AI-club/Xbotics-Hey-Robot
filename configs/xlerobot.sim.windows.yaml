@@ -1,4 +1,4 @@
-﻿# XLeRobot MuJoCo simulation deployment for local development and testing.
+# XLeRobot MuJoCo simulation deployment for local development and testing.
 # Usage: hey-robot run --config configs/xlerobot.sim.windows.yaml
 
 deployment:
@@ -31,7 +31,7 @@ resources:
 
 skills:
   modules:
-    - hey_robot.skills.builtin
+    - hey_robot.skill_os.builtins
   mode: bringup
   enabled:
     - inspect_scene
@@ -39,6 +39,8 @@ skills:
     - detect_marker
     - move_base
     - turn_base
+    - navigate_to
+    - approach_object
     - human_follow
     - stop_motion
     - reset_posture
@@ -178,7 +180,39 @@ robots:
       viewer:
         enabled: false
 
-capability_services: {}
+capability_services:
+  vln_nav:
+    type: vln_service
+    robot_id: sim_robot
+    enabled: true
+    target: grpc://127.0.0.1:9091
+    skill_names:
+      - navigate_to
+      - approach_object
+    timeout_sec: 60.0
+    settings:
+      host: 127.0.0.1
+      port: 9091
+      backend: internvla_n1_system2
+      control_mode: planner_only
+      execute_low_level_control: false
+      mock_mode: false
+      model_path: InternRobotics/InternVLA-N1-System2
+      device: cpu
+      dtype: fp32
+      attn_implementation: eager
+      media_root: runtime/xlerobot.sim.windows/media
+      internnav_repo: FM改造方案/references/InternNav
+      camera: front
+      image_width: 640
+      image_height: 480
+      resize_w: 384
+      resize_h: 384
+      num_history: 8
+      max_new_tokens: 128
+      hfov: 90
+      mock_pixel_x: 320
+      mock_pixel_y: 240
 
 policies:
   embodied_skills:

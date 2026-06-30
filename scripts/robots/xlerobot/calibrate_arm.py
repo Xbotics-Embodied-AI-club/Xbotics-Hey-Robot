@@ -22,8 +22,8 @@ if str(TOOL_ROOT) not in sys.path:
 
 from common import angle_from_position, load_hardware_config, print_json_or_text
 
-from hey_robot.robots.components import ServoBus
-from hey_robot.robots.components.scservo_sdk import (
+from hey_robot.robot_runtime.components import ServoBus
+from hey_robot.robot_runtime.components.scservo_sdk import (
     SMS_STS_LOCK,
     SMS_STS_MAX_ANGLE_LIMIT_H,
     SMS_STS_MAX_ANGLE_LIMIT_L,

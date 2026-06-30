@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from hey_robot.media import MediaResolver
 from hey_robot.protocol import RobotObservation
 from hey_robot.providers.types import ReasoningImage
+from hey_robot.robot_runtime.media import MediaResolver
 
 
 class ReasoningMediaResolver:

@@ -42,7 +42,7 @@ python scripts/robots/xlerobot/generate_mjcf.py
 运行仿真测试：
 
 ```bash
-pytest tests/robots/test_simulation.py -q --no-cov
+pytest tests/robot_runtime/test_simulation.py -q --no-cov
 ```
 
 启动仿真 deployment：

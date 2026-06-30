@@ -1,4 +1,4 @@
-﻿deployment:
+deployment:
   id: xlerobot.real.windows
   bus:
     type: nats
@@ -30,7 +30,7 @@ resources:
 
 skills:
   modules:
-    - hey_robot.skills.builtin
+    - hey_robot.skill_os.builtins
   mode: bringup
   enabled:
     - inspect_scene

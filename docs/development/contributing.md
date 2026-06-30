@@ -99,9 +99,9 @@ tests/{module_name}/test_{file_name}.py
 示例：
 
 ```
-src/hey_robot/agents/core.py        -> tests/agents/test_core.py
-src/hey_robot/skills/catalog.py     -> tests/skills/test_catalog.py
-src/hey_robot/robots/xlerobot/...   -> tests/robots/test_xlerobot.py
+src/hey_robot/cognition/core.py        -> tests/cognition/test_core.py
+src/hey_robot/skill_os/catalog.py      -> tests/skill_os/test_catalog.py
+src/hey_robot/robot_runtime/xlerobot/... -> tests/robot_runtime/test_xlerobot.py
 ```
 
 ### 最低通过标准

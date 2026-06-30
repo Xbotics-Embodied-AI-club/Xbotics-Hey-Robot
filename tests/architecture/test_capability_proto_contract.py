@@ -4,14 +4,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PROTO_FILE = ROOT / "proto/hey_robot/capability/v1/capability.proto"
-CONTRACT_DIR = ROOT / "src/hey_robot/capability/contract/v1"
+CONTRACT_DIR = ROOT / "src/hey_robot/foundation/contract/v1"
 LEGACY_GENERATED_DIR = ROOT / "src/hey_robot/capability/v1"
+LEGACY_CONTRACT_DIR = ROOT / "src/hey_robot/capability/contract/v1"
 
 
 def test_capability_proto_source_and_generated_contract_layout() -> None:
     assert PROTO_FILE.exists()
     assert CONTRACT_DIR.exists()
     assert not LEGACY_GENERATED_DIR.exists()
+    assert not any(LEGACY_CONTRACT_DIR.glob("capability_pb2*"))
 
     expected_files = {
         "capability_pb2.py",
@@ -33,7 +35,9 @@ def test_generated_contract_files_keep_expected_codegen_markers() -> None:
         grpc_text
     )
     assert "class GetHealthRequest" in pyi_text
-    assert "from hey_robot.capability.contract.v1 import capability_pb2 as " in (
+    assert "from hey_robot.foundation.contract.v1 import" in grpc_text
+    assert "capability_pb2 as hey__robot_dot_foundation_dot_v1_dot_capability__pb2" in (
         grpc_text
     )
+    assert "from hey_robot.capability.contract.v1 import" not in grpc_text
     assert "from hey_robot.capability.v1 import" not in grpc_text

@@ -257,14 +257,14 @@ Camera 不归 VLA 独占，也不归某个 perception skill 独占。
 当前 capability 子系统已经统一收口到：
 
 ```text
-src/hey_robot/capability/
+src/hey_robot/foundation/
   catalog/
   contract/
     v1/
-  runtime/
-  sensors/
+  clients/
   transport/
     grpc/
+  backends/
 ```
 
 其中：
@@ -349,14 +349,15 @@ docs/operations/          hardware and service deployment guides
 frontend/views/           Web UI views（chat、tasks、admin）
 frontend/shared/          Web UI shared CSS/JS
 proto/                    protobuf contract sources
-src/hey_robot/agents/     Agent runtime, loop, core, task runtime, turn policy
-src/hey_robot/capability/ Capability catalog, contract, runtime, gRPC transport
-src/hey_robot/memory/     MemoryBroker, SceneMemoryStore, MemoryRuntime (LTM)
+src/hey_robot/cognition/  Agentic cognition, loop, core, task runtime, turn policy
+src/hey_robot/foundation/ Capability catalog, contract, clients, gRPC transport
+src/hey_robot/cognition/memory/ MemoryBroker, SceneMemoryStore, MemoryRuntime (LTM)
 src/hey_robot/health/     HealthReportService and deployment health payloads
-src/hey_robot/perception/ Camera service and observation pipeline
-src/hey_robot/robots/     Robot runtime and drivers
-src/hey_robot/skills/     Skill catalog, contracts, controller（每个 skill 单一 implementation）
-src/hey_robot/tasks/      TaskSession, recovery, view, report
+src/hey_robot/robot_runtime/observations/ Camera service and observation pipeline
+src/hey_robot/cognition/perception/ Scene understanding
+src/hey_robot/robot_runtime/ Robot runtime and drivers
+src/hey_robot/skill_os/   Skill catalog, contracts, controller（每个 skill 单一 implementation）
+src/hey_robot/cognition/tasks/ TaskSession, recovery, view, report
 tests/                    runtime, robot, capability, integration tests
 scripts/model_downloads/  local model download scripts
 scripts/audio/            audio device utilities

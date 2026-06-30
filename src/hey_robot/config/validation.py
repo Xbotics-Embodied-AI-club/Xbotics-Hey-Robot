@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from hey_robot.config.model import DeploymentConfig, RobotSpec
-from hey_robot.robots.primitive_inventory import supported_driver_primitives
-from hey_robot.skills.base import SkillSpec
-from hey_robot.skills.registry import SkillRegistry, registry_from_config
+from hey_robot.robot_runtime.primitive_inventory import supported_driver_primitives
+from hey_robot.skill_os.base import SkillSpec
+from hey_robot.skill_os.registry import SkillRegistry, registry_from_config
 
 
 @dataclass(frozen=True)

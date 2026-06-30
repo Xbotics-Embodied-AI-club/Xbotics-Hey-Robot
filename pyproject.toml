@@ -62,14 +62,14 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 exclude = [
-    "^src/hey_robot/robots/components/scservo_sdk/",
-    "^src/hey_robot/capability/contract/v1/capability_pb2.py$",
-    "^src/hey_robot/capability/contract/v1/capability_pb2_grpc.py$",
+    "^src/hey_robot/foundation/contract/v1/capability_pb2.py$",
+    "^src/hey_robot/foundation/contract/v1/capability_pb2_grpc.py$",
 ]
 
-[[tool.mypy.overrides]]
-module = ["hey_robot.robots.components.scservo_sdk.*"]
-ignore_errors = true
+[tool.ruff]
+exclude = [
+    "src/hey_robot/robot_runtime/components/scservo_sdk",
+]
 
 [project.optional-dependencies]
 sim = ["mujoco>=3.3.0"]

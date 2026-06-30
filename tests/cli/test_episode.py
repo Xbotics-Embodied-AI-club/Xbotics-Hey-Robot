@@ -6,7 +6,7 @@ from hey_robot.cli.main import CLI_ACTIONS, main
 from hey_robot.config import DeploymentConfig
 from hey_robot.episode import EpisodeScope, JsonlEpisodeStore, RobotEpisodeStateStore
 from hey_robot.protocol import Envelope, SkillEvent, UserTurn
-from hey_robot.skills import SkillStore
+from hey_robot.skill_os import SkillStore
 
 
 def test_episode_cli_skills_are_new_deployment_skills() -> None:

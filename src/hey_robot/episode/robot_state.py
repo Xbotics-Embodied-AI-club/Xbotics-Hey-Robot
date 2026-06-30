@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from hey_robot.protocol import RobotObservation, RobotStatus, SkillEvent, SkillResult
-from hey_robot.skills import SkillPhase
+from hey_robot.skill_os import SkillPhase
 
 _LOCK_TIMEOUT_SEC = 10.0
 _STALE_LOCK_SEC = 30.0

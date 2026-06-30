@@ -31,10 +31,25 @@ SOURCE_ONLY_FORBIDDEN = (
 )
 
 FORBIDDEN_PATH_PARTS = (
+    Path("src/hey_robot/agents"),
+    Path("src/hey_robot/skills"),
+    Path("src/hey_robot/robots"),
+    Path("src/hey_robot/capability"),
+    Path("src/hey_robot/tasks"),
+    Path("src/hey_robot/memory"),
+    Path("src/hey_robot/media"),
+    Path("src/hey_robot/perception"),
+    Path("src/hey_robot/capability/runtime"),
+    Path("src/hey_robot/capability/contract"),
+    Path("src/hey_robot/capability/transport/grpc"),
     Path("src/hey_robot/agents/runtime/runtime.py"),
     Path("src/hey_robot/agents/runtime/mcp.py"),
     Path("src/hey_robot/tasks/supervisor.py"),
     Path("tests/tasks/test_supervisor.py"),
+    Path("tests/tasks"),
+    Path("tests/memory"),
+    Path("tests/media"),
+    Path("tests/perception"),
 )
 
 

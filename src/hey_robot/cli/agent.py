@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 
-from hey_robot.agents import RobotAgentService
+from hey_robot.cognition import RobotAgentService
 from hey_robot.config import DeploymentConfig
 
 

@@ -8,7 +8,7 @@ from typing import Any
 
 from hey_robot.bus.client import BusClient
 from hey_robot.protocol import Topics
-from hey_robot.skills.base import SkillResult
+from hey_robot.skill_os.base import SkillResult
 
 ProgressCallback = Callable[..., Awaitable[None]]
 

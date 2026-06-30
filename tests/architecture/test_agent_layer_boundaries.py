@@ -4,21 +4,21 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-AGENTS_ROOT = ROOT / "src" / "hey_robot" / "agents"
+COGNITION_ROOT = ROOT / "src" / "hey_robot" / "cognition"
 
 ALLOWED_SKILL_INTENT_CONSTRUCTORS = {
-    Path("src/hey_robot/agents/skill_gateway.py"),
-    Path("src/hey_robot/agents/robot_agent.py"),
+    Path("src/hey_robot/cognition/skill_gateway.py"),
+    Path("src/hey_robot/cognition/robot_agent.py"),
 }
 
 
-def _agent_source_files() -> list[Path]:
-    return sorted(path for path in AGENTS_ROOT.rglob("*.py") if path.is_file())
+def _cognition_source_files() -> list[Path]:
+    return sorted(path for path in COGNITION_ROOT.rglob("*.py") if path.is_file())
 
 
 def test_agent_layer_does_not_construct_skill_intents_outside_gateway() -> None:
     offenders: list[str] = []
-    for path in _agent_source_files():
+    for path in _cognition_source_files():
         rel_path = path.relative_to(ROOT)
         if rel_path in ALLOWED_SKILL_INTENT_CONSTRUCTORS:
             continue
@@ -39,7 +39,7 @@ def test_agent_layer_does_not_depend_on_robot_actions_or_driver_primitives() -> 
         re.compile(r"['\"]arm\."),
     )
     offenders: list[str] = []
-    for path in _agent_source_files():
+    for path in _cognition_source_files():
         text = path.read_text(encoding="utf-8")
         offenders.extend(
             f"{path.relative_to(ROOT)}: {pattern.pattern}"

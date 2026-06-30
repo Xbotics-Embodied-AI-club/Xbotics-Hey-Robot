@@ -10,14 +10,15 @@ from typing import Any, TypedDict
 
 logger = logging.getLogger(__name__)
 
-from hey_robot.agents import RobotAgentService, TaskSupervisorService
+from hey_robot.cognition import RobotAgentService, TaskSupervisorService
 from hey_robot.config import DeploymentConfig
 from hey_robot.config.validation import validate_deployment
 from hey_robot.gateway import GatewayService
 from hey_robot.human_follow import HumanFollowService
 from hey_robot.logging import HeyRobotLogger
-from hey_robot.robots import RobotService
-from hey_robot.skills.controller import SkillControllerService
+from hey_robot.robot_runtime import RobotService
+from hey_robot.skill_os.controller import SkillControllerService
+from hey_robot.skill_os.registry import registry_from_config
 
 
 @dataclass
@@ -115,8 +116,9 @@ class DeploymentRunner:
     def _build_services(self) -> list[ManagedService]:
         services: list[ManagedService] = []
         robot = None
+        skill_catalog = registry_from_config(self.config).robot_skill_catalog()
         if self.config.robots:
-            robot = RobotService(self.config)
+            robot = RobotService(self.config, skill_catalog=skill_catalog)
             services.append(ManagedService("robot", robot.start, robot.stop))
             if bool(
                 self.config.deployment.bus.options.get(

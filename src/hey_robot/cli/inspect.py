@@ -4,10 +4,10 @@ import argparse
 import json
 import sys
 
-from hey_robot.capability.catalog import CapabilityLoader
 from hey_robot.config import DeploymentConfig
 from hey_robot.config.validation import validate_deployment
-from hey_robot.skills.registry import registry_from_config
+from hey_robot.foundation.catalog import CapabilityLoader
+from hey_robot.skill_os.registry import registry_from_config
 
 
 def _display_width(text: str) -> int:

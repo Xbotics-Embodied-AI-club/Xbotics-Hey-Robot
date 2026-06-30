@@ -85,7 +85,7 @@ def test_validate_deployment_rejects_implementation_skill_in_production(
 def test_validate_deployment_reports_transitive_unknown_skill_dependency(
     tmp_path, monkeypatch
 ) -> None:
-    from hey_robot.skills.base import BaseSkill, SkillResult, SkillSpec
+    from hey_robot.skill_os.base import BaseSkill, SkillResult, SkillSpec
 
     module_name = "tests.fake_validation_plugin"
     module = types.ModuleType(module_name)
@@ -147,7 +147,7 @@ def test_validate_deployment_reports_transitive_unknown_skill_dependency(
 def test_validate_deployment_rejects_unsupported_robot_family(
     tmp_path, monkeypatch
 ) -> None:
-    from hey_robot.skills.base import BaseSkill, SkillResult, SkillSpec
+    from hey_robot.skill_os.base import BaseSkill, SkillResult, SkillSpec
 
     module_name = "tests.fake_robot_specific_skill"
     module = types.ModuleType(module_name)
@@ -191,7 +191,7 @@ def test_validate_deployment_rejects_unsupported_robot_family(
 def test_validate_deployment_rejects_unavailable_external_capability(
     tmp_path, monkeypatch
 ) -> None:
-    from hey_robot.skills.base import BaseSkill, SkillResult, SkillSpec
+    from hey_robot.skill_os.base import BaseSkill, SkillResult, SkillSpec
 
     module_name = "tests.fake_external_capability_skill"
     module = types.ModuleType(module_name)
@@ -240,7 +240,7 @@ def test_validate_deployment_rejects_unavailable_external_capability(
 def test_validate_deployment_rejects_missing_driver_primitive(
     tmp_path, monkeypatch
 ) -> None:
-    from hey_robot.skills.base import BaseSkill, SkillResult, SkillSpec
+    from hey_robot.skill_os.base import BaseSkill, SkillResult, SkillSpec
 
     module_name = "tests.fake_driver_primitive_skill"
     module = types.ModuleType(module_name)
@@ -303,7 +303,7 @@ def test_validate_deployment_rejects_missing_driver_primitive(
 def test_validate_deployment_allows_configured_driver_primitive(
     tmp_path, monkeypatch
 ) -> None:
-    from hey_robot.skills.base import BaseSkill, SkillResult, SkillSpec
+    from hey_robot.skill_os.base import BaseSkill, SkillResult, SkillSpec
 
     module_name = "tests.fake_configured_driver_primitive_skill"
     module = types.ModuleType(module_name)

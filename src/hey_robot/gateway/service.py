@@ -7,7 +7,6 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from hey_robot.agents.task_run import TaskRunStore
 from hey_robot.bus.factory import create_bus_client
 from hey_robot.channels import (
     ChannelContext,
@@ -17,6 +16,9 @@ from hey_robot.channels import (
     VoiceChannel,
     WebChannel,
 )
+from hey_robot.cognition.memory import SceneMemoryStore
+from hey_robot.cognition.task_run import TaskRunStore
+from hey_robot.cognition.tasks import TaskSessionQueryService
 from hey_robot.config import DeploymentConfig
 from hey_robot.episode import (
     JsonlEpisodeStore,
@@ -31,7 +33,6 @@ from hey_robot.gateway.identity import ClaimedBinding, IdentityResolver, Pending
 from hey_robot.health import HealthReportService
 from hey_robot.interaction import InteractionStateStore
 from hey_robot.logging import HeyRobotLogger
-from hey_robot.memory import SceneMemoryStore
 from hey_robot.protocol import (
     AgentReply,
     Envelope,
@@ -42,8 +43,7 @@ from hey_robot.protocol import (
     UserTurn,
 )
 from hey_robot.protocol.messages import from_payload, to_payload
-from hey_robot.skills import SkillStore
-from hey_robot.tasks import TaskSessionQueryService
+from hey_robot.skill_os import SkillStore
 
 logger = HeyRobotLogger(name="gateway")
 _BINDING_COMMAND = re.compile(

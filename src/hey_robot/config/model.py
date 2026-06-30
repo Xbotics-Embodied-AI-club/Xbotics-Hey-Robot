@@ -185,7 +185,7 @@ class AgentSpec:
 
 @dataclass(frozen=True)
 class SkillSurfaceConfig:
-    modules: tuple[str, ...] = ("hey_robot.skills.builtin",)
+    modules: tuple[str, ...] = ("hey_robot.skill_os.builtins",)
     enabled: tuple[str, ...] = ()
     mode: str = "production"  # "production" | "bringup"
 
@@ -409,12 +409,12 @@ class DeploymentConfig:
                 modules=tuple(
                     str(item).strip()
                     for item in skills_data.get(
-                        "modules", ("hey_robot.skills.builtin",)
+                        "modules", ("hey_robot.skill_os.builtins",)
                     )
-                    or ("hey_robot.skills.builtin",)
+                    or ("hey_robot.skill_os.builtins",)
                     if str(item).strip()
                 )
-                or ("hey_robot.skills.builtin",),
+                or ("hey_robot.skill_os.builtins",),
                 enabled=tuple(
                     str(item).strip()
                     for item in skills_data.get("enabled", ()) or ()

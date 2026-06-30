@@ -4,16 +4,16 @@ import asyncio
 
 import grpc
 
-from hey_robot.capability.contract.v1 import capability_pb2_grpc
-from hey_robot.capability.runtime import CapabilityExecutionRequest, CapabilityRuntime
-from hey_robot.capability.transport.grpc.client import GrpcCapabilityClient
-from hey_robot.capability.transport.grpc.server import (
+from hey_robot.config import DeploymentConfig
+from hey_robot.foundation.clients import CapabilityExecutionRequest, CapabilityRuntime
+from hey_robot.foundation.contract.v1 import capability_pb2_grpc
+from hey_robot.foundation.transport.grpc.client import GrpcCapabilityClient
+from hey_robot.foundation.transport.grpc.server import (
     VLACapabilityServicer,
     VLAServiceState,
 )
-from hey_robot.config import DeploymentConfig
 from hey_robot.protocol import Envelope, SkillIntent
-from hey_robot.skills import load_skill_registry
+from hey_robot.skill_os import load_skill_registry
 
 
 def test_deployment_style_capability_grpc_flow(tmp_path) -> None:

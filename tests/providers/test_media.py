@@ -4,9 +4,9 @@ from typing import cast
 
 import numpy as np
 
-from hey_robot.media import MediaResolver
 from hey_robot.protocol import Envelope, ImageRef, RobotObservation
 from hey_robot.providers.media import ReasoningMediaResolver
+from hey_robot.robot_runtime.media import MediaResolver
 
 
 class ImageResolver:

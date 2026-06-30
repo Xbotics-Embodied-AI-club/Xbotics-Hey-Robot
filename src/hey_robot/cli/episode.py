@@ -9,13 +9,13 @@ import time
 from pathlib import Path
 from typing import Any
 
-from hey_robot.agents.checkpoint import RobotAgentCheckpointStore
-from hey_robot.agents.task_run import TaskRunStore
+from hey_robot.cognition.checkpoint import RobotAgentCheckpointStore
+from hey_robot.cognition.task_run import TaskRunStore
 from hey_robot.config import DeploymentConfig
 from hey_robot.episode import JsonlEpisodeStore, RobotEpisodeStateStore
 from hey_robot.events.store import RuntimeEventStore
-from hey_robot.media import LocalMediaStore
-from hey_robot.skills import SkillStore
+from hey_robot.robot_runtime.media import LocalMediaStore
+from hey_robot.skill_os import SkillStore
 
 
 def main() -> None:
