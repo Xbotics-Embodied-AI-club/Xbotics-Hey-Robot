@@ -202,7 +202,7 @@ capability_services:
       dtype: fp32
       attn_implementation: eager
       media_root: runtime/xlerobot.sim.windows/media
-      internnav_repo: FM改造方案/references/InternNav
+      internnav_repo: third_party/InternNav
       camera: front
       image_width: 640
       image_height: 480

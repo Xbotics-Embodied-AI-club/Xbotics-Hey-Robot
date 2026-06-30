@@ -189,9 +189,13 @@ capability_services:
       backend: internvla_n1_system2
       control_mode: planner_only
       execute_low_level_control: false
-      mock_mode: true
+      mock_mode: false
+      model_path: models/InternVLA-N1-System2
+      device: cuda:1
+      dtype: bf16
+      attn_implementation: sdpa
       media_root: runtime/xlerobot.sim.ubuntu/media
-      internnav_repo: FM改造方案/references/InternNav
+      internnav_repo: third_party/InternNav
       camera: front
       image_width: 640
       image_height: 480
@@ -200,8 +204,6 @@ capability_services:
       num_history: 8
       max_new_tokens: 128
       hfov: 90
-      mock_pixel_x: 320
-      mock_pixel_y: 240
 
 policies:
   embodied_skills:

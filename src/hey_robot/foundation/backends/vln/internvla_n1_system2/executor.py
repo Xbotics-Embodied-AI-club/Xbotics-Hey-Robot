@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import torch
 from PIL import Image
 
 from hey_robot.config import CapabilityServiceSpec
@@ -284,10 +285,21 @@ class InternVLAN1System2Executor:
                 settings.get("resize_h", settings.get("image_height", 384))
             ),
             "max_new_tokens": int(settings.get("max_new_tokens", 128)),
+            "num_frames": int(settings.get("num_frames", 8)),
+            "num_future_steps": int(settings.get("num_future_steps", 0)),
+            "continuous_traj": bool(settings.get("continuous_traj", False)),
+            "n_query": int(settings.get("n_query", 4)),
             "vis_debug": bool(settings.get("vis_debug", False)),
             "vis_debug_path": settings.get("vis_debug_path", "./logs/vln_debug"),
         }
         model = policy_cls(config=config_cls(model_cfg={"model": model_settings}))
+        n_query = int(settings.get("n_query", 4))
+        if not hasattr(model.model.config, "n_query"):
+            model.model.config.n_query = n_query
+        if not hasattr(model.model, "latent_queries") or model.model.latent_queries is None:
+            model.model.latent_queries = torch.nn.Parameter(
+                torch.randn(1, n_query, model.model.config.hidden_size)
+            )
         eval_fn = getattr(model, "eval", None)
         if callable(eval_fn):
             eval_fn()

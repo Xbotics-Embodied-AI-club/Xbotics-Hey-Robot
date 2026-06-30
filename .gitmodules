@@ -1,0 +1,4 @@
+[submodule "third_party/InternNav"]
+	path = third_party/InternNav
+	url = https://github.com/InternRobotics/InternNav.git
+
