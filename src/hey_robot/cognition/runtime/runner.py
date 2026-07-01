@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, cast
 
 import numpy as np
+
+logger = logging.getLogger("hey_robot")
 
 from hey_robot.cognition.runtime.agent_run import AgentRunRecorder
 from hey_robot.cognition.runtime.audit import ToolAuditLogger
@@ -608,6 +611,7 @@ class AgentRuntime:
                     result=tool_result_text,
                     success=success,
                     payload=payload,
+                    task_contract=task_contract,
                 )
                 if continuation_guidance:
                     messages.append(
@@ -1396,12 +1400,17 @@ class AgentRuntime:
         result: str,
         success: bool,
         payload: AgentRuntimeInput,
+        task_contract: TaskContract | None = None,
     ) -> str | None:
-        if tool != "request_capability":
+        if tool not in {"request_capability", "request_perception"}:
             return None
         capability = str(args.get("capability") or "").strip()
         objective = str(args.get("objective") or "").strip()
-        safety_level = _resolve_capability_safety_level(capability)
+        safety_level = (
+            "observe"
+            if tool == "request_perception"
+            else _resolve_capability_safety_level(capability)
+        )
         if success:
             self.state.last_capability_safety_level = safety_level
             self.state.last_capability_name = capability or None
@@ -1427,6 +1436,17 @@ class AgentRuntime:
                     "才给用户最终答复；最终答复必须使用简体中文纯文本，不使用 Markdown。"
                 )
             else:
+                action_required = _task_requires_action(task_contract)
+                if action_required:
+                    assert task_contract is not None  # implied by _task_requires_action
+                    required_cap = task_contract.required_capability
+                    cap_name = required_cap.type if required_cap else "navigate_to"
+                    lines.extend(
+                        [
+                            f'- perception_done: 已经获得了场景感知结果，现在必须调用 request_capability(capability="{cap_name}", ...) 来做实质动作。',
+                            "- do_not_observe_again: 不要继续观察，直接执行任务要求的导航或操作能力。",
+                        ]
+                    )
                 lines.extend(
                     [
                         (
@@ -1453,13 +1473,27 @@ class AgentRuntime:
             lines.append(
                 "- motion_failed: 重试或改用其他动作前，先检查相机和机器人状态。"
             )
+        if _task_requires_action(task_contract) and (
+            safety_level == "observe" or tool == "request_perception"
+        ):
+            assert task_contract is not None  # implied by _task_requires_action
+            required_cap = task_contract.required_capability
+            cap_hint = ""
+            if required_cap is not None:
+                cap_hint = f'使用 request_capability(capability="{required_cap.type}", ...) 来执行任务要求的动作。'
+            lines.extend(
+                [
+                    f"- perception_failed_but_action_required: 感知未成功，但不要反复重试感知。{cap_hint}",
+                    "- skip_perception_proceed_to_action: 跳过感知，直接执行导航或操作能力。",
+                ]
+            )
         lines.extend(
             [
                 (
                     "- do_not_retry_blindly: 不要立刻重复同一个能力，除非已经获得新证据或选择了不同的恢复步骤。"
                 ),
                 (
-                    "- next_action_rule: 先检查最新工具结果、执行反馈、机器人状态或感知结果，再决定下一步。"
+                    "- next_action_rule: 如果任务需要移动/操作，调用 request_capability 执行导航或操作能力，不要停留在感知或状态查询。"
                 ),
             ]
         )
@@ -1511,6 +1545,28 @@ class AgentRuntime:
     @staticmethod
     def _looks_like_unexecuted_tool_protocol(content: str) -> bool:
         return looks_like_unexecuted_tool_protocol(content)
+
+
+def _task_requires_action(task_contract: TaskContract | None) -> bool:
+    """Return True when the task contract demands a motion or actuation skill."""
+    if task_contract is None:
+        return False
+    if task_contract.task_type in {"motion", "actuation"}:
+        return True
+    if task_contract.required_capability is not None:
+        cap_type = task_contract.required_capability.type
+        if cap_type in {
+            "base_move",
+            "base_turn",
+            "human_follow",
+            "semantic_navigation",
+            "object_approach",
+            "gripper_control",
+            "arm_pose",
+            "arm_joint_delta",
+        }:
+            return True
+    return False
 
 
 def _resolve_capability_safety_level(capability: str) -> str | None:

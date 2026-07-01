@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import grpc
+from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct
 
 from hey_robot.config import CapabilityServiceSpec, DeploymentConfig
@@ -504,4 +505,12 @@ def _dict_to_struct(value: dict[str, Any]) -> Struct:
 
 
 def _struct_to_dict(value: Struct) -> dict[str, Any]:
-    return dict(value) if value is not None else {}
+    """使用 MessageToDict 完整转换 protobuf Struct 为纯 Python dict。
+
+    MessageToDict 会递归处理嵌套的 Struct 和 ListValue，
+    避免手动转换时残留 protobuf 容器类型。
+    """
+    if value is None:
+        return {}
+    # preserving_proto_field_name=True 保留原始字段名（如 snake_case）
+    return MessageToDict(value, preserving_proto_field_name=True)  # type: ignore[no-any-return]

@@ -263,7 +263,7 @@ def test_runtime_executes_navigate_to_skill_through_capability() -> None:
     result = __import__("asyncio").run(
         runtime.execute(
             "navigate_to",
-            {"target": "desk"},
+            {"target": "desk", "execute_primitives": False},
             context_factory=lambda invoke: SkillContext(
                 capabilities=capabilities,
                 invoke=invoke,
@@ -276,7 +276,7 @@ def test_runtime_executes_navigate_to_skill_through_capability() -> None:
     assert capabilities.calls == [("navigate_to", {"target": "desk"})]
 
 
-def test_navigate_to_skill_does_not_execute_primitives_by_default() -> None:
+def test_navigate_to_skill_respects_execute_primitives_false() -> None:
     class CapabilityAPI:
         async def call(self, name: str, arguments: dict):
             del name, arguments
@@ -296,7 +296,7 @@ def test_navigate_to_skill_does_not_execute_primitives_by_default() -> None:
     result = __import__("asyncio").run(
         runtime.execute(
             "navigate_to",
-            {"target": "desk"},
+            {"target": "desk", "execute_primitives": False},
             context_factory=lambda invoke: SkillContext(
                 robot=robot,
                 capabilities=CapabilityAPI(),
@@ -629,7 +629,7 @@ def test_navigate_to_skill_injects_latest_observation_image() -> None:
     result = __import__("asyncio").run(
         runtime.execute(
             "navigate_to",
-            {"target": "desk", "camera": "front"},
+            {"target": "desk", "camera": "front", "execute_primitives": False},
             context_factory=lambda invoke: SkillContext(
                 capabilities=capabilities,
                 observation=observation,
@@ -689,7 +689,11 @@ def test_navigate_to_skill_keeps_explicit_image_path() -> None:
     result = __import__("asyncio").run(
         runtime.execute(
             "navigate_to",
-            {"target": "desk", "image_path": "D:/tmp/front.png"},
+            {
+                "target": "desk",
+                "image_path": "D:/tmp/front.png",
+                "execute_primitives": False,
+            },
             context_factory=lambda invoke: SkillContext(
                 capabilities=capabilities,
                 observation=observation,
@@ -700,7 +704,13 @@ def test_navigate_to_skill_keeps_explicit_image_path() -> None:
 
     assert result.success is True
     assert capabilities.calls == [
-        ("navigate_to", {"target": "desk", "image_path": "D:/tmp/front.png"})
+        (
+            "navigate_to",
+            {
+                "target": "desk",
+                "image_path": "D:/tmp/front.png",
+            },
+        )
     ]
 
 

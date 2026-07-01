@@ -11,7 +11,7 @@ deployment:
       robot_status_log_every_frames: 5
 
 logging:
-  level: INFO
+  level: DEBUG
   theme: dark
   json_format: false
   file_path: logs/xlerobot.sim.ubuntu/app.log
@@ -171,7 +171,7 @@ robots:
       linear_speed: 0.2
       angular_speed: 0.45
       viewer:
-        enabled: true
+        enabled: false
 
 capability_services:
   vln_nav:
@@ -222,15 +222,12 @@ agents:
       providers:
         planner:
           type: deepseek
+          model: deepseek-chat
           model_env: DEEPSEEK_MODEL
           api_key_env: DEEPSEEK_API_KEY
           base_url_env: DEEPSEEK_BASE_URL
           temperature: 0.0
           max_tokens: 1024
-          reasoning_effort: high
-          extra_body:
-            thinking:
-              type: enabled
         scene_captioner:
           type: dashscope
           model_env: DASHSCOPE_MODEL

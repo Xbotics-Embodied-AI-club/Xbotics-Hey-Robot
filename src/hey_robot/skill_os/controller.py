@@ -695,6 +695,11 @@ class SkillControllerService:
                 else f"capability {service_id} is not deployed or model is not loaded"
             )
             raise RuntimeError(reason)
+        # 将 skill 层 enriched 的参数（如 observation/images）合并到 intent，
+        # 否则 gRPC client 只用原始 intent.arguments，丢失 skill 添加的数据。
+        # SkillIntent 是 frozen dataclass，必须用 object.__setattr__ 绕过。
+        enriched_arguments = {**run.intent.arguments, **_arguments}
+        object.__setattr__(run.intent, "arguments", enriched_arguments)
         contract = self.plugin_skill_catalog.resolve(name)
         run.execution_plan = SkillExecutionPlan(
             actions=(

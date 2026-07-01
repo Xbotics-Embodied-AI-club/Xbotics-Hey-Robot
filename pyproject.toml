@@ -66,10 +66,6 @@ exclude = [
     "^src/hey_robot/foundation/contract/v1/capability_pb2_grpc.py$",
 ]
 
-[tool.ruff]
-exclude = [
-    "src/hey_robot/robot_runtime/components/scservo_sdk",
-]
 
 [project.optional-dependencies]
 sim = ["mujoco>=3.3.0"]

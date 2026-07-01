@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import json
@@ -69,13 +70,27 @@ class OpenAICompatReasoningProvider(BaseReasoningProvider):
         api_base = self.api_base
         if not api_key:
             raise ValueError("model provider requires api_key")
+        import httpx
+
+        _httpx_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(60.0, connect=15.0, read=45.0, write=15.0, pool=10.0),
+            trust_env=False,
+            http2=False,
+        )
         if api_base:
             self._client = AsyncOpenAI(
-                api_key=api_key, base_url=api_base, default_headers=self.extra_headers
+                api_key=api_key,
+                base_url=api_base,
+                default_headers=self.extra_headers,
+                http_client=_httpx_client,
+                max_retries=0,
             )
         else:
             self._client = AsyncOpenAI(
-                api_key=api_key, default_headers=self.extra_headers
+                api_key=api_key,
+                default_headers=self.extra_headers,
+                http_client=_httpx_client,
+                max_retries=0,
             )
         return self._client
 
@@ -90,7 +105,6 @@ class OpenAICompatReasoningProvider(BaseReasoningProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> ReasoningResponse:
-        client = self._client_or_create()
         model_name = model or self.model
         max_output = max(
             1, int(self.generation.max_tokens if max_tokens is None else max_tokens)
@@ -111,6 +125,7 @@ class OpenAICompatReasoningProvider(BaseReasoningProvider):
         effective_tool_choice = self._effective_tool_choice(tool_choice)
         try:
             if self._should_use_responses_api(model_name, effort):
+                client = self._client_or_create()
                 response = await client.responses.create(
                     **self._build_responses_body(
                         openai_messages,
@@ -123,11 +138,12 @@ class OpenAICompatReasoningProvider(BaseReasoningProvider):
                     )
                 )
                 parsed = parse_response_output(response)
-                return _validate_required_tool_call(
+                result = _validate_required_tool_call(
                     parsed, effective_tool_choice, openai_tools
                 )
-            response = await client.chat.completions.create(
-                **self._build_chat_kwargs(
+            else:
+                result = await asyncio.to_thread(
+                    self._sync_chat_call,
                     openai_messages,
                     openai_tools,
                     model_name,
@@ -136,10 +152,41 @@ class OpenAICompatReasoningProvider(BaseReasoningProvider):
                     effort,
                     effective_tool_choice,
                 )
-            )
+            return result
         except Exception as exc:
             return _error_response(exc)
+
+    def _sync_chat_call(
+        self,
+        openai_messages: list[dict[str, Any]],
+        openai_tools: list[dict[str, Any]],
+        model_name: str,
+        max_output: int,
+        temp: float,
+        effort: str | None,
+        effective_tool_choice: str | dict[str, Any] | None,
+    ) -> ReasoningResponse:
+        import httpx as _httpx
+        from openai import OpenAI
+
+        _sync_client = OpenAI(
+            api_key=self.api_key,
+            base_url=self.api_base,
+            timeout=_httpx.Timeout(60.0, connect=15.0, read=45.0),
+            max_retries=0,
+        )
+        kwargs = self._build_chat_kwargs(
+            openai_messages,
+            openai_tools,
+            model_name,
+            max_output,
+            temp,
+            effort,
+            effective_tool_choice,
+        )
+        response = _sync_client.chat.completions.create(**kwargs)
         parsed = _parse_chat_response(response)
+        return _validate_required_tool_call(parsed, effective_tool_choice, openai_tools)
         return _validate_required_tool_call(parsed, effective_tool_choice, openai_tools)
 
     def get_default_model(self) -> str:

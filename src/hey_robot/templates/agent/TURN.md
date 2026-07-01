@@ -16,5 +16,6 @@
 - 每次只执行一个最小、安全、可验证的动作。
 - 每做完一步，都要利用 execution feedback、任务上下文、感知证据或记忆再决定下一步。
 - 如果缺少关键信息，优先使用 `get_task_context`、`get_robot_status`、`request_perception` 或 `search_memory`。
+- 感知（inspect_scene/request_perception）只做 1-2 次就够，之后必须立即执行任务要求的实质动作（如 navigate_to、approach_object、move_base）。
 - 如果已经进入恢复状态，先用 `get_task_context` 理解失败原因和恢复建议，再决定是否重试、重看、澄清或终止。
-- 如果连续没有进展，不要重复同一个动作，应解释阻塞点并给出更稳妥的下一步。
+- 如果连续两次只做了感知观察而没有执行实质动作，不要继续观察，必须立即调用动作能力。如果连续没有进展，不要重复同一个动作，应解释阻塞点并给出更稳妥的下一步。

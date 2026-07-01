@@ -1571,3 +1571,28 @@ def test_post_tool_guidance_returns_none_for_non_capability_tool() -> None:
     # _post_tool_guidance returns None for non-request_capability tools
     assert runtime.state.last_capability_safety_level is None
     assert runtime.state.last_capability_name is None
+
+
+def test_task_requires_action() -> None:
+    from hey_robot.cognition.runtime.runner import _task_requires_action
+    from hey_robot.cognition.task_contract import CapabilityRequirement, TaskContract
+
+    assert _task_requires_action(None) is False
+    assert _task_requires_action(TaskContract(task_type="chat", user_goal="hello")) is False
+
+    action_types = [
+        "base_move", "base_turn", "human_follow", "semantic_navigation",
+        "object_approach", "gripper_control", "arm_pose", "arm_joint_delta",
+    ]
+    for cap_type in action_types:
+        tc = TaskContract(
+            task_type="motion",
+            user_goal="move",
+            required_capability=CapabilityRequirement(type=cap_type),
+        )
+        assert _task_requires_action(tc) is True
+
+    tc_motion = TaskContract(task_type="motion", user_goal="go")
+    assert _task_requires_action(tc_motion) is True
+    tc_actuation = TaskContract(task_type="actuation", user_goal="grab")
+    assert _task_requires_action(tc_actuation) is True

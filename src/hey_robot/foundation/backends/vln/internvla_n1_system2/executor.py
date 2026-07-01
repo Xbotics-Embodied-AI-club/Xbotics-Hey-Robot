@@ -265,7 +265,24 @@ class InternVLAN1System2Executor:
             repo_path = str(Path(str(repo)).expanduser().resolve())
             if repo_path not in sys.path:
                 sys.path.insert(0, repo_path)
+
         from internnav.model import get_config, get_policy
+        from internnav.model.basemodel.internvla_n1.internvla_n1 import (
+            InternVLAN1ForCausalLM,
+        )
+
+        # InternNav hardcodes flash_attention_2; replace with sdpa on systems
+        # without a flash-attn build. sdpa is built into PyTorch >= 2.0.
+        _orig_from_pretrained = InternVLAN1ForCausalLM.from_pretrained
+
+        @classmethod  # type: ignore[misc]
+        def _patched_from_pretrained(cls, *args: Any, **kwargs: Any) -> Any:
+            attn = settings.get("attn_implementation", "sdpa")
+            if kwargs.get("attn_implementation") == "flash_attention_2":
+                kwargs["attn_implementation"] = attn
+            return _orig_from_pretrained.__func__(cls, *args, **kwargs)
+
+        InternVLAN1ForCausalLM.from_pretrained = _patched_from_pretrained
 
         policy_name = str(settings.get("policy_name") or "InternVLAN1_Policy")
         policy_cls = get_policy(policy_name)
@@ -294,11 +311,13 @@ class InternVLAN1System2Executor:
         }
         model = policy_cls(config=config_cls(model_cfg={"model": model_settings}))
         n_query = int(settings.get("n_query", 4))
-        if not hasattr(model.model.config, "n_query"):
-            model.model.config.n_query = n_query
-        if not hasattr(model.model, "latent_queries") or model.model.latent_queries is None:
-            model.model.latent_queries = torch.nn.Parameter(
-                torch.randn(1, n_query, model.model.config.hidden_size)
+        inner = model.model  # InternVLAN1ForCausalLM
+        if not hasattr(inner.config, "n_query"):
+            inner.config.n_query = n_query
+        vlm = inner.get_model()  # InternVLAN1Model
+        if not hasattr(vlm, "latent_queries") or vlm.latent_queries is None:
+            vlm.latent_queries = torch.nn.Parameter(
+                torch.randn(1, n_query, vlm.config.hidden_size)
             )
         eval_fn = getattr(model, "eval", None)
         if callable(eval_fn):
@@ -381,6 +400,15 @@ class InternVLAN1System2Executor:
                 mode="stop",
                 stop=True,
                 reason="InternVLA-N1 System 2 returned STOP",
+                raw_output=raw_output or str(action),
+                image_source=image_source,
+            )
+        heading = _action_to_heading(action)
+        if heading is not None:
+            return VLNPlannerResult(
+                mode="heading",
+                heading_deg=heading,
+                reason="InternVLA-N1 System 2 returned direction action",
                 raw_output=raw_output or str(action),
                 image_source=image_source,
             )
@@ -555,10 +583,10 @@ def _pose_from_payload(
     value = arguments.get("pose") or dict(payload.get("metadata", {}) or {}).get("pose")
     if value is None:
         return (0.0, 0.0, 0.0)
-    items = list(value) if isinstance(value, (list, tuple)) else []
+    items = _to_float_list(value)
     if len(items) < 3:
         raise VLNPlanningError("invalid_request", "pose must contain x, y, yaw")
-    return (float(items[0]), float(items[1]), float(items[2]))
+    return (items[0], items[1], items[2])
 
 
 def _intrinsic_from_payload(
@@ -585,6 +613,37 @@ def _intrinsic_from_payload(
         ],
         dtype=np.float32,
     )
+
+
+def _to_float_list(value: Any) -> list[float]:
+    if isinstance(value, (list, tuple)):
+        return [float(v) for v in value]
+    # Handle protobuf ListValue (exposes items via __iter__ but not list/tuple check)
+    try:
+        return [float(v) for v in value]
+    except (TypeError, ValueError):
+        pass
+    return []
+
+
+# InternVLA-N1 System 2 direction action codes
+_ACTION_HEADING: dict[int, float] = {
+    1: 0.0,  # ↑ → forward
+    2: -90.0,  # ← → left
+    3: 90.0,  # → → right
+    5: 180.0,  # ↓ → turn around
+}
+
+
+def _action_to_heading(action: Any) -> float | None:
+    if action is None:
+        return None
+    arr = np.asarray(action).reshape(-1)
+    non_stop = [int(a) for a in arr if int(a) != 0]
+    if not non_stop:
+        return None
+    mode_value = max(set(non_stop), key=non_stop.count)
+    return _ACTION_HEADING.get(mode_value)
 
 
 def _parse_pixel_goal(value: Any) -> tuple[int, int] | None:

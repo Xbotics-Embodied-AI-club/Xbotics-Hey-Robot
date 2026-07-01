@@ -81,6 +81,13 @@ def test_cli_channel_start_stop_and_on_event(monkeypatch) -> None:
     )
     invoked: list[str] = []
 
+    class _FakeStdin:
+        @staticmethod
+        def isatty() -> bool:
+            return True
+
+    monkeypatch.setattr("sys.stdin", _FakeStdin())
+
     async def fake_loop(_handler) -> None:
         invoked.append("loop")
 

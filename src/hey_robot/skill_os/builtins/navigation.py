@@ -122,7 +122,7 @@ class _VLNNavigationSkill(BaseSkill):
                 error="foundation capability port is unavailable",
             )
         max_steps = max(1, int(arguments.get("max_steps") or 1))
-        execute_primitives = bool(arguments.get("execute_primitives", False))
+        execute_primitives = bool(arguments.get("execute_primitives", True))
         steps: list[dict[str, Any]] = []
         planner_data: dict[str, Any] = {}
         result = None

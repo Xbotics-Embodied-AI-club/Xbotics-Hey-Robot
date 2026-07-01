@@ -218,7 +218,9 @@ def test_internvla_n1_system2_real_path_requires_image() -> None:
     assert result["failure_mode"] == "image_unavailable"
 
 
-def test_internvla_n1_system2_real_path_rejects_non_stop_action(tmp_path) -> None:
+def test_internvla_n1_system2_real_path_maps_non_stop_action_to_heading(
+    tmp_path,
+) -> None:
     image_path = tmp_path / "front.png"
     _write_rgb(image_path)
     model = _FakeS2Model(SimpleNamespace(output_action=[1], output_pixel=None))
@@ -229,8 +231,9 @@ def test_internvla_n1_system2_real_path_rejects_non_stop_action(tmp_path) -> Non
         {"arguments": {"target": "desk", "image_path": str(image_path)}}
     )
 
-    assert result["success"] is False
-    assert result["failure_mode"] == "vln_no_valid_goal"
+    assert result["success"] is True
+    assert result["metrics"]["vln"]["mode"] == "heading"
+    assert result["metrics"]["vln"]["heading_deg"] == 0.0
 
 
 def test_vln_adapter_maps_center_pixel_to_forward_step() -> None:
@@ -267,3 +270,26 @@ def test_vln_adapter_maps_heading_and_stop() -> None:
 def test_vln_adapter_rejects_empty_planner_output() -> None:
     with pytest.raises(ValueError, match="planner output"):
         planner_output_to_primitive({})
+
+
+def test_action_to_heading_maps_direction_codes() -> None:
+    from hey_robot.foundation.backends.vln.internvla_n1_system2.executor import (
+        _action_to_heading,
+    )
+
+    assert _action_to_heading([1]) == 0.0
+    assert _action_to_heading([2]) == -90.0
+    assert _action_to_heading([3]) == 90.0
+    assert _action_to_heading([5]) == 180.0
+    assert _action_to_heading([0]) is None
+    assert _action_to_heading(None) is None
+
+
+def test_to_float_list_handles_iterables() -> None:
+    from hey_robot.foundation.backends.vln.internvla_n1_system2.executor import (
+        _to_float_list,
+    )
+
+    assert _to_float_list([1.0, 2.0, 3.0]) == [1.0, 2.0, 3.0]
+    assert _to_float_list((4.0, 5.0, 6.0)) == [4.0, 5.0, 6.0]
+    assert _to_float_list("not a list") == []

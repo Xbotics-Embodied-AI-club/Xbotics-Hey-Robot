@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import grpc
+from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct
 
 from hey_robot.config import CapabilityServiceSpec
@@ -21,6 +22,8 @@ class GrpcCapabilityClient:
         self.service_id = service_id
         self.spec = spec
         self.target = str(spec.target).strip()
+        # 标准化 gRPC 目标地址：移除 grpc:// 前缀（gRPC 不识别该 scheme）
+        self.target = self.target.removeprefix("grpc://")
         self._channel = grpc.aio.insecure_channel(self.target)
         self._stub = capability_pb2_grpc.CapabilityServiceStub(self._channel)
 
@@ -108,4 +111,11 @@ def _dict_to_struct(value: dict[str, Any]) -> Struct:
 
 
 def _struct_to_dict(value: Struct) -> dict[str, Any]:
-    return dict(value) if value is not None else {}
+    """使用 MessageToDict 递归转换嵌套 protobuf Struct 为纯 Python dict。
+
+    dict(value) 只转换第一层，内层的 Struct/ListValue 仍为 protobuf 对象，
+    导致 isinstance(x, dict) / isinstance(x, list) 检查失败。
+    """
+    if value is None:
+        return {}
+    return MessageToDict(value, preserving_proto_field_name=True)  # type: ignore[no-any-return]

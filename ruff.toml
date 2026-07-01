@@ -39,6 +39,7 @@ exclude = [
   "site-packages",
   ".history",
   "src/hey_robot/robot_runtime/components/scservo_sdk",
+  "third_party",
   "src/hey_robot/foundation/contract/v1/capability_pb2.py",
   "src/hey_robot/foundation/contract/v1/capability_pb2.pyi",
   "src/hey_robot/foundation/contract/v1/capability_pb2_grpc.py",
