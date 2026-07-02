@@ -177,7 +177,7 @@ hey-robot run --config configs/xlerobot.real.ubuntu.yaml
 | 操作 | `move_arm_joints` | 控制机械臂关节 |
 | 操作 | `set_gripper` | 控制夹爪开合 |
 
-`vla_manipulation` 已注册 capability service，默认不加入 `skills.enabled`。VLA 稳定后手动添加。
+`vla_manipulation` 已注册 ModelService，默认不加入 `skills.enabled`。VLA 稳定后手动添加。
 
 ## 双摄像头配置
 
@@ -197,9 +197,9 @@ cameras:
 
 ---
 
-# VLA Capability Service
+# VLA ModelService
 
-VLA 在系统中不属于 robot driver，而是独立的 `capability_service`。Agent 只请求 skill，是否走 VLA 由 `SkillControllerService` 和 `CapabilityRuntime` 决定。
+VLA 在系统中不属于 robot driver，而是独立的 `model_service`。Agent 只请求 skill，是否走 VLA 由 `SkillControllerService` 和 `ModelServiceRegistry` 决定。
 
 ## 链路
 
@@ -207,8 +207,8 @@ VLA 在系统中不属于 robot driver，而是独立的 `capability_service`。
 Agent
   -> vla_manipulation
   -> SkillControllerService
-  -> CapabilityRuntime
-  -> VLACapabilityService
+  -> ModelServiceRegistry
+  -> VLAPolicyService
   -> LeRobot RobotClient
   -> LeRobot policy_server
   -> SO101 arm + cameras
@@ -217,7 +217,7 @@ Agent
 ## 先关闭 VLA 验证 native skills
 
 ```yaml
-capability_services:
+model_services:
   arm_vla:
     enabled: false
 ```
@@ -226,7 +226,7 @@ capability_services:
 
 ## 开启 VLA
 
-配置位置：`capability_services.arm_vla.settings`
+配置位置：`model_services.arm_vla.settings`
 
 Ubuntu 配置使用 `policy_runtime: groot_zmq`，通过 ZMQ 连接 policy server。Windows 配置使用 `policy_runtime: lerobot_single_arm`。
 
@@ -249,10 +249,10 @@ Ubuntu 配置使用 `policy_runtime: groot_zmq`，通过 ZMQ 连接 policy serve
 uv run python -m lerobot.async_inference.policy_server --host=0.0.0.0 --port=8080
 ```
 
-再启动 VLA capability service：
+再启动 VLA ModelService：
 
 ```bash
-uv run hey-robot capability-service --config configs/xlerobot.real.ubuntu.yaml --service-id arm_vla
+uv run hey-robot model-service --config configs/xlerobot.real.ubuntu.yaml --service-id arm_vla
 ```
 
 ## 更换模型

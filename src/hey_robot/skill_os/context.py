@@ -6,7 +6,7 @@ from typing import Any
 
 from hey_robot.protocol import RobotObservation
 from hey_robot.skill_os.apis import (
-    CapabilityAPI,
+    ModelServiceAPI,
     PerceptionAPI,
     RobotSkillAPI,
 )
@@ -18,7 +18,7 @@ class SkillContext:
     robot_id: str | None = None
     robot: RobotSkillAPI | None = None
     perception: PerceptionAPI | None = None
-    capabilities: CapabilityAPI | None = None
+    model_services: ModelServiceAPI | None = None
     observation: RobotObservation | None = None
     current_observation: Callable[[], RobotObservation | None] | None = None
     resolve_images: Callable[[list[Any]], list[Any]] | None = None

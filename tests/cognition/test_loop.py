@@ -626,7 +626,7 @@ def test_robot_agent_service_scene_turn_uses_scene_evidence_tool_call(tmp_path) 
     )
 
 
-def test_robot_agent_service_motion_turn_uses_request_capability_tool_call(
+def test_robot_agent_service_motion_turn_uses_request_skill_tool_call(
     tmp_path,
 ) -> None:
     class FakeBus:
@@ -666,9 +666,9 @@ def test_robot_agent_service_motion_turn_uses_request_capability_tool_call(
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "move_base",
+                    "skill": "move_base",
                     "objective": "move forward 10cm",
                     "slots": {"direction": "forward", "distance_cm": 10.0},
                 },
@@ -744,7 +744,7 @@ def test_robot_agent_suppresses_empty_response_wait_reply() -> None:
     assert _suppress_user_visible_reply(result) is True
 
     command_result = types.SimpleNamespace(
-        tool="request_capability", metadata={"stop_reason": "command_router"}
+        tool="request_skill", metadata={"stop_reason": "command_router"}
     )
     assert _suppress_user_visible_reply(command_result) is False
 
@@ -1244,13 +1244,13 @@ def test_robot_agent_service_confirmed_pending_confirmation_reports_motion_guard
     service.bus = fake_bus  # type: ignore[assignment]
     service.events = BusEventPublisher(fake_bus, service.topics)  # type: ignore[arg-type]
 
-    async def blocked_request_capability(*_args: object, **_kwargs: object) -> str:
+    async def blocked_request_skill(*_args: object, **_kwargs: object) -> str:
         raise RuntimeError(
             "ConsecutiveMotionBlocked: last capability 'move_base' was also a "
             "motion/actuation skill. Run inspect_scene first."
         )
 
-    service.core.request_capability = blocked_request_capability  # type: ignore[method-assign]
+    service.core.request_skill = blocked_request_skill  # type: ignore[method-assign]
     service.task_runtime.store_pending_confirmation(
         "s1",
         {

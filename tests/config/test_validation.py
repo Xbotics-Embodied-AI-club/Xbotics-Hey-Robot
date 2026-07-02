@@ -188,19 +188,19 @@ def test_validate_deployment_rejects_unsupported_robot_family(
     assert any("supports robots other_robot" in issue.message for issue in issues)
 
 
-def test_validate_deployment_rejects_unavailable_external_capability(
+def test_validate_deployment_rejects_unavailable_required_model_service(
     tmp_path, monkeypatch
 ) -> None:
     from hey_robot.skill_os.base import BaseSkill, SkillResult, SkillSpec
 
-    module_name = "tests.fake_external_capability_skill"
+    module_name = "tests.fake_required_model_service_skill"
     module = types.ModuleType(module_name)
 
     class ExternalCapabilitySkill(BaseSkill):
         spec = SkillSpec(
-            name="external_capability_skill",
+            name="required_model_service_skill",
             description="Requires an external service.",
-            external_capability="special_service",
+            required_model_service="special_service",
         )
 
         async def execute(self, ctx, arguments):
@@ -222,7 +222,7 @@ def test_validate_deployment_rejects_unavailable_external_capability(
             "robots": {"robot0": {"type": "xlerobot"}},
             "skills": {
                 "modules": [module_name],
-                "enabled": ["external_capability_skill"],
+                "enabled": ["required_model_service_skill"],
             },
         }
     )
@@ -231,7 +231,7 @@ def test_validate_deployment_rejects_unavailable_external_capability(
 
     assert any(
         issue.message
-        == "skill external_capability_skill requires unavailable capability "
+        == "skill required_model_service_skill requires unavailable model service "
         "special_service"
         for issue in issues
     )

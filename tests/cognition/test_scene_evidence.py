@@ -56,8 +56,8 @@ def test_scene_evidence_reuses_request_perception_for_inspect_scene() -> None:
 def test_scene_evidence_reuses_successful_look_around_for_inspect_scene() -> None:
     records = [
         ToolCallRecord(
-            name="request_capability",
-            arguments={"capability": "look_around"},
+            name="request_skill",
+            arguments={"skill": "look_around"},
             result=(
                 "Execution feedback for skill skill_seen:\n"
                 "- outcome: confirmed\n"
@@ -80,8 +80,8 @@ def test_scene_evidence_reuses_successful_look_around_for_inspect_scene() -> Non
 def test_scene_evidence_does_not_reuse_failed_perception_feedback() -> None:
     records = [
         ToolCallRecord(
-            name="request_capability",
-            arguments={"capability": "inspect_scene"},
+            name="request_skill",
+            arguments={"skill": "inspect_scene"},
             result=(
                 "Execution feedback for skill skill_failed:\n"
                 "- outcome: failed\n"
@@ -103,8 +103,8 @@ def test_scene_evidence_does_not_reuse_failed_perception_feedback() -> None:
 
 def test_scene_evidence_ignores_non_perception_requests_and_records() -> None:
     motion = ToolCallRecord(
-        name="request_capability",
-        arguments={"capability": "move_base"},
+        name="request_skill",
+        arguments={"skill": "move_base"},
         result="moved forward",
         success=True,
     )

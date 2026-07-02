@@ -203,7 +203,7 @@ def test_runtime_wraps_plugin_exception_as_internal_error() -> None:
 
 
 def test_runtime_executes_vla_manipulation_skill() -> None:
-    class CapabilityAPI:
+    class ModelServiceAPI:
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict]] = []
 
@@ -218,7 +218,7 @@ def test_runtime_executes_vla_manipulation_skill() -> None:
                 metrics={"verified": True},
             )
 
-    capabilities = CapabilityAPI()
+    model_services = ModelServiceAPI()
     registry = load_skill_registry(enabled=("vla_manipulation",))
     runtime = SkillRuntime(registry)
 
@@ -227,7 +227,7 @@ def test_runtime_executes_vla_manipulation_skill() -> None:
             "vla_manipulation",
             {"task_prompt": "Pick up the red cup."},
             context_factory=lambda invoke: SkillContext(
-                capabilities=capabilities,
+                model_services=model_services,
                 invoke=invoke,
             ),
         )
@@ -235,13 +235,13 @@ def test_runtime_executes_vla_manipulation_skill() -> None:
 
     assert result.success is True
     assert result.data == {"verified": True}
-    assert capabilities.calls == [
+    assert model_services.calls == [
         ("vla_manipulation", {"task_prompt": "Pick up the red cup."})
     ]
 
 
 def test_runtime_executes_navigate_to_skill_through_capability() -> None:
-    class CapabilityAPI:
+    class ModelServiceAPI:
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict]] = []
 
@@ -256,7 +256,7 @@ def test_runtime_executes_navigate_to_skill_through_capability() -> None:
                 metrics={"vln": {"mode": "pixel_goal", "pixel_goal": [320, 240]}},
             )
 
-    capabilities = CapabilityAPI()
+    model_services = ModelServiceAPI()
     registry = load_skill_registry(enabled=("navigate_to",))
     runtime = SkillRuntime(registry)
 
@@ -265,7 +265,7 @@ def test_runtime_executes_navigate_to_skill_through_capability() -> None:
             "navigate_to",
             {"target": "desk", "execute_primitives": False},
             context_factory=lambda invoke: SkillContext(
-                capabilities=capabilities,
+                model_services=model_services,
                 invoke=invoke,
             ),
         )
@@ -273,11 +273,11 @@ def test_runtime_executes_navigate_to_skill_through_capability() -> None:
 
     assert result.success is True
     assert result.data == {"vln": {"mode": "pixel_goal", "pixel_goal": [320, 240]}}
-    assert capabilities.calls == [("navigate_to", {"target": "desk"})]
+    assert model_services.calls == [("navigate_to", {"target": "desk"})]
 
 
 def test_navigate_to_skill_respects_execute_primitives_false() -> None:
-    class CapabilityAPI:
+    class ModelServiceAPI:
         async def call(self, name: str, arguments: dict):
             del name, arguments
             return SimpleNamespace(
@@ -299,7 +299,7 @@ def test_navigate_to_skill_respects_execute_primitives_false() -> None:
             {"target": "desk", "execute_primitives": False},
             context_factory=lambda invoke: SkillContext(
                 robot=robot,
-                capabilities=CapabilityAPI(),
+                model_services=ModelServiceAPI(),
                 invoke=invoke,
             ),
         )
@@ -310,7 +310,7 @@ def test_navigate_to_skill_respects_execute_primitives_false() -> None:
 
 
 def test_navigate_to_skill_executes_center_pixel_as_forward_step() -> None:
-    class CapabilityAPI:
+    class ModelServiceAPI:
         async def call(self, name: str, arguments: dict):
             del name, arguments
             return SimpleNamespace(
@@ -332,7 +332,7 @@ def test_navigate_to_skill_executes_center_pixel_as_forward_step() -> None:
             {"target": "desk", "execute_primitives": True},
             context_factory=lambda invoke: SkillContext(
                 robot=robot,
-                capabilities=CapabilityAPI(),
+                model_services=ModelServiceAPI(),
                 invoke=invoke,
             ),
         )
@@ -349,7 +349,7 @@ def test_navigate_to_skill_executes_center_pixel_as_forward_step() -> None:
 
 
 def test_navigate_to_skill_executes_off_center_pixel_as_turn() -> None:
-    class CapabilityAPI:
+    class ModelServiceAPI:
         async def call(self, name: str, arguments: dict):
             del name, arguments
             return SimpleNamespace(
@@ -371,7 +371,7 @@ def test_navigate_to_skill_executes_off_center_pixel_as_turn() -> None:
             {"target": "desk", "execute_primitives": True},
             context_factory=lambda invoke: SkillContext(
                 robot=robot,
-                capabilities=CapabilityAPI(),
+                model_services=ModelServiceAPI(),
                 invoke=invoke,
             ),
         )
@@ -384,7 +384,7 @@ def test_navigate_to_skill_executes_off_center_pixel_as_turn() -> None:
 
 
 def test_approach_object_skill_executes_stop_from_vln_planner() -> None:
-    class CapabilityAPI:
+    class ModelServiceAPI:
         async def call(self, name: str, arguments: dict):
             del name, arguments
             return SimpleNamespace(
@@ -406,7 +406,7 @@ def test_approach_object_skill_executes_stop_from_vln_planner() -> None:
             {"target": "cup", "execute_primitives": True},
             context_factory=lambda invoke: SkillContext(
                 robot=robot,
-                capabilities=CapabilityAPI(),
+                model_services=ModelServiceAPI(),
                 invoke=invoke,
             ),
         )
@@ -418,7 +418,7 @@ def test_approach_object_skill_executes_stop_from_vln_planner() -> None:
 
 
 def test_navigate_to_skill_does_not_execute_primitive_when_capability_fails() -> None:
-    class CapabilityAPI:
+    class ModelServiceAPI:
         async def call(self, name: str, arguments: dict):
             del name, arguments
             return SimpleNamespace(
@@ -440,7 +440,7 @@ def test_navigate_to_skill_does_not_execute_primitive_when_capability_fails() ->
             {"target": "desk", "execute_primitives": True},
             context_factory=lambda invoke: SkillContext(
                 robot=robot,
-                capabilities=CapabilityAPI(),
+                model_services=ModelServiceAPI(),
                 invoke=invoke,
             ),
         )
@@ -452,7 +452,7 @@ def test_navigate_to_skill_does_not_execute_primitive_when_capability_fails() ->
 
 
 def test_navigate_to_skill_requires_robot_for_primitive_execution() -> None:
-    class CapabilityAPI:
+    class ModelServiceAPI:
         async def call(self, name: str, arguments: dict):
             del name, arguments
             return SimpleNamespace(
@@ -472,7 +472,7 @@ def test_navigate_to_skill_requires_robot_for_primitive_execution() -> None:
             "navigate_to",
             {"target": "desk", "execute_primitives": True},
             context_factory=lambda invoke: SkillContext(
-                capabilities=CapabilityAPI(),
+                model_services=ModelServiceAPI(),
                 invoke=invoke,
             ),
         )
@@ -485,7 +485,7 @@ def test_navigate_to_skill_requires_robot_for_primitive_execution() -> None:
 def test_navigate_to_skill_records_multistep_progress_and_refreshes_observation() -> (
     None
 ):
-    class CapabilityAPI:
+    class ModelServiceAPI:
         def __init__(self) -> None:
             self.calls = 0
 
@@ -507,7 +507,7 @@ def test_navigate_to_skill_records_multistep_progress_and_refreshes_observation(
             )
 
     robot = _RobotAPI()
-    capabilities = CapabilityAPI()
+    model_services = ModelServiceAPI()
     invocations: list[tuple[str, dict]] = []
     progress_events: list[dict] = []
     registry = load_skill_registry(enabled=("navigate_to",))
@@ -525,7 +525,7 @@ def test_navigate_to_skill_records_multistep_progress_and_refreshes_observation(
             {"target": "desk", "execute_primitives": True, "max_steps": 2},
             context_factory=lambda _invoke: SkillContext(
                 robot=robot,
-                capabilities=capabilities,
+                model_services=model_services,
                 invoke=invoke,
                 progress=progress,
             ),
@@ -549,7 +549,7 @@ def test_navigate_to_skill_records_multistep_progress_and_refreshes_observation(
 
 
 def test_navigate_to_skill_returns_structured_failure_when_primitive_fails() -> None:
-    class CapabilityAPI:
+    class ModelServiceAPI:
         async def call(self, name: str, arguments: dict):
             del name, arguments
             return SimpleNamespace(
@@ -581,7 +581,7 @@ def test_navigate_to_skill_returns_structured_failure_when_primitive_fails() -> 
             {"target": "desk", "execute_primitives": True},
             context_factory=lambda invoke: SkillContext(
                 robot=FailingRobot(),
-                capabilities=CapabilityAPI(),
+                model_services=ModelServiceAPI(),
                 invoke=invoke,
             ),
         )
@@ -595,7 +595,7 @@ def test_navigate_to_skill_returns_structured_failure_when_primitive_fails() -> 
 
 
 def test_navigate_to_skill_injects_latest_observation_image() -> None:
-    class CapabilityAPI:
+    class ModelServiceAPI:
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict]] = []
 
@@ -622,7 +622,7 @@ def test_navigate_to_skill_injects_latest_observation_image() -> None:
             ),
         ],
     )
-    capabilities = CapabilityAPI()
+    model_services = ModelServiceAPI()
     registry = load_skill_registry(enabled=("navigate_to",))
     runtime = SkillRuntime(registry)
 
@@ -631,7 +631,7 @@ def test_navigate_to_skill_injects_latest_observation_image() -> None:
             "navigate_to",
             {"target": "desk", "camera": "front", "execute_primitives": False},
             context_factory=lambda invoke: SkillContext(
-                capabilities=capabilities,
+                model_services=model_services,
                 observation=observation,
                 current_observation=lambda: observation,
                 invoke=invoke,
@@ -640,7 +640,7 @@ def test_navigate_to_skill_injects_latest_observation_image() -> None:
     )
 
     assert result.success is True
-    sent = capabilities.calls[0][1]
+    sent = model_services.calls[0][1]
     assert sent["observation"]["frame_id"] == 42
     assert sent["observation"]["images"] == [
         {
@@ -658,7 +658,7 @@ def test_navigate_to_skill_injects_latest_observation_image() -> None:
 
 
 def test_navigate_to_skill_keeps_explicit_image_path() -> None:
-    class CapabilityAPI:
+    class ModelServiceAPI:
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict]] = []
 
@@ -682,7 +682,7 @@ def test_navigate_to_skill_keeps_explicit_image_path() -> None:
             )
         ],
     )
-    capabilities = CapabilityAPI()
+    model_services = ModelServiceAPI()
     registry = load_skill_registry(enabled=("navigate_to",))
     runtime = SkillRuntime(registry)
 
@@ -695,7 +695,7 @@ def test_navigate_to_skill_keeps_explicit_image_path() -> None:
                 "execute_primitives": False,
             },
             context_factory=lambda invoke: SkillContext(
-                capabilities=capabilities,
+                model_services=model_services,
                 observation=observation,
                 invoke=invoke,
             ),
@@ -703,7 +703,7 @@ def test_navigate_to_skill_keeps_explicit_image_path() -> None:
     )
 
     assert result.success is True
-    assert capabilities.calls == [
+    assert model_services.calls == [
         (
             "navigate_to",
             {
@@ -714,7 +714,7 @@ def test_navigate_to_skill_keeps_explicit_image_path() -> None:
     ]
 
 
-def test_registry_rejects_duplicate_skill_names() -> None:
+def test_registry_rejects_duplicate_provides() -> None:
     registry = load_skill_registry(enabled=())
     duplicate = registry.get("inspect_scene", enabled_only=False).skill
 
@@ -740,7 +740,7 @@ def test_robot_skill_catalog_exposes_capability_semantics() -> None:
 
     assert navigate_to.capability_type == "semantic_navigation"
     assert navigate_to.evidence_outputs[0] == "vln_planner_result"
-    assert navigate_to.external_capability == "navigate_to"
+    assert navigate_to.required_model_service == "navigate_to"
     assert approach_object.capability_type == "object_approach"
     assert approach_object.evidence_outputs[0] == "vln_planner_result"
-    assert approach_object.external_capability == "approach_object"
+    assert approach_object.required_model_service == "approach_object"

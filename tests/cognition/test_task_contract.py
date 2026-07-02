@@ -25,14 +25,14 @@ def test_evidence_ledger_distinguishes_caption_from_marker_detector() -> None:
     ledger = EvidenceLedger(default_skill_semantics())
 
     ledger.add_tool_result(
-        tool="request_capability",
-        args={"capability": "inspect_scene"},
+        tool="request_skill",
+        args={"skill": "inspect_scene"},
         result="red marker-like region visible",
         success=True,
     )
     ledger.add_tool_result(
-        tool="request_capability",
-        args={"capability": "detect_marker"},
+        tool="request_skill",
+        args={"skill": "detect_marker"},
         result="marker detector timed out",
         success=False,
     )

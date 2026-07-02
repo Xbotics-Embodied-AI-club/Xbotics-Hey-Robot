@@ -151,7 +151,7 @@ def _contract_to_robot_spec(spec: SkillSpec) -> RobotSkillSpec:
         category=spec.category,
         input_schema=dict(spec.input_schema),
         supported_robots=tuple(spec.supported_robots),
-        external_capability=spec.external_capability,
+        required_model_service=spec.required_model_service,
         driver_primitives=tuple(spec.driver_primitives),
         safety_level=spec.safety_level,
         required_resources=tuple(spec.required_resources),

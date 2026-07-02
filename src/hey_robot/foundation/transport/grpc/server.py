@@ -12,19 +12,19 @@ import grpc
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct
 
-from hey_robot.config import CapabilityServiceSpec, DeploymentConfig
-from hey_robot.foundation.contract.v1 import capability_pb2, capability_pb2_grpc
+from hey_robot.config import DeploymentConfig, ModelServiceSpec
+from hey_robot.foundation.contract.v1 import model_service_pb2, model_service_pb2_grpc
 from hey_robot.logging import HeyRobotLogger
 
-logger = HeyRobotLogger(name="capability.vla")
+logger = HeyRobotLogger(name="model_service")
 
 DEFAULT_ARM_CALIBRATION_DIR = "~/.cache/hey_robot/calibrations/robots/so_follower/"
 
 
 @dataclass
-class VLAServiceState:
+class ModelServiceState:
     service_id: str
-    spec: CapabilityServiceSpec
+    spec: ModelServiceSpec
     busy: bool = False
     current_skill_id: str | None = None
     last_error: str | None = None
@@ -32,7 +32,7 @@ class VLAServiceState:
     metrics: dict[str, Any] = field(default_factory=dict)
 
 
-class CapabilityExecutor(Protocol):
+class ModelServiceExecutor(Protocol):
     def health(self) -> dict[str, Any]: ...
 
     def execute(self, payload: dict[str, Any]) -> dict[str, Any]: ...
@@ -41,9 +41,9 @@ class CapabilityExecutor(Protocol):
 
 
 class LeRobotVLAExecutor:
-    """Runs a LeRobot single-arm VLA as a capability service."""
+    """Runs a LeRobot single-arm VLA as a model service."""
 
-    def __init__(self, service_id: str, spec: CapabilityServiceSpec) -> None:
+    def __init__(self, service_id: str, spec: ModelServiceSpec) -> None:
         self.service_id = service_id
         self.spec = spec
         self._active_policy_client: Any | None = None
@@ -310,8 +310,10 @@ def _infer_arm_side(arm_port: Any) -> str | None:
     return None
 
 
-class VLACapabilityServicer(capability_pb2_grpc.CapabilityServiceServicer):
-    def __init__(self, state: VLAServiceState, executor: CapabilityExecutor) -> None:
+class ModelServiceServicer(model_service_pb2_grpc.ModelServiceServicer):
+    def __init__(
+        self, state: ModelServiceState, executor: ModelServiceExecutor
+    ) -> None:
         self.state = state
         self.executor = executor
 
@@ -323,7 +325,7 @@ class VLACapabilityServicer(capability_pb2_grpc.CapabilityServiceServicer):
             **dict(self.state.metrics),
             "last_result": self.state.last_result,
         }
-        return capability_pb2.GetHealthResponse(
+        return model_service_pb2.GetHealthResponse(
             service_id=self.state.service_id,
             name=str(payload.get("name") or self.state.service_id),
             robot_id=str(payload.get("robot_id") or self.state.spec.robot_id),
@@ -336,16 +338,16 @@ class VLACapabilityServicer(capability_pb2_grpc.CapabilityServiceServicer):
             version="grpc-v1",
         )
 
-    async def ExecuteCapability(self, request, context):
+    async def ExecuteSkill(self, request, context):
         del context
         if self.state.busy:
-            return capability_pb2.ExecuteCapabilityResponse(
+            return model_service_pb2.ExecuteSkillResponse(
                 success=False,
                 status="failed",
-                summary=f"capability {self.state.service_id} is busy",
-                failure_mode="capability_busy",
-                error_code="CAPABILITY_BUSY",
-                error_message=f"capability {self.state.service_id} is busy",
+                summary=f"model service {self.state.service_id} is busy",
+                failure_mode="model_service_busy",
+                error_code="MODEL_SERVICE_BUSY",
+                error_message=f"model service {self.state.service_id} is busy",
             )
         self.state.busy = True
         self.state.current_skill_id = request.skill_id or None
@@ -369,7 +371,7 @@ class VLACapabilityServicer(capability_pb2_grpc.CapabilityServiceServicer):
                 "success": False,
                 "status": "failed",
                 "failure_mode": "execution_failed",
-                "summary": f"capability execution failed: {type(exc).__name__}: {exc}",
+                "summary": f"model service invocation failed: {type(exc).__name__}: {exc}",
                 "error": str(exc),
                 "error_code": "EXECUTION_FAILED",
             }
@@ -382,7 +384,7 @@ class VLACapabilityServicer(capability_pb2_grpc.CapabilityServiceServicer):
             if not result.get("success")
             else None
         )
-        return capability_pb2.ExecuteCapabilityResponse(
+        return model_service_pb2.ExecuteSkillResponse(
             success=bool(result.get("success", False)),
             status=str(
                 result.get("status")
@@ -395,15 +397,15 @@ class VLACapabilityServicer(capability_pb2_grpc.CapabilityServiceServicer):
             metrics=_dict_to_struct(dict(result.get("metrics", {}) or {})),
         )
 
-    async def CancelCapability(self, request, context):
+    async def CancelSkill(self, request, context):
         del request, context
         self.executor.cancel()
-        return capability_pb2.CancelCapabilityResponse(
+        return model_service_pb2.CancelSkillResponse(
             accepted=True, summary="cancel requested"
         )
 
 
-class VLACapabilityService:
+class VLAPolicyService:
     def __init__(
         self,
         config: DeploymentConfig,
@@ -414,23 +416,23 @@ class VLACapabilityService:
     ) -> None:
         self.config = config
         self.service_id = service_id
-        self.spec = config.capability_services[service_id]
+        self.spec = config.model_services[service_id]
         self.host = host or str(self.spec.settings.get("host", "127.0.0.1"))
         self.port = port or int(self.spec.settings.get("port", 9090))
-        self.state = VLAServiceState(service_id, self.spec)
+        self.state = ModelServiceState(service_id, self.spec)
         self.executor = LeRobotVLAExecutor(service_id, self.spec)
         self._server: grpc.aio.Server | None = None
 
     async def start(self) -> None:
         self._server = grpc.aio.server()
-        capability_pb2_grpc.add_CapabilityServiceServicer_to_server(
-            VLACapabilityServicer(self.state, self.executor),
+        model_service_pb2_grpc.add_ModelServiceServicer_to_server(
+            ModelServiceServicer(self.state, self.executor),
             self._server,
         )
         bind_target = f"{self.host}:{self.port}"
         self._server.add_insecure_port(bind_target)
         logger.info(
-            f"VLA capability [{self.service_id}] listening on grpc://{bind_target}"
+            f"VLA policy service [{self.service_id}] listening on grpc://{bind_target}"
         )
         await self._server.start()
         await self._server.wait_for_termination()
@@ -441,7 +443,7 @@ class VLACapabilityService:
             await self._server.stop(grace=0.5)
 
 
-class VLNCapabilityService:
+class VLNPlannerService:
     def __init__(
         self,
         config: DeploymentConfig,
@@ -456,23 +458,23 @@ class VLNCapabilityService:
 
         self.config = config
         self.service_id = service_id
-        self.spec = config.capability_services[service_id]
+        self.spec = config.model_services[service_id]
         self.host = host or str(self.spec.settings.get("host", "127.0.0.1"))
         self.port = port or int(self.spec.settings.get("port", 9091))
-        self.state = VLAServiceState(service_id, self.spec)
+        self.state = ModelServiceState(service_id, self.spec)
         self.executor = InternVLAN1System2Executor(service_id, self.spec)
         self._server: grpc.aio.Server | None = None
 
     async def start(self) -> None:
         self._server = grpc.aio.server()
-        capability_pb2_grpc.add_CapabilityServiceServicer_to_server(
-            VLACapabilityServicer(self.state, self.executor),
+        model_service_pb2_grpc.add_ModelServiceServicer_to_server(
+            ModelServiceServicer(self.state, self.executor),
             self._server,
         )
         bind_target = f"{self.host}:{self.port}"
         self._server.add_insecure_port(bind_target)
         logger.info(
-            f"VLN capability [{self.service_id}] listening on grpc://{bind_target}"
+            f"VLN planner service [{self.service_id}] listening on grpc://{bind_target}"
         )
         await self._server.start()
         await self._server.wait_for_termination()
@@ -483,19 +485,19 @@ class VLNCapabilityService:
             await self._server.stop(grace=0.5)
 
 
-def build_capability_service(
+def build_model_service(
     config: DeploymentConfig,
     *,
     service_id: str,
     host: str | None = None,
     port: int | None = None,
-) -> VLACapabilityService | VLNCapabilityService:
-    spec = config.capability_services[service_id]
-    if spec.type == "vla_service":
-        return VLACapabilityService(config, service_id=service_id, host=host, port=port)
-    if spec.type == "vln_service":
-        return VLNCapabilityService(config, service_id=service_id, host=host, port=port)
-    raise ValueError(f"unsupported capability service type: {spec.type}")
+) -> VLAPolicyService | VLNPlannerService:
+    spec = config.model_services[service_id]
+    if spec.type == "vla_policy":
+        return VLAPolicyService(config, service_id=service_id, host=host, port=port)
+    if spec.type == "vln_planner":
+        return VLNPlannerService(config, service_id=service_id, host=host, port=port)
+    raise ValueError(f"unsupported model service type: {spec.type}")
 
 
 def _dict_to_struct(value: dict[str, Any]) -> Struct:
@@ -505,12 +507,7 @@ def _dict_to_struct(value: dict[str, Any]) -> Struct:
 
 
 def _struct_to_dict(value: Struct) -> dict[str, Any]:
-    """使用 MessageToDict 完整转换 protobuf Struct 为纯 Python dict。
-
-    MessageToDict 会递归处理嵌套的 Struct 和 ListValue，
-    避免手动转换时残留 protobuf 容器类型。
-    """
+    """Recursively convert a protobuf Struct into plain Python values."""
     if value is None:
         return {}
-    # preserving_proto_field_name=True 保留原始字段名（如 snake_case）
     return MessageToDict(value, preserving_proto_field_name=True)  # type: ignore[no-any-return]

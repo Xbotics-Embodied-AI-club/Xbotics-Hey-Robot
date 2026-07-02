@@ -30,22 +30,20 @@ def test_capability_resolver_blocks_non_read_only_when_robot_state_failed() -> N
     assert decision.rule == "robot_state"
 
 
-def test_capability_resolver_allows_request_capability_when_robot_state_failed() -> (
-    None
-):
+def test_capability_resolver_allows_request_skill_when_robot_state_failed() -> None:
     registry = ToolRegistry()
 
     def submit_capability(_capability: str, _objective: str) -> str:
         return "ok"
 
     registry.register_simple(
-        "request_capability",
+        "request_skill",
         submit_capability,
         safety_level="actuate",
     )
 
     decision = CapabilityResolver(registry).resolve(
-        "request_capability", context={"robot_status": {"state": "failed"}}
+        "request_skill", context={"robot_status": {"state": "failed"}}
     )
 
     assert decision.behavior == "allow"

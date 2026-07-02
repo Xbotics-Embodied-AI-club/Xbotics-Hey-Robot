@@ -307,7 +307,7 @@ def test_task_run_store_persists_skill_trace_for_bound_and_completed_skill(tmp_p
             "skill": "vla_manipulation",
             "backend": "foundation",
             "implementation_name": "vla_manipulation",
-            "implementation_kind": "capability_service",
+            "implementation_kind": "model_service",
         },
     )
     assert bound is not None
@@ -323,7 +323,7 @@ def test_task_run_store_persists_skill_trace_for_bound_and_completed_skill(tmp_p
             "skill": "vla_manipulation",
             "backend": "foundation",
             "implementation_name": "vla_manipulation",
-            "implementation_kind": "capability_service",
+            "implementation_kind": "model_service",
         },
     )
 

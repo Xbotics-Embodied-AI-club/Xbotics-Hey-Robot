@@ -7,7 +7,7 @@ from hey_robot.protocol import RobotSkillSpec, SkillIntent
 
 
 @dataclass(frozen=True)
-class CapabilityHealth:
+class ServiceHealth:
     name: str
     online: bool
     loaded: bool = True
@@ -21,7 +21,7 @@ class CapabilityHealth:
 
 
 @dataclass(frozen=True)
-class CapabilityExecutionRequest:
+class ServiceInvocationRequest:
     service_id: str
     intent: SkillIntent
     contract: RobotSkillSpec
@@ -29,7 +29,7 @@ class CapabilityExecutionRequest:
 
 
 @dataclass(frozen=True)
-class CapabilityExecutionResult:
+class ServiceInvocationResult:
     success: bool
     summary: str
     status: str = "completed"
@@ -39,11 +39,11 @@ class CapabilityExecutionResult:
     error_code: str | None = None
 
 
-class CapabilityClient(Protocol):
-    async def health(self) -> CapabilityHealth: ...
+class ModelServiceClient(Protocol):
+    async def health(self) -> ServiceHealth: ...
 
     async def execute(
-        self, request: CapabilityExecutionRequest
-    ) -> CapabilityExecutionResult: ...
+        self, request: ServiceInvocationRequest
+    ) -> ServiceInvocationResult: ...
 
     async def cancel(self, skill_id: str) -> None: ...

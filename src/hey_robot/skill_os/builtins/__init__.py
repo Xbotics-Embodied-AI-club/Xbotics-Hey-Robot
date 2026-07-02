@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from hey_robot.skill_os.builtins.capability import VLAManipulationSkill
 from hey_robot.skill_os.builtins.manipulation import (
     MoveArmJointsSkill,
     SetArmPoseSkill,
     SetGripperSkill,
 )
+from hey_robot.skill_os.builtins.model_service import VLAManipulationSkill
 from hey_robot.skill_os.builtins.navigation import (
     ApproachObjectSkill,
     BaseVelocityStepSkill,

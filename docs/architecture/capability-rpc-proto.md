@@ -9,7 +9,7 @@
 - `codegen flow` 怎么跑
 - 后续扩展新的 RPC contract 时，目录和命名怎么保持一致
 
-Capability proto 面向 capability service 的执行请求，而不是直接暴露 robot driver primitive。当前 VLA 路径统一使用 `vla_manipulation` 作为 skill/capability 名称；普通 XLeRobot 原子能力（例如 `move_base`、`turn_base`、`set_gripper`）走 RobotRuntime，不需要 capability service。当前 XLeRobot real/sim 配置默认不把 `vla_manipulation` 加入 `skills.enabled`，因此 Agent 默认不能直接调用它。
+Capability proto 面向 ModelService 的执行请求，而不是直接暴露 robot driver primitive。当前 VLA 路径统一使用 `vla_manipulation` 作为 skill/capability 名称；普通 XLeRobot 原子能力（例如 `move_base`、`turn_base`、`set_gripper`）走 RobotRuntime，不需要 ModelService。当前 XLeRobot real/sim 配置默认不把 `vla_manipulation` 加入 `skills.enabled`，因此 Agent 默认不能直接调用它。
 
 当前 source of truth：
 

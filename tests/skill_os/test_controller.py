@@ -89,21 +89,21 @@ def _service_with_vla_capability(
                     "settings": {"codec": "skill"},
                 }
             },
-            "capability_services": {
+            "model_services": {
                 "foundation_locomotion": {
-                    "type": "mock_vla_service",
+                    "type": "mock_vla_policy",
                     "enabled": True,
                     "robot_id": "xlerobot",
-                    "skill_names": ["foundation_locomotion_run"],
+                    "provides": ["foundation_locomotion_run"],
                     "resources": ["base", "camera"],
                     "timeout_sec": 20,
                     "settings": locomotion_settings or {},
                 },
                 "arm_vla": {
-                    "type": "mock_vla_service",
+                    "type": "mock_vla_policy",
                     "enabled": True,
                     "robot_id": "xlerobot",
-                    "skill_names": ["vla_manipulation"],
+                    "provides": ["vla_manipulation"],
                     "resources": ["arm", "gripper", "camera"],
                     "timeout_sec": 30,
                     "settings": settings or {},

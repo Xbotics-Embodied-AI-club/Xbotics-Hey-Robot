@@ -15,7 +15,7 @@ from hey_robot.skill_os.registry import (
     registry_from_config,
 )
 from hey_robot.skill_os.runtime import (
-    FoundationCapabilityPort,
+    ModelServiceRuntimePort,
     RobotRuntimePort,
     SkillOSPort,
     SkillRuntime,
@@ -24,7 +24,7 @@ from hey_robot.skill_os.skill_planner import SkillPlanner
 
 __all__ = [
     "BaseSkill",
-    "FoundationCapabilityPort",
+    "ModelServiceRuntimePort",
     "PluginSkillResult",
     "RobotRuntimePort",
     "RobotSkillAction",

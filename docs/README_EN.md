@@ -11,11 +11,11 @@ Hey Robot is an embodied Agent runtime for real robot deployment. The current ma
 ## Features
 
 - LLM Agent runtime for robot tasks.
-- Skill-layer abstraction: the Agent requests capabilities instead of directly controlling hardware.
+- Skill-layer abstraction: the Agent requests skills instead of directly controlling hardware.
 - MuJoCo simulation and XLeRobot real-robot deployment.
 - Web, CLI, voice, and Feishu user channels.
 - Task cockpit for task state, timeline, scene evidence, and recovery.
-- VLA capability integration through an independent capability service.
+- VLA ModelService integration through an independent ModelService.
 - Execution feedback, resource gates, readiness gates, timeouts, and recovery flow.
 
 ## Architecture
@@ -23,13 +23,13 @@ Hey Robot is an embodied Agent runtime for real robot deployment. The current ma
 ```mermaid
 flowchart TD
     U[User Channels<br/>Web / Voice / Feishu / CLI]
-    A[Agent Layer<br/>Task understanding / Capability request]
+    A[Agent Layer<br/>Task understanding / Skill request]
     S[Skill Layer<br/>Contracts / Scheduling / Resource gates]
     R[Robot Layer<br/>Simulation / Real robot execution]
-    V[External Capability<br/>VLA / gRPC]
+    V[ModelService<br/>VLA / gRPC]
 
     U -->|User request| A
-    A -->|Capability request| S
+    A -->|Skill request| S
     S -->|Robot action| R
     S -->|Optional| V
     R -->|Status / Observation| A
@@ -40,9 +40,9 @@ Core boundaries:
 
 - `Robot` represents the body and hardware execution boundary.
 - `Skill` is the unified capability entry point for the Agent.
-- The Agent requests robot skills through `request_capability` and does not submit `RobotAction` directly.
+- The Agent requests robot skills through `request_skill` and does not submit `RobotAction` directly.
 - `RobotService / RobotRuntime / PerceptionService` publish observations and camera frames.
-- VLA capabilities are integrated through an independent capability service and are treated as optional extensions.
+- VLA capabilities are integrated through an independent ModelService and are treated as optional extensions.
 
 ## Quick Start
 
@@ -144,7 +144,7 @@ move_arm_joints
 set_gripper
 ```
 
-VLA support is integrated as an optional capability extension and should be exposed to the Agent only after the capability service is stable.
+VLA support is integrated as an optional ModelService extension and should be exposed to the Agent only after the ModelService is stable.
 
 ## Safety
 
@@ -196,7 +196,7 @@ frontend/shared/            shared Web CSS and JS
 proto/                      capability protobuf sources
 src/hey_robot/cognition/    Agentic cognition, loop, core, task state
 src/hey_robot/skill_os/     Skill registry, contracts, scheduler, builtin skills
-src/hey_robot/foundation/   VLA/VLN capability service, catalog, gRPC transport
+src/hey_robot/foundation/   VLA/VLN ModelService, catalog, gRPC transport
 src/hey_robot/robot_runtime/ Robot runtime and drivers
 src/hey_robot/robot_runtime/observations/ observation pipeline and runtime snapshots
 src/hey_robot/cognition/perception/       scene understanding

@@ -19,9 +19,9 @@ Hey Robot 是一个面向真实机器人部署的 embodied agent runtime。
 
 - 上层：Agent Runtime，负责任务理解、task state、scene memory、active perception、recovery 和多轮交互。
 - 中层：Skill OS / Capability Runtime，负责 skill contract、resource gate、lifecycle、backend resolution 和 capability routing。
-- 下层：Robot / Backend Control Runtime，负责 robot driver、safety、真实硬件或仿真执行；VLA 等 foundation 能力通过独立 capability service 接入。
+- 下层：Robot / Backend Control Runtime，负责 robot driver、safety、真实硬件或仿真执行；VLA 等 foundation 能力通过独立 ModelService 接入。
 
-当前系统优先保证 XLeRobot 的真实可用能力边界：Agent 通过统一 skill surface 调用可验证的感知、底盘、机械臂、夹爪和安全动作。`vla_manipulation` 已注册，capability service 可单独部署；但它未加入 `skills.enabled`，默认不进入 Agent 可调用面。
+当前系统优先保证 XLeRobot 的真实可用能力边界：Agent 通过统一 skill surface 调用可验证的感知、底盘、机械臂、夹爪和安全动作。`vla_manipulation` 已注册，ModelService 可单独部署；但它未加入 `skills.enabled`，默认不进入 Agent 可调用面。
 
 一个 deployment 通常会绑定：
 
@@ -52,7 +52,7 @@ User Channel
           active perception gate
           run RobotAgentCore
             -> AgentRuntime
-            -> request_capability / request_perception
+            -> request_skill / request_perception
             -> SkillGateway
   -> bus topic: skill_intent
           save checkpoint/task state
@@ -61,7 +61,7 @@ User Channel
       -> AgentNotificationRuntime
   -> SkillControllerService
       -> SkillContractRuntime
-      -> CapabilityRuntime
+      -> ModelServiceRegistry
   -> bus topic: robot_action
   -> RobotService / RobotRuntime
       -> XLeRobotDriver / SO101Driver / LeKiwiDriver / MockRobotDriver
@@ -70,7 +70,7 @@ User Channel
   -> User Channel
 ```
 
-当前 XLeRobot real/sim 配置启用 11 个非 VLA skill。启用面包括感知、底盘、跟随、安全、机械臂和夹爪；`vla_manipulation` 已注册，并有 capability service 配置路径，但默认不加入 `skills.enabled`。
+当前 XLeRobot real/sim 配置启用 11 个非 VLA skill。启用面包括感知、底盘、跟随、安全、机械臂和夹爪；`vla_manipulation` 已注册，并有 ModelService 配置路径，但默认不加入 `skills.enabled`。
 
 ## 3. 关键边界
 
@@ -93,7 +93,7 @@ User Channel
 - `SkillContractRuntime`
   - skill schema、precondition、resource conflict、timeout、readiness gate
 
-- `CapabilityRuntime`
+- `ModelServiceRegistry`
   - 当前按 skill/capability 配置路由到已部署 model service
   - VLA 路径使用 `vla_manipulation`；该 skill 需显式加入 `skills.enabled` 后 Agent 才能调用
 
@@ -158,16 +158,16 @@ Hey Robot 当前已经形成对应的三层 runtime：
 | upper cognition | `RobotAgentCore`, LLM runtime, prompt templates | 已有 |
 | memory / world context | `SceneRuntime`, task memory, episode history | 已有，仍需增强 |
 | task / recovery runtime | `TaskRunManager`, `AgentNotificationRuntime` | 已有 |
-| skill bridge | `SkillIntent`, `SkillResult`, `SkillContractRuntime`, `SkillControllerService`, `CapabilityRuntime` | 当前 XLeRobot real/sim 配置启用 11 个非 VLA skill；每个 skill 单一执行边界 |
+| skill bridge | `SkillIntent`, `SkillResult`, `SkillContractRuntime`, `SkillControllerService`, `ModelServiceRegistry` | 当前 XLeRobot real/sim 配置启用 11 个非 VLA skill；每个 skill 单一执行边界 |
 | robot execution | XLeRobot drivers, readiness gates, safety policy | 已有，仍需真实场景 hardened |
-| foundation backend | VLA / future foundation services | VLA 已有 `vla_manipulation` 注册和 capability service 路径；只有加入 `skills.enabled` 后才进入 Agent 可调用面 |
+| foundation backend | VLA / future foundation services | VLA 已有 `vla_manipulation` 注册和 ModelService 路径；只有加入 `skills.enabled` 后才进入 Agent 可调用面 |
 | classic backend | deterministic primitive control | bring-up / fallback / ablation，不是最终 claim |
 
 skill/backend decoupling 的当前状态：
 
 - Agent 只能从 deployment 的 `skills.enabled` 调用 skill。
 - 当前 XLeRobot real/sim 配置启用 11 个非 VLA skill。
-- `vla_manipulation` 已注册；capability service 可部署，但只有加入 `skills.enabled` 后才进入 Agent 可调用面。
+- `vla_manipulation` 已注册；ModelService 可部署，但只有加入 `skills.enabled` 后才进入 Agent 可调用面。
 - memory、scene record、task context 属于 Agent/runtime 工具边界，不作为 robot skill 暴露。
 
 ## 6. XLeRobot 执行链路
@@ -188,7 +188,7 @@ Agent
   -> SkillIntent(name="<enabled_skill>")
   -> SkillControllerService
   -> SkillContractRuntime
-  -> RobotRuntime / CapabilityRuntime
+  -> RobotRuntime / ModelServiceRegistry
   -> XLeRobotDriver / CapabilityService
   -> SO101 arm / LeKiwi base / camera / battery
 ```
@@ -230,7 +230,7 @@ TaskSessionView:
 
 用户可见的 task cockpit 在 `/cockpit`，通过 `TaskSessionQueryService` 聚合 task runs、robot state、scene memory、skill traces 和 recovery state 为单一视图。
 
-当前代码中没有独立的 `request_quick_action` Agent 工具。用户、语音和 Web 入口进入系统后，仍通过 Gateway、Agent、`request_capability`、`SkillGateway` 和 SkillController 这条主链路提交机器人能力请求；底盘流式跟随等特殊控制使用单独的 service/topic，但不作为 LLM 可见工具暴露。
+当前代码中没有独立的 `request_quick_action` Agent 工具。用户、语音和 Web 入口进入系统后，仍通过 Gateway、Agent、`request_skill`、`SkillGateway` 和 SkillController 这条主链路提交机器人能力请求；底盘流式跟随等特殊控制使用单独的 service/topic，但不作为 LLM 可见工具暴露。
 
 ## 8. Camera Model
 
@@ -320,7 +320,7 @@ gRPC 化的部分：
 2. 验证平台与硬件映射
 3. 验证 camera observation publishing
 4. bring-up 验证：base、arm、gripper、perception（diagnostic profile）
-5. 验证 foundation capability services（如 VLA manipulation）
+5. 验证 foundation ModelServices（如 VLA manipulation）
 6. 验证 semantic skill → single implementation 执行链路
 7. 验证端到端 Agent task execution、execution feedback、typed recovery
 8. 验证 task cockpit（`/cockpit`）展示 task state、timeline、scene evidence、recovery

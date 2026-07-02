@@ -12,7 +12,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from hey_robot.config import CapabilityServiceSpec
+from hey_robot.config import ModelServiceSpec
 from hey_robot.robot_runtime.media import LocalMediaStore
 
 
@@ -72,7 +72,7 @@ class InternVLAN1System2Executor:
     heavy InternNav dependency stack.
     """
 
-    def __init__(self, service_id: str, spec: CapabilityServiceSpec) -> None:
+    def __init__(self, service_id: str, spec: ModelServiceSpec) -> None:
         self.service_id = service_id
         self.spec = spec
         self._cancelled = threading.Event()

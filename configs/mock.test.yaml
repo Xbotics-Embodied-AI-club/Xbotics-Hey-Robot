@@ -120,7 +120,7 @@ robots:
     body: xlerobot
     control_hz: 10.0
 
-capability_services: {}
+model_services: {}
 
 policies:
   embodied_skills:

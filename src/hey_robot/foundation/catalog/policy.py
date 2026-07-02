@@ -31,7 +31,7 @@ class CapabilityPolicy:
     safe_on_blocked_robot: tuple[str, ...] = (
         "get_task_context",
         "get_robot_status",
-        "request_capability",
+        "request_skill",
         "wait",
     )
 
@@ -55,7 +55,7 @@ class CapabilityPolicy:
                 default=(
                     "get_task_context",
                     "get_robot_status",
-                    "request_capability",
+                    "request_skill",
                     "wait",
                 ),
             ),

@@ -129,12 +129,12 @@ class PolicySpec:
 
 
 @dataclass(frozen=True, init=False)
-class CapabilityServiceSpec:
+class ModelServiceSpec:
     type: str
     robot_id: str
     enabled: bool = True
     target: str | None = None
-    skill_names: tuple[str, ...] = ()
+    provides: tuple[str, ...] = ()
     timeout_sec: float = 30.0
     settings: dict[str, Any] = field(default_factory=dict)
 
@@ -144,7 +144,7 @@ class CapabilityServiceSpec:
         robot_id: str,
         enabled: bool = True,
         target: str | None = None,
-        skill_names: tuple[str, ...] = (),
+        provides: tuple[str, ...] = (),
         timeout_sec: float = 30.0,
         settings: dict[str, Any] | None = None,
         *,
@@ -155,7 +155,7 @@ class CapabilityServiceSpec:
         object.__setattr__(self, "robot_id", robot_id)
         object.__setattr__(self, "enabled", enabled)
         object.__setattr__(self, "target", target)
-        object.__setattr__(self, "skill_names", skill_names)
+        object.__setattr__(self, "provides", provides)
         object.__setattr__(self, "timeout_sec", timeout_sec)
         object.__setattr__(self, "settings", dict(settings or {}))
 
@@ -200,7 +200,7 @@ class DeploymentConfig:
     channels: dict[str, ChannelSpec] = field(default_factory=dict)
     robots: dict[str, RobotSpec] = field(default_factory=dict)
     policies: dict[str, PolicySpec] = field(default_factory=dict)
-    capability_services: dict[str, CapabilityServiceSpec] = field(default_factory=dict)
+    model_services: dict[str, ModelServiceSpec] = field(default_factory=dict)
     agents: dict[str, AgentSpec] = field(default_factory=dict)
     skills: SkillSurfaceConfig = field(default_factory=SkillSurfaceConfig)
 
@@ -213,6 +213,17 @@ class DeploymentConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DeploymentConfig:
+        if "capability_services" in data:
+            raise ValueError(
+                "deployment config uses removed field: capability_services"
+            )
+        for service_id, service_data in dict(
+            data.get("model_services", {}) or {}
+        ).items():
+            if isinstance(service_data, dict) and "skill_names" in service_data:
+                raise ValueError(
+                    f"model_services.{service_id} uses removed field: skill_names"
+                )
         deployment_data = data.get("deployment", {}) or {}
         bus_data = deployment_data.get("bus", {}) or {}
         deployment = DeploymentSpec(
@@ -351,14 +362,14 @@ class DeploymentConfig:
                 )
                 for name, value in (data.get("policies", {}) or {}).items()
             },
-            capability_services={
-                name: CapabilityServiceSpec(
+            model_services={
+                name: ModelServiceSpec(
                     type=(value or {}).get("type", name),
                     robot_id=(value or {}).get("robot_id", ""),
                     enabled=bool((value or {}).get("enabled", True)),
                     target=(value or {}).get("target"),
-                    skill_names=tuple(
-                        str(item) for item in (value or {}).get("skill_names", ()) or ()
+                    provides=tuple(
+                        str(item) for item in (value or {}).get("provides", ()) or ()
                     ),
                     timeout_sec=float((value or {}).get("timeout_sec", 30.0)),
                     settings={
@@ -372,7 +383,7 @@ class DeploymentConfig:
                                 "robot_id",
                                 "enabled",
                                 "target",
-                                "skill_names",
+                                "provides",
                                 "resources",
                                 "timeout_sec",
                                 "settings",
@@ -380,7 +391,7 @@ class DeploymentConfig:
                         },
                     },
                 )
-                for name, value in (data.get("capability_services", {}) or {}).items()
+                for name, value in (data.get("model_services", {}) or {}).items()
             },
             agents={
                 name: AgentSpec(

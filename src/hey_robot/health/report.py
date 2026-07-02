@@ -404,7 +404,9 @@ def _fix_hint(message: str) -> str | None:
     if "primitive" in lower or "does not support" in lower:
         return "Check robot driver primitives and keep only skills supported by this embodiment."
     if "capability" in lower:
-        return "Start or configure the required capability service before enabling the skill."
+        return (
+            "Start or configure the required model service before enabling the skill."
+        )
     if "resource path" in lower:
         return (
             "Fix the runtime/media/episode path permissions or choose writable paths."

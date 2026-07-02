@@ -119,8 +119,8 @@ def test_memory_runtime_records_capability_tool_result(tmp_path) -> None:
     runtime = MemoryRuntime(store)
 
     runtime.record_tool_result(
-        "request_capability",
-        {"capability": "vla_manipulation", "slots": {"object": "cup"}},
+        "request_skill",
+        {"skill": "vla_manipulation", "slots": {"object": "cup"}},
         "picked cup",
         True,
         context_summary="cup on table",
@@ -137,8 +137,8 @@ def test_memory_runtime_sanitizes_execution_feedback_before_storing(tmp_path) ->
     runtime = MemoryRuntime(store)
 
     runtime.record_tool_result(
-        "request_capability",
-        {"capability": "reposition_for_view", "slots": {"angle_deg": 180}},
+        "request_skill",
+        {"skill": "reposition_for_view", "slots": {"angle_deg": 180}},
         (
             "Execution feedback for skill skill-turn:\n"
             "- outcome: failed\n"
@@ -171,8 +171,8 @@ def test_memory_runtime_skips_transient_safety_gate_failures(tmp_path) -> None:
     runtime = MemoryRuntime(store)
 
     runtime.record_tool_result(
-        "request_capability",
-        {"capability": "turn_base", "slots": {"direction": "left"}},
+        "request_skill",
+        {"skill": "turn_base", "slots": {"direction": "left"}},
         (
             "RuntimeError: ConsecutiveMotionBlocked: last capability 'move_base' "
             "was also a motion/actuation skill. Run inspect_scene or "
@@ -194,9 +194,9 @@ def test_memory_runtime_uses_execution_feedback_success_for_capability_result(
     runtime = MemoryRuntime(store)
 
     runtime.record_tool_result(
-        "request_capability",
+        "request_skill",
         {
-            "capability": "move_base",
+            "skill": "move_base",
             "objective": "move to the target",
             "slots": {"target": "red cup"},
         },

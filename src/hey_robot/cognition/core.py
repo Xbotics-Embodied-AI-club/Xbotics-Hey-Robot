@@ -206,7 +206,7 @@ class RobotAgentCore:
         if (
             reply_text is None
             and result.stop_reason == "max_iterations_after_tool_result"
-            and result.tool == "request_capability"
+            and result.tool == "request_skill"
         ):
             reply_text = self._safe_tool_result_reply(result.result)
         if reply_text is None and result.stop_reason in {
@@ -259,7 +259,7 @@ class RobotAgentCore:
         try:
             result_text = await self.skill_gateway.submit(
                 SkillGatewayRequest(
-                    capability=command.capability,
+                    skill=command.capability,
                     objective=command.objective,
                     slots=command.slots,
                     interrupt=command.interrupt,
@@ -279,10 +279,10 @@ class RobotAgentCore:
                 reply_text=f"指令没有成功下发：{exc}",
                 skill_submitted=False,
                 task_finished=False,
-                tool="request_capability",
+                tool="request_skill",
                 metadata={
-                    "tool": "request_capability",
-                    "capability": command.capability,
+                    "tool": "request_skill",
+                    "skill": command.capability,
                     "stop_reason": "command_router_failed",
                     "error": str(exc),
                 },
@@ -291,11 +291,11 @@ class RobotAgentCore:
             reply_text=command.reply_text,
             skill_submitted=True,
             task_finished=False,
-            tool="request_capability",
+            tool="request_skill",
             metadata={
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": command.capability,
+                    "skill": command.capability,
                     "objective": command.objective,
                     "slots": command.slots,
                     "interrupt": command.interrupt,
@@ -309,7 +309,7 @@ class RobotAgentCore:
 
     def _latest_execution_failure(self, tool_call_start: int) -> str | None:
         for record in reversed(self.runtime.state.tool_calls[tool_call_start:]):
-            if record.name != "request_capability" or not record.success:
+            if record.name != "request_skill" or not record.success:
                 continue
             parsed = self._parse_agent_feedback(record.result)
             if parsed is None or parsed.get("subgoal_success") is not False:
@@ -331,7 +331,7 @@ class RobotAgentCore:
         capability_calls = [
             record
             for record in self.runtime.state.tool_calls[tool_call_start:]
-            if record.name == "request_capability" and record.success
+            if record.name == "request_skill" and record.success
         ]
         if not capability_calls:
             logger.debug("final_response 无 capability 调用，视为任务完成")
@@ -349,7 +349,7 @@ class RobotAgentCore:
         self, tool_call_start: int, *, final_response: bool = False
     ) -> bool:
         for record in reversed(self.runtime.state.tool_calls[tool_call_start:]):
-            if record.name != "request_capability" or not record.success:
+            if record.name != "request_skill" or not record.success:
                 continue
             capability = str(record.arguments.get("capability") or "").strip()
             parsed = self._parse_agent_feedback(record.result)
@@ -377,7 +377,7 @@ class RobotAgentCore:
             result = str(parsed.get("recommended_action") or "").lower() != "continue"
             logger.debug(f"recommended_action 分支：返回 {result}")
             return result
-        logger.debug("没有找到有效的 request_capability 记录，返回 False")
+        logger.debug("没有找到有效的 request_skill 记录，返回 False")
         return False
 
     def observe_skill_result(
@@ -415,7 +415,7 @@ class RobotAgentCore:
         return AgentCoreResult(
             reply_text="Skill submitted. Waiting for execution feedback.",
             skill_submitted=True,
-            tool="request_capability",
+            tool="request_skill",
             metadata={"skill_id": skill.skill_id, "status": "skill_issued"},
         )
 
@@ -515,9 +515,9 @@ class RobotAgentCore:
         """Register tools via auto-discovery from the ``agents.tools`` package."""
         self._tool_context = bind_agent_tools(self)
 
-    async def request_capability(
+    async def request_skill(
         self,
-        capability: str,
+        skill: str,
         objective: str,
         slots: dict[str, Any] | None = None,
         interrupt: bool = False,
@@ -526,15 +526,13 @@ class RobotAgentCore:
     ) -> str:
         turn = getattr(self, "_current_turn", None)
         turn_metadata = dict(getattr(turn, "metadata", {}) or {})
-        duplicate_perception = self._successful_perception_result_this_turn(capability)
+        duplicate_perception = self._successful_perception_result_this_turn(skill)
         if duplicate_perception is not None:
-            logger.info(
-                f"reuse perception result in current turn: capability={capability}"
-            )
+            logger.info(f"reuse perception result in current turn: skill={skill}")
             return duplicate_perception
         return await self.skill_gateway.submit(
             SkillGatewayRequest(
-                capability=capability,
+                skill=skill,
                 objective=objective,
                 slots=slots,
                 interrupt=interrupt,
@@ -544,10 +542,10 @@ class RobotAgentCore:
             )
         )
 
-    def _successful_perception_result_this_turn(self, capability: str) -> str | None:
+    def _successful_perception_result_this_turn(self, skill: str) -> str | None:
         return reusable_scene_evidence_result(
             self.runtime.state.tool_calls[self._current_tool_call_start :],
-            capability,
+            skill,
             parse_feedback=self._parse_agent_feedback,
         )
 
@@ -592,7 +590,7 @@ class RobotAgentCore:
         baseline_frame_id = (
             snapshot.observation.frame_id if snapshot and snapshot.observation else None
         )
-        await self.request_capability(
+        await self.request_skill(
             skill_name,
             objective=objective,
             slots={"question": objective},
@@ -757,8 +755,8 @@ class RobotAgentCore:
         if not skills:
             return ""
         lines = [
-            "Robot capability catalog for request_capability.capability:",
-            "- Choose request_capability.capability exactly from this catalog. Do not invent capability names.",
+            "Robot skill catalog for request_skill.skill:",
+            "- Choose request_skill.skill exactly from this catalog. Do not invent skill names.",
             "- Use the skill description and input_schema to choose arguments.",
         ]
         for skill in skills:

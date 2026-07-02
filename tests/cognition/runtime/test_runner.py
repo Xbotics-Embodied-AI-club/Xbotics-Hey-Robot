@@ -132,18 +132,18 @@ def test_agent_runtime_can_continue_to_second_robot_skill_after_skill_result() -
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "set_gripper",
+                    "skill": "set_gripper",
                     "objective": "pick up the marker",
                     "slots": {"task": "pick up the marker"},
                 },
                 "reason": "first grasp the target object",
             },
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "set_gripper",
+                    "skill": "set_gripper",
                     "objective": "place the held object into the bin",
                     "slots": {"task": "place the held object into the bin"},
                 },
@@ -156,16 +156,12 @@ def test_agent_runtime_can_continue_to_second_robot_skill_after_skill_result() -
     submitted: list[dict[str, Any]] = []
 
     def submit_capability(
-        capability: str, objective: str, slots: dict[str, Any] | None = None
+        skill: str, objective: str, slots: dict[str, Any] | None = None
     ) -> str:
-        submitted.append(
-            {"capability": capability, "objective": objective, "slots": slots or {}}
-        )
-        return f"{capability} completed: {objective}"
+        submitted.append({"skill": skill, "objective": objective, "slots": slots or {}})
+        return f"{skill} completed: {objective}"
 
-    runtime.register_tool(
-        "request_capability", submit_capability, safety_level="actuate"
-    )
+    runtime.register_tool("request_skill", submit_capability, safety_level="actuate")
 
     result = asyncio.run(
         runtime.step(_payload("clean the table by putting the marker into the bin"))
@@ -178,8 +174,8 @@ def test_agent_runtime_can_continue_to_second_robot_skill_after_skill_result() -
         "place the held object into the bin",
     ]
     assert [record.name for record in runtime.state.tool_calls] == [
-        "request_capability",
-        "request_capability",
+        "request_skill",
+        "request_skill",
     ]
 
 
@@ -188,9 +184,9 @@ def test_agent_runtime_blocks_motion_final_until_required_capability_runs() -> N
         [
             "我已经看了一下当前画面。",
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "turn_base",
+                    "skill": "turn_base",
                     "objective": "向左转动底盘",
                     "slots": {"direction": "left", "angle_deg": 15},
                 },
@@ -203,23 +199,19 @@ def test_agent_runtime_blocks_motion_final_until_required_capability_runs() -> N
     submitted: list[dict[str, Any]] = []
 
     def submit_capability(
-        capability: str, objective: str, slots: dict[str, Any] | None = None
+        skill: str, objective: str, slots: dict[str, Any] | None = None
     ) -> str:
-        submitted.append(
-            {"capability": capability, "objective": objective, "slots": slots or {}}
-        )
-        return f"{capability} completed: {objective}"
+        submitted.append({"skill": skill, "objective": objective, "slots": slots or {}})
+        return f"{skill} completed: {objective}"
 
-    runtime.register_tool(
-        "request_capability", submit_capability, safety_level="motion"
-    )
+    runtime.register_tool("request_skill", submit_capability, safety_level="motion")
 
     result = asyncio.run(runtime.step(_payload("往左转")))
 
     assert result.tool == "final_response"
     assert result.task_finished is True
     assert result.result == "已完成向左转动。"
-    assert [item["capability"] for item in submitted] == ["turn_base"]
+    assert [item["skill"] for item in submitted] == ["turn_base"]
     assert provider.last_messages is not None
     assert any(
         "Task evidence evaluator" in str(message.content)
@@ -231,9 +223,9 @@ def test_agent_runtime_does_not_treat_perception_as_motion_completion() -> None:
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "inspect_scene",
+                    "skill": "inspect_scene",
                     "objective": "查看当前画面",
                     "slots": {},
                 },
@@ -245,13 +237,13 @@ def test_agent_runtime_does_not_treat_perception_as_motion_completion() -> None:
     runtime = AgentRuntime(provider, max_iterations=2)
 
     def submit_observation(
-        capability: str, objective: str, slots: dict[str, Any] | None = None
+        skill: str, objective: str, slots: dict[str, Any] | None = None
     ) -> str:
         del slots
-        return f"{capability} completed: {objective}"
+        return f"{skill} completed: {objective}"
 
     runtime.register_tool(
-        "request_capability",
+        "request_skill",
         submit_observation,
         safety_level="observe",
     )
@@ -268,9 +260,9 @@ def test_agent_runtime_does_not_treat_perception_as_forward_motion_completion() 
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "inspect_scene",
+                    "skill": "inspect_scene",
                     "objective": "check the area before moving",
                     "slots": {},
                 },
@@ -282,13 +274,13 @@ def test_agent_runtime_does_not_treat_perception_as_forward_motion_completion() 
     runtime = AgentRuntime(provider, max_iterations=2)
 
     def submit_observation(
-        capability: str, objective: str, slots: dict[str, Any] | None = None
+        skill: str, objective: str, slots: dict[str, Any] | None = None
     ) -> str:
         del slots
-        return f"{capability} completed: {objective}"
+        return f"{skill} completed: {objective}"
 
     runtime.register_tool(
-        "request_capability",
+        "request_skill",
         submit_observation,
         safety_level="observe",
     )
@@ -305,18 +297,18 @@ def test_agent_runtime_does_not_treat_perception_as_arm_raise_completion() -> No
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "move_arm_joints",
+                    "skill": "move_arm_joints",
                     "objective": "raise the arm endpoint",
                     "slots": {"joints": [{"name": "shoulder_lift", "delta": 0.15}]},
                 },
                 "reason": "try arm adjustment",
             },
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "inspect_scene",
+                    "skill": "inspect_scene",
                     "objective": "check the arm endpoint",
                     "slots": {},
                 },
@@ -328,15 +320,15 @@ def test_agent_runtime_does_not_treat_perception_as_arm_raise_completion() -> No
     runtime = AgentRuntime(provider, max_iterations=3)
 
     def submit_capability(
-        capability: str, objective: str, slots: dict[str, Any] | None = None
+        skill: str, objective: str, slots: dict[str, Any] | None = None
     ) -> str:
         del objective, slots
-        if capability == "move_arm_joints":
+        if skill == "move_arm_joints":
             raise RuntimeError("arm joint command rejected")
         return "scene inspected"
 
     runtime.register_tool(
-        "request_capability",
+        "request_skill",
         submit_capability,
         safety_level="motion",
     )
@@ -355,9 +347,9 @@ def test_agent_runtime_does_not_treat_wrong_motion_capability_as_turn_completion
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "move_base",
+                    "skill": "move_base",
                     "objective": "move forward instead",
                     "slots": {"direction": "forward", "distance_cm": 10},
                 },
@@ -369,13 +361,13 @@ def test_agent_runtime_does_not_treat_wrong_motion_capability_as_turn_completion
     runtime = AgentRuntime(provider, max_iterations=2)
 
     def submit_motion(
-        capability: str, objective: str, slots: dict[str, Any] | None = None
+        skill: str, objective: str, slots: dict[str, Any] | None = None
     ) -> str:
         del slots
-        return f"{capability} completed: {objective}"
+        return f"{skill} completed: {objective}"
 
     runtime.register_tool(
-        "request_capability",
+        "request_skill",
         submit_motion,
         safety_level="motion",
     )
@@ -394,9 +386,9 @@ def test_agent_runtime_does_not_allow_caption_to_replace_marker_detector(
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "inspect_scene",
+                    "skill": "inspect_scene",
                     "objective": "look for a workspace marker",
                     "slots": {},
                 },
@@ -409,13 +401,13 @@ def test_agent_runtime_does_not_allow_caption_to_replace_marker_detector(
     runtime = AgentRuntime(provider, max_iterations=2, agent_run_recorder=recorder)
 
     def submit_caption(
-        capability: str, objective: str, slots: dict[str, Any] | None = None
+        skill: str, objective: str, slots: dict[str, Any] | None = None
     ) -> str:
-        del capability, objective, slots
+        del skill, objective, slots
         return "caption: red marker-like region visible"
 
     runtime.register_tool(
-        "request_capability",
+        "request_skill",
         submit_caption,
         safety_level="observe",
     )
@@ -451,9 +443,9 @@ def test_agent_runtime_allows_failed_marker_detector_final_without_goal_success(
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "detect_marker",
+                    "skill": "detect_marker",
                     "objective": "detect workspace marker",
                     "slots": {},
                 },
@@ -464,17 +456,17 @@ def test_agent_runtime_allows_failed_marker_detector_final_without_goal_success(
     )
     runtime = AgentRuntime(provider, max_iterations=2)
 
-    def request_capability(
-        capability: str, objective: str, slots: dict[str, Any] | None = None
+    def request_skill(
+        skill: str, objective: str, slots: dict[str, Any] | None = None
     ) -> str:
         del objective, slots
-        if capability == "detect_marker":
+        if skill == "detect_marker":
             raise RuntimeError("marker detector timed out")
-        return f"{capability} completed"
+        return f"{skill} completed"
 
     runtime.register_tool(
-        "request_capability",
-        request_capability,
+        "request_skill",
+        request_skill,
         safety_level="observe",
     )
 
@@ -581,19 +573,17 @@ def test_agent_runtime_grounding_guard_handles_missing_perception_tool() -> None
 def test_agent_runtime_reports_allowed_tool_block_as_failed_tool_result() -> None:
     provider = FakeProvider(
         {
-            "tool": "request_capability",
-            "args": {"capability": "set_gripper", "objective": "close gripper"},
+            "tool": "request_skill",
+            "args": {"skill": "set_gripper", "objective": "close gripper"},
             "reason": "try to grasp",
         }
     )
     runtime = AgentRuntime(provider, max_iterations=1)
 
-    def submit_capability(capability: str, objective: str) -> str:
-        return f"submitted {capability}: {objective}"
+    def submit_capability(skill: str, objective: str) -> str:
+        return f"submitted {skill}: {objective}"
 
-    runtime.register_tool(
-        "request_capability", submit_capability, safety_level="actuate"
-    )
+    runtime.register_tool("request_skill", submit_capability, safety_level="actuate")
 
     payload = _payload()
     payload.allowed_tools = {"get_robot_status"}
@@ -603,7 +593,7 @@ def test_agent_runtime_reports_allowed_tool_block_as_failed_tool_result() -> Non
     assert result.tool == "final_response"
     assert result.reason == "failed_tool_fallback"
     assert result.tool_success is False
-    assert "ToolUnavailable: request_capability is not available" in result.result
+    assert "ToolUnavailable: request_skill is not available" in result.result
 
 
 def test_agent_runtime_records_tool_decision_and_skill_memory_fallback(
@@ -612,9 +602,9 @@ def test_agent_runtime_records_tool_decision_and_skill_memory_fallback(
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "set_gripper",
+                    "skill": "set_gripper",
                     "objective": "close gripper",
                     "slots": {"width": 0.02},
                 },
@@ -627,11 +617,11 @@ def test_agent_runtime_records_tool_decision_and_skill_memory_fallback(
     runtime = AgentRuntime(provider, max_iterations=1, agent_run_recorder=recorder)
 
     def submit_capability(
-        capability: str, objective: str, slots: dict[str, Any] | None = None
+        skill: str, objective: str, slots: dict[str, Any] | None = None
     ) -> str:
-        return f"skill submitted: {capability} {objective} {slots}"
+        return f"skill submitted: {skill} {objective} {slots}"
 
-    runtime.register_tool("request_capability", submit_capability)
+    runtime.register_tool("request_skill", submit_capability)
 
     class Memory:
         def __init__(self) -> None:
@@ -666,9 +656,9 @@ def test_agent_runtime_records_tool_decision_and_skill_memory_fallback(
     assert result.result == "The gripper has been closed."
     assert memory.records == [
         {
-            "tool": "request_capability",
+            "tool": "request_skill",
             "args": {
-                "capability": "set_gripper",
+                "skill": "set_gripper",
                 "objective": "close gripper",
                 "slots": {"width": 0.02},
             },
@@ -679,7 +669,7 @@ def test_agent_runtime_records_tool_decision_and_skill_memory_fallback(
     ]
     latest = AgentRunReader(tmp_path, agent_run_id="run1").latest_agent_step()
     assert latest is not None
-    assert latest["decision"]["tool"] == "request_capability"
+    assert latest["decision"]["tool"] == "request_skill"
     assert latest["result"]["success"] is True
     reader = AgentRunReader(tmp_path, agent_run_id="run1")
     contracts = reader.read_jsonl("task_contracts.jsonl", agent_run_id="run1")
@@ -699,9 +689,9 @@ def test_agent_runtime_emits_runtime_hooks_in_expected_order() -> None:
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "set_gripper",
+                    "skill": "set_gripper",
                     "objective": "close gripper",
                 },
                 "reason": "actuate once",
@@ -729,8 +719,8 @@ def test_agent_runtime_emits_runtime_hooks_in_expected_order() -> None:
 
     runtime = AgentRuntime(provider, max_iterations=3, runtime_hooks=[RecordingHook()])
     runtime.register_tool(
-        "request_capability",
-        lambda capability, objective: f"{capability} completed: {objective}",
+        "request_skill",
+        lambda skill, objective: f"{skill} completed: {objective}",
     )
 
     result = asyncio.run(runtime.step(_payload("close the gripper")))
@@ -867,14 +857,14 @@ def test_agent_runtime_falls_back_after_successful_tool_when_final_content_is_to
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "set_gripper",
+                    "skill": "set_gripper",
                     "objective": "close gripper",
                     "slots": {"action": "close"},
                 },
             },
-            '<tool_calls>\n<invoke name="request_capability"></invoke>\n</tool_calls>',
+            '<tool_calls>\n<invoke name="request_skill"></invoke>\n</tool_calls>',
         ]
     )
     runtime = AgentRuntime(provider, max_iterations=2)
@@ -882,7 +872,7 @@ def test_agent_runtime_falls_back_after_successful_tool_when_final_content_is_to
     def submit_skill(*_: object, **__: object) -> str:
         return "gripper closed"
 
-    runtime.register_tool("request_capability", submit_skill)
+    runtime.register_tool("request_skill", submit_skill)
 
     result = asyncio.run(runtime.step(_payload("close gripper")))
 
@@ -906,9 +896,9 @@ def test_agent_runtime_retries_when_final_content_is_internal_feedback() -> None
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "move_base",
+                    "skill": "move_base",
                     "objective": "move closer",
                     "slots": {"direction": "forward", "distance_cm": 25},
                 },
@@ -922,7 +912,7 @@ def test_agent_runtime_retries_when_final_content_is_internal_feedback() -> None
     def submit_skill(*_: object, **__: object) -> str:
         return internal_feedback
 
-    runtime.register_tool("request_capability", submit_skill, safety_level="actuate")
+    runtime.register_tool("request_skill", submit_skill, safety_level="actuate")
 
     result = asyncio.run(runtime.step(_payload("move closer and inspect")))
 
@@ -967,9 +957,9 @@ def test_execution_feedback_none_mode_respects_explicit_skill_failure() -> None:
 def test_agent_runtime_records_skill_memory_with_specialized_method() -> None:
     provider = FakeProvider(
         {
-            "tool": "request_capability",
+            "tool": "request_skill",
             "args": {
-                "capability": "inspect_scene",
+                "skill": "inspect_scene",
                 "objective": "look",
                 "arguments": {"zoom": 1},
             },
@@ -979,11 +969,11 @@ def test_agent_runtime_records_skill_memory_with_specialized_method() -> None:
     runtime = AgentRuntime(provider, max_iterations=1)
 
     def submit_camera(
-        capability: str, objective: str, arguments: dict[str, Any] | None = None
+        skill: str, objective: str, arguments: dict[str, Any] | None = None
     ) -> str:
-        return f"{capability}:{objective}:{arguments}"
+        return f"{skill}:{objective}:{arguments}"
 
-    runtime.register_tool("request_capability", submit_camera)
+    runtime.register_tool("request_skill", submit_camera)
 
     class Memory:
         def __init__(self) -> None:
@@ -1015,9 +1005,9 @@ def test_agent_runtime_records_skill_memory_with_specialized_method() -> None:
 
     assert memory.records == [
         {
-            "tool": "request_capability",
+            "tool": "request_skill",
             "args": {
-                "capability": "inspect_scene",
+                "skill": "inspect_scene",
                 "objective": "look",
                 "arguments": {"zoom": 1},
             },
@@ -1129,20 +1119,20 @@ def test_agent_runtime_injects_loop_warning_after_repeated_failed_attempts() -> 
     provider = FakeProvider("I need a safer next step.")
     runtime = AgentRuntime(provider, max_iterations=1)
     runtime.state.add_tool_call(
-        "request_capability",
-        {"capability": "set_gripper", "objective": "pick the cup"},
+        "request_skill",
+        {"skill": "set_gripper", "objective": "pick the cup"},
         "target still not reachable",
         success=False,
     )
     runtime.state.add_tool_call(
-        "request_capability",
-        {"capability": "set_gripper", "objective": "pick the cup"},
+        "request_skill",
+        {"skill": "set_gripper", "objective": "pick the cup"},
         "target still not reachable",
         success=False,
     )
     runtime.state.add_tool_call(
-        "request_capability",
-        {"capability": "set_gripper", "objective": "pick the cup"},
+        "request_skill",
+        {"skill": "set_gripper", "objective": "pick the cup"},
         "target still not reachable",
         success=False,
     )
@@ -1161,9 +1151,9 @@ def test_agent_runtime_appends_continuation_guidance_after_successful_capability
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "move_base",
+                    "skill": "move_base",
                     "objective": "move closer to the cup",
                 },
                 "reason": "first move into range",
@@ -1173,8 +1163,8 @@ def test_agent_runtime_appends_continuation_guidance_after_successful_capability
     )
     runtime = AgentRuntime(provider, max_iterations=2)
     runtime.register_tool(
-        "request_capability",
-        lambda capability, objective: f"{capability} completed: {objective}",
+        "request_skill",
+        lambda skill, objective: f"{skill} completed: {objective}",
         safety_level="actuate",
     )
 
@@ -1202,9 +1192,9 @@ def test_agent_runtime_directly_completes_single_step_action_feedback() -> None:
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "set_gripper",
+                    "skill": "set_gripper",
                     "objective": "open the gripper",
                 },
                 "reason": "open gripper",
@@ -1214,8 +1204,8 @@ def test_agent_runtime_directly_completes_single_step_action_feedback() -> None:
     )
     runtime = AgentRuntime(provider, max_iterations=4)
 
-    def complete_gripper(capability: str, objective: str) -> str:
-        del capability, objective
+    def complete_gripper(skill: str, objective: str) -> str:
+        del skill, objective
         return (
             "Execution feedback for skill skill1:\n"
             "- outcome: confirmed\n"
@@ -1225,9 +1215,7 @@ def test_agent_runtime_directly_completes_single_step_action_feedback() -> None:
             "- recommended_action: report_or_continue"
         )
 
-    runtime.register_tool(
-        "request_capability", complete_gripper, safety_level="actuate"
-    )
+    runtime.register_tool("request_skill", complete_gripper, safety_level="actuate")
 
     result = asyncio.run(runtime.step(_payload("夹爪打开")))
 
@@ -1242,8 +1230,8 @@ def test_agent_runtime_single_step_action_feedback_is_user_facing() -> None:
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
-                "args": {"capability": "move_base", "objective": "move forward"},
+                "tool": "request_skill",
+                "args": {"skill": "move_base", "objective": "move forward"},
                 "reason": "move forward",
             },
             "provider should not be called again",
@@ -1251,8 +1239,8 @@ def test_agent_runtime_single_step_action_feedback_is_user_facing() -> None:
     )
     runtime = AgentRuntime(provider, max_iterations=4)
 
-    def complete_move(capability: str, objective: str) -> str:
-        del capability, objective
+    def complete_move(skill: str, objective: str) -> str:
+        del skill, objective
         return (
             "Execution feedback for skill skill1:\n"
             "- outcome: confirmed\n"
@@ -1262,7 +1250,7 @@ def test_agent_runtime_single_step_action_feedback_is_user_facing() -> None:
             "- recommended_action: report_or_continue"
         )
 
-    runtime.register_tool("request_capability", complete_move, safety_level="actuate")
+    runtime.register_tool("request_skill", complete_move, safety_level="actuate")
 
     result = asyncio.run(runtime.step(_payload("往前走一些")))
 
@@ -1336,8 +1324,8 @@ def test_agent_runtime_appends_recovery_guidance_after_failed_capability_step() 
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
-                "args": {"capability": "set_gripper", "objective": "grasp the cup"},
+                "tool": "request_skill",
+                "args": {"skill": "set_gripper", "objective": "grasp the cup"},
                 "reason": "attempt grasp",
             },
             "I should inspect again before retrying.",
@@ -1345,10 +1333,10 @@ def test_agent_runtime_appends_recovery_guidance_after_failed_capability_step() 
     )
     runtime = AgentRuntime(provider, max_iterations=2)
 
-    def fail_capability(capability: str, objective: str) -> str:
-        raise RuntimeError(f"{capability} failed: {objective}")
+    def fail_capability(skill: str, objective: str) -> str:
+        raise RuntimeError(f"{skill} failed: {objective}")
 
-    runtime.register_tool("request_capability", fail_capability, safety_level="actuate")
+    runtime.register_tool("request_skill", fail_capability, safety_level="actuate")
     payload = _payload("pick up the cup")
     payload.recovery_context = "Recovery context: target may be occluded"
 
@@ -1367,8 +1355,8 @@ def test_agent_runtime_presents_internal_inspect_scene_result_for_user() -> None
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
-                "args": {"capability": "inspect_scene", "objective": "look"},
+                "tool": "request_skill",
+                "args": {"skill": "inspect_scene", "objective": "look"},
                 "reason": "need visual evidence",
             },
             "scene inspected",
@@ -1380,7 +1368,7 @@ def test_agent_runtime_presents_internal_inspect_scene_result_for_user() -> None
         return "scene inspected"
 
     runtime.register_tool(
-        "request_capability",
+        "request_skill",
         inspect_scene_result,
         safety_level="observe",
     )
@@ -1397,8 +1385,8 @@ def test_agent_runtime_prefers_inspect_scene_user_summary_payload() -> None:
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
-                "args": {"capability": "inspect_scene", "objective": "look"},
+                "tool": "request_skill",
+                "args": {"skill": "inspect_scene", "objective": "look"},
                 "reason": "need visual evidence",
             },
             "inspect_scene completed",
@@ -1418,7 +1406,7 @@ def test_agent_runtime_prefers_inspect_scene_user_summary_payload() -> None:
         )
 
     runtime.register_tool(
-        "request_capability",
+        "request_skill",
         inspect_scene_payload,
         safety_level="observe",
     )
@@ -1433,8 +1421,8 @@ def test_post_tool_guidance_sets_last_capability_safety_level_after_motion() -> 
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
-                "args": {"capability": "move_base", "objective": "move"},
+                "tool": "request_skill",
+                "args": {"skill": "move_base", "objective": "move"},
                 "reason": "move",
             },
             "Done.",
@@ -1442,8 +1430,8 @@ def test_post_tool_guidance_sets_last_capability_safety_level_after_motion() -> 
     )
     runtime = AgentRuntime(provider, max_iterations=2)
     runtime.register_tool(
-        "request_capability",
-        lambda capability, objective: f"{capability}: {objective}",
+        "request_skill",
+        lambda skill, objective: f"{skill}: {objective}",
         safety_level="actuate",
     )
 
@@ -1457,8 +1445,8 @@ def test_post_tool_guidance_sets_last_capability_safety_level_after_observe() ->
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
-                "args": {"capability": "inspect_scene", "objective": "look"},
+                "tool": "request_skill",
+                "args": {"skill": "inspect_scene", "objective": "look"},
                 "reason": "look",
             },
             "Scene is clear.",
@@ -1466,8 +1454,8 @@ def test_post_tool_guidance_sets_last_capability_safety_level_after_observe() ->
     )
     runtime = AgentRuntime(provider, max_iterations=2)
     runtime.register_tool(
-        "request_capability",
-        lambda capability, objective: f"{capability}: {objective}",
+        "request_skill",
+        lambda skill, objective: f"{skill}: {objective}",
         safety_level="actuate",
     )
 
@@ -1481,8 +1469,8 @@ def test_post_tool_guidance_no_perception_required_after_observe() -> None:
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
-                "args": {"capability": "inspect_scene", "objective": "check around"},
+                "tool": "request_skill",
+                "args": {"skill": "inspect_scene", "objective": "check around"},
                 "reason": "look",
             },
             "Camera inspection is complete.",
@@ -1490,8 +1478,8 @@ def test_post_tool_guidance_no_perception_required_after_observe() -> None:
     )
     runtime = AgentRuntime(provider, max_iterations=4)
     runtime.register_tool(
-        "request_capability",
-        lambda capability, objective: f"{capability}: {objective}",
+        "request_skill",
+        lambda skill, objective: f"{skill}: {objective}",
         safety_level="actuate",
     )
 
@@ -1508,8 +1496,8 @@ def test_post_tool_guidance_failed_motion_injects_inspect_guidance() -> None:
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
-                "args": {"capability": "move_base", "objective": "move forward"},
+                "tool": "request_skill",
+                "args": {"skill": "move_base", "objective": "move forward"},
                 "reason": "move",
             },
             "I need to check the scene first.",
@@ -1517,11 +1505,11 @@ def test_post_tool_guidance_failed_motion_injects_inspect_guidance() -> None:
     )
     runtime = AgentRuntime(provider, max_iterations=2)
 
-    def fail_move(capability: str, objective: str) -> str:
+    def fail_move(skill: str, objective: str) -> str:
         del objective
-        raise RuntimeError(f"{capability} failed: collision detected")
+        raise RuntimeError(f"{skill} failed: collision detected")
 
-    runtime.register_tool("request_capability", fail_move, safety_level="actuate")
+    runtime.register_tool("request_skill", fail_move, safety_level="actuate")
 
     result = asyncio.run(runtime.step(_payload("move forward")))
     assert result.tool == "final_response"
@@ -1535,8 +1523,8 @@ def test_failed_capability_does_not_update_last_capability_state() -> None:
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
-                "args": {"capability": "turn_base", "objective": "turn left"},
+                "tool": "request_skill",
+                "args": {"skill": "turn_base", "objective": "turn left"},
                 "reason": "turn",
             },
             "I need to check the scene first.",
@@ -1544,11 +1532,11 @@ def test_failed_capability_does_not_update_last_capability_state() -> None:
     )
     runtime = AgentRuntime(provider, max_iterations=2)
 
-    def fail_turn(capability: str, objective: str) -> str:
+    def fail_turn(skill: str, objective: str) -> str:
         del objective
-        raise RuntimeError(f"{capability} failed: blocked")
+        raise RuntimeError(f"{skill} failed: blocked")
 
-    runtime.register_tool("request_capability", fail_turn, safety_level="actuate")
+    runtime.register_tool("request_skill", fail_turn, safety_level="actuate")
 
     asyncio.run(runtime.step(_payload("turn left")))
 
@@ -1568,7 +1556,7 @@ def test_post_tool_guidance_returns_none_for_non_capability_tool() -> None:
 
     asyncio.run(runtime.step(_payload("check robot status")))
 
-    # _post_tool_guidance returns None for non-request_capability tools
+    # _post_tool_guidance returns None for non-request_skill tools
     assert runtime.state.last_capability_safety_level is None
     assert runtime.state.last_capability_name is None
 
@@ -1578,11 +1566,20 @@ def test_task_requires_action() -> None:
     from hey_robot.cognition.task_contract import CapabilityRequirement, TaskContract
 
     assert _task_requires_action(None) is False
-    assert _task_requires_action(TaskContract(task_type="chat", user_goal="hello")) is False
+    assert (
+        _task_requires_action(TaskContract(task_type="chat", user_goal="hello"))
+        is False
+    )
 
     action_types = [
-        "base_move", "base_turn", "human_follow", "semantic_navigation",
-        "object_approach", "gripper_control", "arm_pose", "arm_joint_delta",
+        "base_move",
+        "base_turn",
+        "human_follow",
+        "semantic_navigation",
+        "object_approach",
+        "gripper_control",
+        "arm_pose",
+        "arm_joint_delta",
     ]
     for cap_type in action_types:
         tc = TaskContract(

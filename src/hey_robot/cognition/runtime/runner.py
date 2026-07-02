@@ -564,17 +564,17 @@ class AgentRuntime:
                 turn_trace["tool_calls"].append(
                     {
                         "name": tool,
-                        "capability": str(args.get("capability") or "")
+                        "skill": str(args.get("skill") or "")
                         if isinstance(args, dict)
                         else "",
                         "success": bool(success),
                         "tool_call_id": executed.tool_call_id,
                     }
                 )
-                if tool == "request_capability":
+                if tool == "request_skill":
                     turn_trace["skills"].append(
                         {
-                            "name": str(args.get("capability") or ""),
+                            "name": str(args.get("skill") or ""),
                             "status": "completed" if success else "failed",
                             "tool_call_id": executed.tool_call_id,
                         }
@@ -944,7 +944,7 @@ class AgentRuntime:
     def _fallback_reply_from_failed_tool(
         self, result: AgentRuntimeResult
     ) -> str | None:
-        if result.tool == "request_capability":
+        if result.tool == "request_skill":
             error = (result.result or result.reason or "").strip()
             lowered = error.lower()
             if "consecutivemotionblocked" in lowered:
@@ -962,9 +962,9 @@ class AgentRuntime:
         task_contract: TaskContract,
         evidence_ledger: EvidenceLedger,
     ) -> AgentRuntimeResult | None:
-        if tool_result.tool != "request_capability" or not tool_result.tool_success:
+        if tool_result.tool != "request_skill" or not tool_result.tool_success:
             return None
-        capability = str(tool_result.args.get("capability") or "").strip()
+        capability = str(tool_result.args.get("skill") or "").strip()
         if not capability or is_perception_skill_name(capability):
             return None
         if task_contract.required_capability is None:
@@ -1021,7 +1021,7 @@ class AgentRuntime:
     def _final_answer_prompt_for_tool_result(
         self, result: AgentRuntimeResult
     ) -> str | None:
-        if result.tool != "request_capability":
+        if result.tool != "request_skill":
             return None
         return (
             "机器人能力已经执行完成，上方已有工具结果。\n"
@@ -1402,9 +1402,9 @@ class AgentRuntime:
         payload: AgentRuntimeInput,
         task_contract: TaskContract | None = None,
     ) -> str | None:
-        if tool not in {"request_capability", "request_perception"}:
+        if tool not in {"request_skill", "request_perception"}:
             return None
-        capability = str(args.get("capability") or "").strip()
+        capability = str(args.get("skill") or "").strip()
         objective = str(args.get("objective") or "").strip()
         safety_level = (
             "observe"
@@ -1443,7 +1443,7 @@ class AgentRuntime:
                     cap_name = required_cap.type if required_cap else "navigate_to"
                     lines.extend(
                         [
-                            f'- perception_done: 已经获得了场景感知结果，现在必须调用 request_capability(capability="{cap_name}", ...) 来做实质动作。',
+                            f'- perception_done: 已经获得了场景感知结果，现在必须调用 request_skill(skill="{cap_name}", ...) 来做实质动作。',
                             "- do_not_observe_again: 不要继续观察，直接执行任务要求的导航或操作能力。",
                         ]
                     )
@@ -1480,7 +1480,7 @@ class AgentRuntime:
             required_cap = task_contract.required_capability
             cap_hint = ""
             if required_cap is not None:
-                cap_hint = f'使用 request_capability(capability="{required_cap.type}", ...) 来执行任务要求的动作。'
+                cap_hint = f'使用 request_skill(skill="{required_cap.type}", ...) 来执行任务要求的动作。'
             lines.extend(
                 [
                     f"- perception_failed_but_action_required: 感知未成功，但不要反复重试感知。{cap_hint}",
@@ -1493,7 +1493,7 @@ class AgentRuntime:
                     "- do_not_retry_blindly: 不要立刻重复同一个能力，除非已经获得新证据或选择了不同的恢复步骤。"
                 ),
                 (
-                    "- next_action_rule: 如果任务需要移动/操作，调用 request_capability 执行导航或操作能力，不要停留在感知或状态查询。"
+                    "- next_action_rule: 如果任务需要移动/操作，调用 request_skill 执行导航或操作能力，不要停留在感知或状态查询。"
                 ),
             ]
         )

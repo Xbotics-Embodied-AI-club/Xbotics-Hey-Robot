@@ -213,7 +213,7 @@ def test_robot_agent_core_routes_stop_without_provider() -> None:
         )
     )
 
-    assert result.tool == "request_capability"
+    assert result.tool == "request_skill"
     assert result.metadata["stop_reason"] == "command_router"
     assert result.reply_text == "已发送停止指令，正在确认状态。"
     assert io.skills[0].name == "stop_motion"
@@ -254,7 +254,7 @@ def test_robot_agent_core_routes_simple_commands_without_provider(
         )
     )
 
-    assert result.tool == "request_capability"
+    assert result.tool == "request_skill"
     assert result.metadata["stop_reason"] == "command_router"
     assert io.skills[0].name == skill_name
     assert io.skills[0].arguments == arguments
@@ -385,7 +385,7 @@ def test_robot_agent_core_blocks_voice_motion_skill_request() -> None:
 
     with pytest.raises(RuntimeError, match="语音指令不能直接触发移动"):
         asyncio.run(
-            core.request_capability(
+            core.request_skill(
                 "move_base",
                 "前进十厘米",
                 {"direction": "forward", "distance_cm": 10},
@@ -420,13 +420,11 @@ def test_robot_agent_core_injects_robot_skill_catalog_context() -> None:
 
     assert provider.last_messages is not None
     turn_prompt = provider.last_messages[1].content
-    assert "Robot capability catalog for request_capability.capability" in turn_prompt
+    assert "Robot skill catalog for request_skill.skill" in turn_prompt
     assert "set_gripper" in turn_prompt
     assert "inspect_scene" in turn_prompt
     assert "camera_capture" not in turn_prompt
-    assert (
-        "Choose request_capability.capability exactly from this catalog" in turn_prompt
-    )
+    assert "Choose request_skill.skill exactly from this catalog" in turn_prompt
 
 
 def test_robot_agent_core_prompt_uses_enabled_skill_surface() -> None:
@@ -485,7 +483,7 @@ def test_robot_agent_core_rejects_disabled_skill_request() -> None:
 
     with pytest.raises(KeyError):
         asyncio.run(
-            core.request_capability("set_gripper", "open gripper", {"action": "open"})
+            core.request_skill("set_gripper", "open gripper", {"action": "open"})
         )
 
 
@@ -514,7 +512,7 @@ def test_robot_agent_core_accepts_atomic_camera_skill_submission() -> None:
 
     io.submit_skill = submit_and_resolve  # type: ignore[method-assign]
 
-    result = asyncio.run(core.request_capability("inspect_scene", "look"))
+    result = asyncio.run(core.request_skill("inspect_scene", "look"))
 
     assert result == "captured"
     assert io.skills[0].name == "inspect_scene"
@@ -546,7 +544,7 @@ def test_robot_agent_core_resolves_fast_skill_result() -> None:
     io.submit_skill = submit_and_resolve  # type: ignore[method-assign]
 
     result = asyncio.run(
-        core.request_capability("set_gripper", "close gripper", {"action": "close"})
+        core.request_skill("set_gripper", "close gripper", {"action": "close"})
     )
 
     assert result == "gripper closed"
@@ -671,9 +669,9 @@ def test_robot_agent_core_uses_tool_result_as_reply_when_runtime_budget_expires(
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "set_gripper",
+                    "skill": "set_gripper",
                     "objective": "close",
                     "slots": {"action": "close"},
                 },
@@ -718,9 +716,9 @@ def test_robot_agent_core_marks_capability_backed_final_response_as_task_finishe
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "set_gripper",
+                    "skill": "set_gripper",
                     "objective": "close",
                     "slots": {"action": "close"},
                 },
@@ -776,9 +774,9 @@ def test_robot_agent_core_does_not_finish_when_latest_feedback_says_continue() -
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "move_base",
+                    "skill": "move_base",
                     "objective": "move closer",
                     "slots": {"direction": "forward", "distance_cm": 25},
                 },
@@ -839,9 +837,9 @@ def test_robot_agent_core_finishes_final_response_after_successful_atomic_skill(
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "set_gripper",
+                    "skill": "set_gripper",
                     "objective": "open gripper",
                     "slots": {"action": "open"},
                 },
@@ -894,9 +892,9 @@ def test_robot_agent_core_finishes_visual_answer_after_successful_perception() -
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "inspect_scene",
+                    "skill": "inspect_scene",
                     "objective": "describe the scene",
                 },
             },
@@ -961,13 +959,13 @@ def test_robot_agent_core_reuses_successful_perception_within_same_turn() -> Non
         "- recommended_action: report_or_continue"
     )
     core.runtime.state.add_tool_call(
-        "request_capability",
-        {"capability": "inspect_scene", "objective": "look"},
+        "request_skill",
+        {"skill": "inspect_scene", "objective": "look"},
         first_feedback,
     )
 
     result = asyncio.run(
-        core.request_capability(
+        core.request_skill(
             "inspect_scene", "look again", slots={"question": "look again"}
         )
     )
@@ -1004,13 +1002,13 @@ def test_robot_agent_core_reuses_look_around_for_inspect_scene_same_turn() -> No
         "- recommended_action: report_or_continue"
     )
     core.runtime.state.add_tool_call(
-        "request_capability",
-        {"capability": "look_around", "objective": "look around"},
+        "request_skill",
+        {"skill": "look_around", "objective": "look around"},
         first_feedback,
     )
 
     result = asyncio.run(
-        core.request_capability(
+        core.request_skill(
             "inspect_scene", "look again", slots={"question": "look again"}
         )
     )
@@ -1046,8 +1044,8 @@ def test_robot_agent_core_allows_perception_again_in_new_turn() -> None:
         "- recommended_action: report_or_continue"
     )
     core.runtime.state.add_tool_call(
-        "request_capability",
-        {"capability": "inspect_scene", "objective": "look"},
+        "request_skill",
+        {"skill": "inspect_scene", "objective": "look"},
         first_feedback,
     )
 
@@ -1067,7 +1065,7 @@ def test_robot_agent_core_allows_perception_again_in_new_turn() -> None:
     io.submit_skill = submit_and_resolve  # type: ignore[method-assign]
 
     result = asyncio.run(
-        core.request_capability(
+        core.request_skill(
             "inspect_scene", "look again", slots={"question": "look again"}
         )
     )
@@ -1105,8 +1103,8 @@ def test_robot_agent_core_does_not_reuse_failed_perception_within_same_turn() ->
         "- recommended_action: reobserve"
     )
     core.runtime.state.add_tool_call(
-        "request_capability",
-        {"capability": "inspect_scene", "objective": "look"},
+        "request_skill",
+        {"skill": "inspect_scene", "objective": "look"},
         failed_feedback,
     )
 
@@ -1117,7 +1115,7 @@ def test_robot_agent_core_does_not_reuse_failed_perception_within_same_turn() ->
     io.submit_skill = submit_and_resolve  # type: ignore[method-assign]
 
     result = asyncio.run(
-        core.request_capability(
+        core.request_skill(
             "inspect_scene", "retry look", slots={"question": "retry look"}
         )
     )
@@ -1141,9 +1139,9 @@ def test_robot_agent_core_does_not_report_failed_skill_as_completed() -> None:
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "set_gripper",
+                    "skill": "set_gripper",
                     "objective": "关闭夹爪",
                     "slots": {"action": "close"},
                 },
@@ -1194,7 +1192,7 @@ def test_robot_agent_core_sanitizes_non_final_text_response() -> None:
     reply = core._reply_text_from_runtime_result(
         AgentRuntimeResult(
             tool="propose_capability",
-            args={"capability": "move_arm_joints"},
+            args={"skill": "move_arm_joints"},
             result=(
                 "ToolUnavailable: propose_capability is not available in this "
                 "execution context"
@@ -1241,9 +1239,9 @@ def test_robot_agent_core_does_not_reuse_previous_turn_skill_id() -> None:
     provider = FakeProvider(
         [
             {
-                "tool": "request_capability",
+                "tool": "request_skill",
                 "args": {
-                    "capability": "set_gripper",
+                    "skill": "set_gripper",
                     "objective": "close",
                     "slots": {"action": "close"},
                 },
@@ -1335,7 +1333,7 @@ def test_robot_turn_policy_limits_tools_during_recovery() -> None:
     assert policy.allowed_tools is not None
     assert "get_task_context" in policy.allowed_tools
     assert "request_perception" not in policy.allowed_tools
-    assert "request_capability" not in policy.allowed_tools
+    assert "request_skill" not in policy.allowed_tools
 
 
 def test_recovery_allowed_tools_contains_all_essential_tools() -> None:
@@ -1352,7 +1350,7 @@ def test_recovery_allowed_tools_excludes_perception_and_action() -> None:
     tools = RobotTurnPolicy.recovery_allowed_tools()
 
     assert "request_perception" not in tools
-    assert "request_capability" not in tools
+    assert "request_skill" not in tools
     assert "propose_capability" not in tools
 
 
@@ -1362,7 +1360,7 @@ def test_recovery_tools_are_stable_subset_of_all_tools() -> None:
         "get_task_context",
         "get_robot_status",
         "propose_capability",
-        "request_capability",
+        "request_skill",
         "request_perception",
         "search_memory",
         "wait",
@@ -1547,7 +1545,7 @@ def test_robot_agent_core_auto_bootstraps_long_horizon_plan() -> None:
     assert provider.last_messages is not None
     assert "Robot plan:" not in provider.last_messages[1].content
     assert (
-        "Robot capability catalog for request_capability.capability"
+        "Robot skill catalog for request_skill.skill"
         in provider.last_messages[1].content
     )
 
@@ -1578,17 +1576,17 @@ def test_robot_agent_core_mock_xlerobot_uses_single_atomic_deterministic_skill_a
         provider=FakeProvider(
             [
                 {
-                    "tool": "request_capability",
+                    "tool": "request_skill",
                     "args": {
-                        "capability": "inspect_scene",
+                        "skill": "inspect_scene",
                         "objective": task,
                         "slots": {"question": task},
                     },
                 },
                 {
-                    "tool": "request_capability",
+                    "tool": "request_skill",
                     "args": {
-                        "capability": "move_base",
+                        "skill": "move_base",
                         "objective": task,
                         "slots": {"direction": "forward", "distance_cm": 30},
                     },

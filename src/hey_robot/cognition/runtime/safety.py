@@ -25,7 +25,7 @@ class RobotSafetyHook:
         if context.tool.read_only:
             return
         status = dict(self.status_provider() or {})
-        if context.tool.name == "request_capability":
+        if context.tool.name == "request_skill":
             self._check_status_snapshot(context, status)
             active_flags = [
                 key
@@ -90,11 +90,11 @@ class RobotSafetyHook:
         arguments: Mapping[str, Any],
         status: Mapping[str, Any],
     ) -> None:
-        capability = str(arguments.get("capability") or "").strip()
-        if not capability:
+        skill = str(arguments.get("skill") or "").strip()
+        if not skill:
             return
         try:
-            spec = load_skill_registry().catalog(enabled_only=False).get(capability)
+            spec = load_skill_registry().catalog(enabled_only=False).get(skill)
         except KeyError:
             return
         if spec.safety_level != "motion":
@@ -115,13 +115,13 @@ class RobotSafetyHook:
                 return
             if (
                 success
-                and name == "request_capability"
-                and str(args.get("capability") or "").strip() == capability
+                and name == "request_skill"
+                and str(args.get("skill") or "").strip() == skill
             ):
                 seen_motion = True
                 break
         if seen_motion:
             raise RuntimeError(
-                "robot safety gate blocked tool request_capability: "
-                f"consecutive {capability} requires fresh perception evidence"
+                "robot safety gate blocked tool request_skill: "
+                f"consecutive {skill} requires fresh perception evidence"
             )

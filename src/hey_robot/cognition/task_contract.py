@@ -459,8 +459,8 @@ def infer_constraints(text: str, capability_type: str) -> dict[str, Any]:
 
 
 def _tool_capability(tool: str, args: dict[str, Any]) -> str:
-    if tool == "request_capability":
-        return str(args.get("capability") or "").strip() or tool
+    if tool == "request_skill":
+        return str(args.get("skill") or "").strip() or tool
     return tool
 
 

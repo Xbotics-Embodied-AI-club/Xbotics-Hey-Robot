@@ -1,1 +1,1 @@
-"""Layer 3: foundation capability services."""
+"""Layer 3: model services for foundation models."""

@@ -19,10 +19,10 @@ _VALID_WAIT_POLICIES = {"wait_result", "wait_acceptance", "return_handle"}
 
 @tool_parameters(
     tool_parameters_schema(
-        capability=StringSchema("Robot capability to request."),
+        skill=StringSchema("Robot skill to request."),
         objective=StringSchema("What to accomplish with this skill"),
         slots=ObjectSchema(
-            description="Capability slots passed to the resolver/executor",
+            description="Skill slots passed to the resolver/executor",
             nullable=True,
         ),
         interrupt=BooleanSchema(description="Whether this is an interrupt signal"),
@@ -30,14 +30,14 @@ _VALID_WAIT_POLICIES = {"wait_result", "wait_acceptance", "return_handle"}
             "wait_result, wait_acceptance, or return_handle",
             enum=["wait_result", "wait_acceptance", "return_handle"],
         ),
-        required=["capability", "objective"],
+        required=["skill", "objective"],
     )
 )
-class RequestCapabilityTool(Tool):
-    """Single Agent-facing gateway for robot capability requests."""
+class RequestSkillTool(Tool):
+    """Single Agent-facing gateway for robot skill requests."""
 
-    name = "request_capability"
-    description = "Request one robot capability without exposing low-level tool scheduling to the Agent."
+    name = "request_skill"
+    description = "Request one robot skill without exposing low-level tool scheduling to the Agent."
     safety_level = "actuate"
     exclusive = True
     resources = ("robot.actuation",)
@@ -52,7 +52,7 @@ class RequestCapabilityTool(Tool):
 
     async def execute(
         self,
-        capability: str,
+        skill: str,
         objective: str,
         slots: dict | None = None,
         interrupt: bool = False,
@@ -65,7 +65,7 @@ class RequestCapabilityTool(Tool):
             raise ValueError(f"unknown wait_policy: {wait_policy}")
         return await self._gateway.submit(
             SkillGatewayRequest(
-                capability=capability,
+                skill=skill,
                 objective=objective,
                 slots=dict(slots or {}),
                 interrupt=interrupt,

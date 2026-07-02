@@ -139,7 +139,7 @@ robots:
       cup: 1
       block: 1
 
-capability_services: {}
+model_services: {}
 
 policies:
   embodied_skills:

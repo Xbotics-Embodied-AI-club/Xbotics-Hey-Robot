@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from hey_robot.config import CapabilityServiceSpec, DeploymentConfig
-from hey_robot.foundation.clients.mock import MockCapabilityClient
-from hey_robot.foundation.clients.models import CapabilityClient
+from hey_robot.config import DeploymentConfig, ModelServiceSpec
+from hey_robot.foundation.clients.mock import MockModelServiceClient
+from hey_robot.foundation.clients.models import ModelServiceClient
 
 
-class CapabilityRuntime:
+class ModelServiceRegistry:
     def __init__(self, config: DeploymentConfig) -> None:
         self.config = config
-        self.clients: dict[str, CapabilityClient] = {
+        self.clients: dict[str, ModelServiceClient] = {
             service_id: self._build_client(service_id, spec)
-            for service_id, spec in config.capability_services.items()
+            for service_id, spec in config.model_services.items()
             if spec.enabled
         }
 
@@ -18,23 +18,23 @@ class CapabilityRuntime:
         self,
         skill_name: str,
         robot_id: str | None,
-    ) -> tuple[str, CapabilityServiceSpec, CapabilityClient] | None:
-        for service_id, spec in self.config.capability_services.items():
+    ) -> tuple[str, ModelServiceSpec, ModelServiceClient] | None:
+        for service_id, spec in self.config.model_services.items():
             if not spec.enabled:
                 continue
             if robot_id and spec.robot_id and spec.robot_id != robot_id:
                 continue
-            if skill_name in spec.skill_names:
+            if skill_name in spec.provides:
                 client = self.clients.get(service_id)
                 if client is not None:
                     return service_id, spec, client
         return None
 
     def _build_client(
-        self, service_id: str, spec: CapabilityServiceSpec
-    ) -> CapabilityClient:
-        if spec.type in {"mock", "mock_vla_service"}:
-            return MockCapabilityClient(service_id, spec)
-        from hey_robot.foundation.transport.grpc.client import GrpcCapabilityClient
+        self, service_id: str, spec: ModelServiceSpec
+    ) -> ModelServiceClient:
+        if spec.type in {"mock", "mock_vla_policy"}:
+            return MockModelServiceClient(service_id, spec)
+        from hey_robot.foundation.transport.grpc.client import GrpcModelServiceClient
 
-        return GrpcCapabilityClient(service_id, spec)
+        return GrpcModelServiceClient(service_id, spec)

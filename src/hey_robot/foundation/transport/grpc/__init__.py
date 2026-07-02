@@ -1,19 +1,19 @@
 from hey_robot.foundation.transport.grpc.server import (
     DEFAULT_ARM_CALIBRATION_DIR,
     LeRobotVLAExecutor,
-    VLACapabilityService,
-    VLACapabilityServicer,
-    VLAServiceState,
-    VLNCapabilityService,
-    build_capability_service,
+    ModelServiceServicer,
+    ModelServiceState,
+    VLAPolicyService,
+    VLNPlannerService,
+    build_model_service,
 )
 
 __all__ = [
     "DEFAULT_ARM_CALIBRATION_DIR",
     "LeRobotVLAExecutor",
-    "VLACapabilityService",
-    "VLACapabilityServicer",
-    "VLAServiceState",
-    "VLNCapabilityService",
-    "build_capability_service",
+    "ModelServiceServicer",
+    "ModelServiceState",
+    "VLAPolicyService",
+    "VLNPlannerService",
+    "build_model_service",
 ]

@@ -1,27 +1,27 @@
-"""Foundation capability service contracts."""
+"""Foundation model service RPC contracts."""
 
 from hey_robot.foundation.contract.v1 import (
-    CancelCapabilityRequest,
-    CancelCapabilityResponse,
-    CapabilityService,
-    CapabilityServiceServicer,
-    CapabilityServiceStub,
-    ExecuteCapabilityRequest,
-    ExecuteCapabilityResponse,
+    CancelSkillRequest,
+    CancelSkillResponse,
+    ExecuteSkillRequest,
+    ExecuteSkillResponse,
     GetHealthRequest,
     GetHealthResponse,
-    add_CapabilityServiceServicer_to_server,
+    ModelService,
+    ModelServiceServicer,
+    ModelServiceStub,
+    add_ModelServiceServicer_to_server,
 )
 
 __all__ = [
-    "CancelCapabilityRequest",
-    "CancelCapabilityResponse",
-    "CapabilityService",
-    "CapabilityServiceServicer",
-    "CapabilityServiceStub",
-    "ExecuteCapabilityRequest",
-    "ExecuteCapabilityResponse",
+    "CancelSkillRequest",
+    "CancelSkillResponse",
+    "ExecuteSkillRequest",
+    "ExecuteSkillResponse",
     "GetHealthRequest",
     "GetHealthResponse",
-    "add_CapabilityServiceServicer_to_server",
+    "ModelService",
+    "ModelServiceServicer",
+    "ModelServiceStub",
+    "add_ModelServiceServicer_to_server",
 ]

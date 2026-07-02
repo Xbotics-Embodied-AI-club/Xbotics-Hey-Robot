@@ -11,7 +11,7 @@ FeedbackParser = Callable[[str], dict[str, Any] | None]
 
 def reusable_scene_evidence_result(
     records: Sequence[ToolCallRecord],
-    requested_capability: str,
+    requested_skill: str,
     *,
     parse_feedback: FeedbackParser,
 ) -> str | None:
@@ -22,7 +22,7 @@ def reusable_scene_evidence_result(
     retry perception normally.
     """
 
-    if not is_perception_skill_name((requested_capability or "").strip()):
+    if not is_perception_skill_name((requested_skill or "").strip()):
         return None
     for record in reversed(records):
         result = _record_reusable_scene_result(record, parse_feedback=parse_feedback)
@@ -36,10 +36,10 @@ def is_scene_observation_evidence_record(record: ToolCallRecord) -> bool:
         return False
     if record.name == "request_perception":
         return True
-    if record.name != "request_capability":
+    if record.name != "request_skill":
         return False
-    capability = str(record.arguments.get("capability") or "").strip()
-    return is_perception_skill_name(capability)
+    skill = str(record.arguments.get("skill") or "").strip()
+    return is_perception_skill_name(skill)
 
 
 def _record_reusable_scene_result(

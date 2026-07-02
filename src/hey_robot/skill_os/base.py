@@ -19,7 +19,7 @@ class SkillSpec:
     recovery_hints: tuple[str, ...] = ()
     dependencies: tuple[str, ...] = ()
     driver_primitives: tuple[str, ...] = ()
-    external_capability: str | None = None
+    required_model_service: str | None = None
     supported_robots: tuple[str, ...] = ()
     safety_level: str = "normal"
     timeout_sec: float = 10.0

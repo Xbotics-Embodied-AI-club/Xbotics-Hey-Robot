@@ -135,7 +135,7 @@ class RequestPerceptionTool(Tool):
         if wait_policy == "return_handle":
             return await self._gateway.submit(
                 SkillGatewayRequest(
-                    capability=skill_name,
+                    skill=skill_name,
                     objective=objective,
                     slots={"question": objective},
                     wait_policy="return_handle",
@@ -145,7 +145,7 @@ class RequestPerceptionTool(Tool):
         if wait_policy == "wait_acceptance":
             return await self._gateway.submit(
                 SkillGatewayRequest(
-                    capability=skill_name,
+                    skill=skill_name,
                     objective=objective,
                     slots={"question": objective},
                     wait_policy="wait_acceptance",
@@ -154,7 +154,7 @@ class RequestPerceptionTool(Tool):
             )
         await self._gateway.submit(
             SkillGatewayRequest(
-                capability=skill_name,
+                skill=skill_name,
                 objective=objective,
                 slots={"question": objective},
                 wait_policy="wait_result",

@@ -102,14 +102,14 @@ def validate_deployment(config: DeploymentConfig) -> list[ValidationIssue]:
                     f"{','.join(unsupported)}",
                 )
             )
-        if contract.external_capability and not _has_capability(
-            config, contract.external_capability
+        if contract.required_model_service and not _has_model_service_for_skill(
+            config, contract.required_model_service
         ):
             issues.append(
                 ValidationIssue(
                     "error",
-                    f"skill {skill_name} requires unavailable capability "
-                    f"{contract.external_capability}",
+                    f"skill {skill_name} requires unavailable model service "
+                    f"{contract.required_model_service}",
                 )
             )
         for dependency in _skill_dependencies(contract, registry=registry):
@@ -123,14 +123,17 @@ def validate_deployment(config: DeploymentConfig) -> list[ValidationIssue]:
                     )
                 )
                 continue
-            if dependency_contract.external_capability and not _has_capability(
-                config, dependency_contract.external_capability
+            if (
+                dependency_contract.required_model_service
+                and not _has_model_service_for_skill(
+                    config, dependency_contract.required_model_service
+                )
             ):
                 issues.append(
                     ValidationIssue(
                         "error",
-                        f"skill {skill_name} requires unavailable capability "
-                        f"{dependency_contract.external_capability}",
+                        f"skill {skill_name} requires unavailable model service "
+                        f"{dependency_contract.required_model_service}",
                     )
                 )
         issues.extend(
@@ -143,10 +146,10 @@ def validate_deployment(config: DeploymentConfig) -> list[ValidationIssue]:
     return issues
 
 
-def _has_capability(config: DeploymentConfig, name: str) -> bool:
+def _has_model_service_for_skill(config: DeploymentConfig, name: str) -> bool:
     return any(
-        service.enabled and name in service.skill_names
-        for service in config.capability_services.values()
+        service.enabled and name in service.provides
+        for service in config.model_services.values()
     )
 
 

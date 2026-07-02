@@ -32,7 +32,7 @@
 └─────────────────────────────────────────────┘
 ```
 
-VLN 导航能力以独立 gRPC 服务运行，Agent 通过 capability service 协议调用，不直接加载模型。
+VLN 导航能力以独立 gRPC 服务运行，Agent 通过 ModelService 协议调用，不直接加载模型。
 
 ## 双环境设置
 
@@ -109,7 +109,7 @@ pytest tests/robot_runtime/test_simulation.py -q --no-cov
 ### 1. 启动 VLN 服务
 
 ```bash
-.vln-venv/bin/python -m hey_robot.cli.capability_service \
+.vln-venv/bin/python -m hey_robot.cli.model_service \
   --config configs/xlerobot.sim.ubuntu.yaml \
   --service-id vln_nav
 ```
@@ -149,9 +149,9 @@ kill $(lsof -t -i:9091)   # VLN 服务
 ## VLN 配置
 
 ```yaml
-capability_services:
+model_services:
   vln_nav:
-    type: vln_service
+    type: vln_planner
     target: grpc://127.0.0.1:9091
     settings:
       backend: internvla_n1_system2
@@ -209,8 +209,8 @@ capability_services:
 | 感知 | `detect_marker` | 检测可见 marker |
 | 导航 | `move_base` | 底盘前进/后退 |
 | 导航 | `turn_base` | 底盘左转/右转 |
-| 导航 | `navigate_to` | VLN 视觉导航（走 gRPC capability service） |
-| 导航 | `approach_object` | VLN 接近目标（走 gRPC capability service） |
+| 导航 | `navigate_to` | VLN 视觉导航（走 gRPC ModelService） |
+| 导航 | `approach_object` | VLN 接近目标（走 gRPC ModelService） |
 | 导航 | `human_follow` | 基于视觉的人体跟随 |
 | 安全 | `stop_motion` | 停止所有运动 |
 | 安全 | `reset_posture` | 回到安全姿态 |
@@ -269,4 +269,4 @@ Ubuntu 上检查 `viewer.enabled: true`，确保有图形环境（X11/Wayland）
 Ubuntu 上的默认配置已解决音频设备问题（`input_device: null`）。Windows 上根据 `scripts/audio/list_devices.py` 的输出调整设备索引。
 ### gRPC 请求超时 (DEADLINE_EXCEEDED)
 
-配置中 `target: grpc://127.0.0.1:9091` 的 `grpc://` 前缀是项目内部格式，`GrpcCapabilityClient` 会自动去掉。如果直接使用 gRPC 客户端工具测试，目标地址应为 `127.0.0.1:9091`（不带 scheme）。
+配置中 `target: grpc://127.0.0.1:9091` 的 `grpc://` 前缀是项目内部格式，`GrpcModelServiceClient` 会自动去掉。如果直接使用 gRPC 客户端工具测试，目标地址应为 `127.0.0.1:9091`（不带 scheme）。

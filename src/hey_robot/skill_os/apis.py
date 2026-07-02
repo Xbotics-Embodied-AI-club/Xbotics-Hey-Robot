@@ -31,5 +31,5 @@ class PerceptionAPI(Protocol):
     async def detect_marker(self, **arguments: Any) -> Any: ...
 
 
-class CapabilityAPI(Protocol):
+class ModelServiceAPI(Protocol):
     async def call(self, name: str, arguments: dict[str, Any]) -> Any: ...

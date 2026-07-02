@@ -8,7 +8,7 @@ def test_state_reset_clears_loop_context():
         last_error="failed",
     )
     state.add_message("user", "pick the bottle")
-    state.add_tool_call("request_capability", {"name": "inspect_scene"}, "ok")
+    state.add_tool_call("request_skill", {"name": "inspect_scene"}, "ok")
 
     state.reset()
 
@@ -34,7 +34,7 @@ def test_recent_tool_context_reports_attempt_history():
         "request_perception", {"question": "what is on the table"}, "bottle visible"
     )
     state.add_tool_call(
-        "request_capability",
+        "request_skill",
         {"objective": "grasp bottle"},
         "grasp failed",
         success=False,
@@ -44,7 +44,7 @@ def test_recent_tool_context_reports_attempt_history():
 
     assert "Recent tool calls:" in context
     assert "request_perception" in context
-    assert "request_capability" in context
+    assert "request_skill" in context
     assert "error: grasp failed" in context
 
 
@@ -52,8 +52,8 @@ def test_loop_warning_context_reports_repeated_failures_and_no_progress():
     state = AgentState()
     for _ in range(3):
         state.add_tool_call(
-            "request_capability",
-            {"capability": "set_gripper", "objective": "pick cup"},
+            "request_skill",
+            {"skill": "set_gripper", "objective": "pick cup"},
             "target still not reachable",
             success=False,
         )
@@ -87,7 +87,7 @@ def test_last_capability_fields_persist_independent_of_tool_calls():
     state = AgentState(
         last_capability_safety_level="motion", last_capability_name="move_base"
     )
-    state.add_tool_call("request_capability", {"capability": "inspect_scene"}, "ok")
+    state.add_tool_call("request_skill", {"skill": "inspect_scene"}, "ok")
     # tool_calls record is separate from capability tracking — runner sets these
     assert state.last_capability_safety_level == "motion"
     assert state.last_capability_name == "move_base"

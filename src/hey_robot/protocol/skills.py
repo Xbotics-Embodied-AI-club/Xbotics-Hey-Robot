@@ -100,7 +100,7 @@ class RobotSkillSpec:
     input_schema: dict[str, Any] = field(default_factory=dict)
     safety_level: str = "normal"
     supported_robots: tuple[str, ...] = ()
-    external_capability: str | None = None
+    required_model_service: str | None = None
     driver_primitives: tuple[str, ...] = ()
     required_resources: tuple[str, ...] = ()
     preconditions: tuple[str, ...] = ()

@@ -25,7 +25,7 @@ def test_message_protocol_requires_tool_call_result_pairs() -> None:
             role="assistant",
             content="",
             tool_calls=[
-                ReasoningToolCall(id="call_1", name="request_capability", arguments={})
+                ReasoningToolCall(id="call_1", name="request_skill", arguments={})
             ],
         ),
     ]
@@ -54,8 +54,8 @@ def test_message_protocol_accepts_valid_tool_pair_and_response_shape() -> None:
                 tool_calls=[
                     ReasoningToolCall(
                         id="call_1",
-                        name="request_capability",
-                        arguments={"capability": "stop_motion"},
+                        name="request_skill",
+                        arguments={"skill": "stop_motion"},
                     )
                 ],
             ),
@@ -67,8 +67,8 @@ def test_message_protocol_accepts_valid_tool_pair_and_response_shape() -> None:
             tool_calls=[
                 ReasoningToolCall(
                     id="call_2",
-                    name="request_capability",
-                    arguments={"capability": "inspect_scene"},
+                    name="request_skill",
+                    arguments={"skill": "inspect_scene"},
                 )
             ],
             finish_reason="tool_calls",
@@ -112,9 +112,7 @@ def test_response_policy_classifies_error_tool_text_and_empty_responses() -> Non
         decide_response(
             ReasoningResponse(
                 tool_calls=[
-                    ReasoningToolCall(
-                        id="call_1", name="request_capability", arguments={}
-                    )
+                    ReasoningToolCall(id="call_1", name="request_skill", arguments={})
                 ],
                 finish_reason="tool_calls",
             )
@@ -122,4 +120,4 @@ def test_response_policy_classifies_error_tool_text_and_empty_responses() -> Non
         == "execute_tools"
     )
     assert decide_response(ReasoningResponse(content="  ")).action == "empty"
-    assert looks_like_unexecuted_tool_protocol("```tool_call request_capability({})```")
+    assert looks_like_unexecuted_tool_protocol("```tool_call request_skill({})```")

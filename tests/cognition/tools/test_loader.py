@@ -17,7 +17,7 @@ def test_discover_finds_all_tools():
         "get_robot_status",
         "get_task_context",
         "propose_capability",
-        "request_capability",
+        "request_skill",
         "request_perception",
         "search_memory",
         "wait",
@@ -220,7 +220,7 @@ def test_load_registers_all_tools():
     ctx = _FakeCtx()
     names = loader.load(ctx, registry)  # type: ignore[arg-type]
     assert len(names) > 0
-    assert "request_capability" in names
+    assert "request_skill" in names
     assert "request_perception" in names
     for name in names:
         assert registry.has(name)

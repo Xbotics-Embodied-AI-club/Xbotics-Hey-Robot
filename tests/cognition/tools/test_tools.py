@@ -632,39 +632,39 @@ class TestRequestPerceptionTool:
             await tool.execute(scope="back")
 
 
-class TestRequestCapabilityTool:
+class TestRequestSkillTool:
     async def test_submits_and_awaits_skill(self):
-        from hey_robot.cognition.tools.request_capability import RequestCapabilityTool
+        from hey_robot.cognition.tools.request_skill import RequestSkillTool
 
         pending: dict = {}
         io = _FakeIO(pending_skills=pending)
         ctx = _build_ctx(io=io, pending_skills=pending)
-        tool = RequestCapabilityTool(ctx)
+        tool = RequestSkillTool(ctx)
         result = await tool.execute(
-            capability="set_gripper",
+            skill="set_gripper",
             objective="close the gripper on the cup",
             slots={"action": "close"},
         )
         assert "controller_status=completed" in result
 
     async def test_empty_objective_raises(self):
-        from hey_robot.cognition.tools.request_capability import RequestCapabilityTool
+        from hey_robot.cognition.tools.request_skill import RequestSkillTool
 
         ctx = _build_ctx()
-        tool = RequestCapabilityTool(ctx)
+        tool = RequestSkillTool(ctx)
         with pytest.raises(ValueError, match="objective"):
-            await tool.execute(capability="grasp", objective="")
+            await tool.execute(skill="grasp", objective="")
 
     async def test_unknown_skill_raises(self):
-        from hey_robot.cognition.tools.request_capability import RequestCapabilityTool
+        from hey_robot.cognition.tools.request_skill import RequestSkillTool
 
         ctx = _build_ctx()
-        tool = RequestCapabilityTool(ctx)
+        tool = RequestSkillTool(ctx)
         with pytest.raises(KeyError, match="unknown skill"):
-            await tool.execute(capability="legacy_internal_skill", objective="look")
+            await tool.execute(skill="legacy_internal_skill", objective="look")
 
     async def test_motion_skill_blocked_when_camera_unhealthy(self):
-        from hey_robot.cognition.tools.request_capability import RequestCapabilityTool
+        from hey_robot.cognition.tools.request_skill import RequestSkillTool
 
         pending: dict = {}
         io = _FakeIO(pending_skills=pending)
@@ -680,12 +680,12 @@ class TestRequestCapabilityTool:
         ctx._current_envelope = lambda: Envelope(
             robot_id="mock0", channel="test", episode_id="ep1"
         )
-        tool = RequestCapabilityTool(ctx)
+        tool = RequestSkillTool(ctx)
         with pytest.raises(RuntimeError, match="CameraUnsafe"):
-            await tool.execute(capability="move_base", objective="move forward")
+            await tool.execute(skill="move_base", objective="move forward")
 
     async def test_motion_skill_blocked_when_camera_stale(self):
-        from hey_robot.cognition.tools.request_capability import RequestCapabilityTool
+        from hey_robot.cognition.tools.request_skill import RequestSkillTool
 
         pending: dict = {}
         io = _FakeIO(pending_skills=pending)
@@ -701,12 +701,12 @@ class TestRequestCapabilityTool:
         ctx._current_envelope = lambda: Envelope(
             robot_id="mock0", channel="test", episode_id="ep1"
         )
-        tool = RequestCapabilityTool(ctx)
+        tool = RequestSkillTool(ctx)
         with pytest.raises(RuntimeError, match="CameraStale"):
-            await tool.execute(capability="move_base", objective="move forward")
+            await tool.execute(skill="move_base", objective="move forward")
 
     async def test_motion_skill_allowed_when_camera_healthy(self):
-        from hey_robot.cognition.tools.request_capability import RequestCapabilityTool
+        from hey_robot.cognition.tools.request_skill import RequestSkillTool
 
         pending: dict = {}
         io = _FakeIO(pending_skills=pending)
@@ -722,23 +722,23 @@ class TestRequestCapabilityTool:
         ctx._current_envelope = lambda: Envelope(
             robot_id="mock0", channel="test", episode_id="ep1"
         )
-        tool = RequestCapabilityTool(ctx)
-        result = await tool.execute(capability="move_base", objective="move forward")
+        tool = RequestSkillTool(ctx)
+        result = await tool.execute(skill="move_base", objective="move forward")
         assert "controller_status=completed" in result
 
     async def test_observe_skill_skips_camera_check(self):
-        from hey_robot.cognition.tools.request_capability import RequestCapabilityTool
+        from hey_robot.cognition.tools.request_skill import RequestSkillTool
 
         pending: dict = {}
         io = _FakeIO(pending_skills=pending)
         ctx = _build_ctx(io=io, pending_skills=pending)
         # No task_runtime set — would fail if camera check ran for observe skill
-        tool = RequestCapabilityTool(ctx)
-        result = await tool.execute(capability="inspect_scene", objective="check scene")
+        tool = RequestSkillTool(ctx)
+        result = await tool.execute(skill="inspect_scene", objective="check scene")
         assert "controller_status=completed" in result
 
     async def test_consecutive_motion_blocked_without_intervening_perception(self):
-        from hey_robot.cognition.tools.request_capability import RequestCapabilityTool
+        from hey_robot.cognition.tools.request_skill import RequestSkillTool
 
         pending: dict = {}
         io = _FakeIO(pending_skills=pending)
@@ -756,12 +756,12 @@ class TestRequestCapabilityTool:
         )
         ctx.runtime_state.last_capability_safety_level = "motion"
         ctx.runtime_state.last_capability_name = "move_base"
-        tool = RequestCapabilityTool(ctx)
+        tool = RequestSkillTool(ctx)
         with pytest.raises(RuntimeError, match="ConsecutiveMotionBlocked"):
-            await tool.execute(capability="move_base", objective="move again")
+            await tool.execute(skill="move_base", objective="move again")
 
     async def test_consecutive_motion_allows_stop_skills(self):
-        from hey_robot.cognition.tools.request_capability import RequestCapabilityTool
+        from hey_robot.cognition.tools.request_skill import RequestSkillTool
 
         pending: dict = {}
         io = _FakeIO(pending_skills=pending)
@@ -779,14 +779,12 @@ class TestRequestCapabilityTool:
         )
         ctx.runtime_state.last_capability_safety_level = "motion"
         ctx.runtime_state.last_capability_name = "move_base"
-        tool = RequestCapabilityTool(ctx)
-        result = await tool.execute(
-            capability="stop_motion", objective="emergency stop"
-        )
+        tool = RequestSkillTool(ctx)
+        result = await tool.execute(skill="stop_motion", objective="emergency stop")
         assert "controller_status=completed" in result
 
     async def test_consecutive_motion_allowed_after_perception_reset(self):
-        from hey_robot.cognition.tools.request_capability import RequestCapabilityTool
+        from hey_robot.cognition.tools.request_skill import RequestSkillTool
 
         pending: dict = {}
         io = _FakeIO(pending_skills=pending)
@@ -804,36 +802,34 @@ class TestRequestCapabilityTool:
         )
         ctx.runtime_state.last_capability_safety_level = "observe"
         ctx.runtime_state.last_capability_name = "inspect_scene"
-        tool = RequestCapabilityTool(ctx)
-        result = await tool.execute(
-            capability="move_base", objective="move after inspect"
-        )
+        tool = RequestSkillTool(ctx)
+        result = await tool.execute(skill="move_base", objective="move after inspect")
         assert "controller_status=completed" in result
 
     async def test_skill_blocked_when_turn_recovery_required(self):
-        from hey_robot.cognition.tools.request_capability import RequestCapabilityTool
+        from hey_robot.cognition.tools.request_skill import RequestSkillTool
 
         pending: dict = {}
         io = _FakeIO(pending_skills=pending)
         turn = _make_turn_context()
         turn.recovery_required = True
         ctx = _build_ctx(io=io, pending_skills=pending, turn_context=turn)
-        tool = RequestCapabilityTool(ctx)
+        tool = RequestSkillTool(ctx)
         with pytest.raises(RuntimeError, match="recovery required"):
-            await tool.execute(capability="move_base", objective="move")
+            await tool.execute(skill="move_base", objective="move")
 
     async def test_recovery_required_allows_open_gripper(self):
-        from hey_robot.cognition.tools.request_capability import RequestCapabilityTool
+        from hey_robot.cognition.tools.request_skill import RequestSkillTool
 
         pending: dict = {}
         io = _FakeIO(pending_skills=pending)
         turn = _make_turn_context()
         turn.recovery_required = True
         ctx = _build_ctx(io=io, pending_skills=pending, turn_context=turn)
-        tool = RequestCapabilityTool(ctx)
+        tool = RequestSkillTool(ctx)
 
         result = await tool.execute(
-            capability="set_gripper",
+            skill="set_gripper",
             objective="open gripper",
             slots={"action": "open"},
         )
@@ -843,18 +839,18 @@ class TestRequestCapabilityTool:
         assert io.skills[0].arguments == {"action": "open"}
 
     async def test_recovery_required_blocks_close_gripper(self):
-        from hey_robot.cognition.tools.request_capability import RequestCapabilityTool
+        from hey_robot.cognition.tools.request_skill import RequestSkillTool
 
         pending: dict = {}
         io = _FakeIO(pending_skills=pending)
         turn = _make_turn_context()
         turn.recovery_required = True
         ctx = _build_ctx(io=io, pending_skills=pending, turn_context=turn)
-        tool = RequestCapabilityTool(ctx)
+        tool = RequestSkillTool(ctx)
 
         with pytest.raises(RuntimeError, match="recovery required"):
             await tool.execute(
-                capability="set_gripper",
+                skill="set_gripper",
                 objective="close gripper",
                 slots={"action": "close"},
             )
@@ -862,17 +858,17 @@ class TestRequestCapabilityTool:
         assert io.skills == []
 
     async def test_recovery_required_allows_reset_posture(self):
-        from hey_robot.cognition.tools.request_capability import RequestCapabilityTool
+        from hey_robot.cognition.tools.request_skill import RequestSkillTool
 
         pending: dict = {}
         io = _FakeIO(pending_skills=pending)
         turn = _make_turn_context()
         turn.recovery_required = True
         ctx = _build_ctx(io=io, pending_skills=pending, turn_context=turn)
-        tool = RequestCapabilityTool(ctx)
+        tool = RequestSkillTool(ctx)
 
         result = await tool.execute(
-            capability="reset_posture",
+            skill="reset_posture",
             objective="reset posture",
         )
 
@@ -949,14 +945,14 @@ class TestTaskContextTool:
         )()
         runtime_state = AgentState(task="pick the cup")
         runtime_state.add_tool_call(
-            "request_capability",
-            {"capability": "vla_manipulation", "objective": "pick the cup"},
+            "request_skill",
+            {"skill": "vla_manipulation", "objective": "pick the cup"},
             "target still not reachable",
             success=False,
         )
         runtime_state.add_tool_call(
-            "request_capability",
-            {"capability": "vla_manipulation", "objective": "pick the cup"},
+            "request_skill",
+            {"skill": "vla_manipulation", "objective": "pick the cup"},
             "target still not reachable",
             success=False,
         )

@@ -180,13 +180,13 @@ robots:
       viewer:
         enabled: false
 
-capability_services:
+model_services:
   vln_nav:
-    type: vln_service
+    type: vln_planner
     robot_id: sim_robot
     enabled: true
     target: grpc://127.0.0.1:9091
-    skill_names:
+    provides:
       - navigate_to
       - approach_object
     timeout_sec: 60.0

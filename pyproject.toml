@@ -62,10 +62,9 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 exclude = [
-    "^src/hey_robot/foundation/contract/v1/capability_pb2.py$",
-    "^src/hey_robot/foundation/contract/v1/capability_pb2_grpc.py$",
+    "^src/hey_robot/foundation/contract/v1/model_service_pb2.py$",
+    "^src/hey_robot/foundation/contract/v1/model_service_pb2_grpc.py$",
 ]
-
 
 [project.optional-dependencies]
 sim = ["mujoco>=3.3.0"]
@@ -116,5 +115,5 @@ sequence = [
 ]
 
 [tool.poe.tasks.proto]
-help = "Regenerate capability protobuf and gRPC contract artifacts"
-cmd = "powershell -ExecutionPolicy Bypass -File scripts/dev/generate_capability_proto.ps1"
+help = "Regenerate model service protobuf and gRPC contract artifacts"
+cmd = "powershell -ExecutionPolicy Bypass -File scripts/dev/generate_model_service_proto.ps1"

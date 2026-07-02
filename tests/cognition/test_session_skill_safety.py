@@ -215,7 +215,7 @@ def test_agent_run_reader_handles_missing_and_explicit_run_ids(tmp_path) -> None
     recorder.record_decision(
         task="bring the bottle",
         robot_state="idle",
-        decision={"tool": "request_capability"},
+        decision={"tool": "request_skill"},
         result={"success": True},
     )
 

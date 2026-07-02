@@ -1,22 +1,22 @@
 from __future__ import annotations
 
-from hey_robot.config import CapabilityServiceSpec
+from hey_robot.config import ModelServiceSpec
 from hey_robot.foundation.clients.models import (
-    CapabilityExecutionRequest,
-    CapabilityExecutionResult,
-    CapabilityHealth,
+    ServiceHealth,
+    ServiceInvocationRequest,
+    ServiceInvocationResult,
 )
 
 
-class MockCapabilityClient:
-    def __init__(self, service_id: str, spec: CapabilityServiceSpec) -> None:
+class MockModelServiceClient:
+    def __init__(self, service_id: str, spec: ModelServiceSpec) -> None:
         self.service_id = service_id
         self.spec = spec
-        self.executed: list[CapabilityExecutionRequest] = []
+        self.executed: list[ServiceInvocationRequest] = []
         self.cancelled: list[str] = []
 
-    async def health(self) -> CapabilityHealth:
-        return CapabilityHealth(
+    async def health(self) -> ServiceHealth:
+        return ServiceHealth(
             name=self.service_id,
             online=bool(self.spec.settings.get("online", True)),
             loaded=bool(self.spec.settings.get("loaded", True)),
@@ -27,11 +27,11 @@ class MockCapabilityClient:
         )
 
     async def execute(
-        self, request: CapabilityExecutionRequest
-    ) -> CapabilityExecutionResult:
+        self, request: ServiceInvocationRequest
+    ) -> ServiceInvocationResult:
         self.executed.append(request)
         success = bool(self.spec.settings.get("success", True))
-        return CapabilityExecutionResult(
+        return ServiceInvocationResult(
             success=success,
             status="completed" if success else "failed",
             summary=str(
@@ -42,7 +42,9 @@ class MockCapabilityClient:
             else str(self.spec.settings.get("failure_mode", "execution_failed")),
             error=None
             if success
-            else str(self.spec.settings.get("error", "capability execution failed")),
+            else str(
+                self.spec.settings.get("error", "model service invocation failed")
+            ),
             metrics=dict(self.spec.settings.get("result_metrics", {}) or {}),
         )
 

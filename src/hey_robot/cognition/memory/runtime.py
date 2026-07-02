@@ -248,11 +248,11 @@ class MemoryRuntime:
         *,
         context_summary: str = "",
     ) -> None:
-        if tool != "request_capability":
+        if tool != "request_skill":
             return
         if _is_transient_safety_gate_result(result):
             return
-        skill_name = str(args.get("capability") or "request_capability").strip()
+        skill_name = str(args.get("skill") or "request_skill").strip()
         (
             memory_summary,
             failure_mode,
@@ -318,12 +318,12 @@ def _normalize_skill_result_for_memory(
     text = (result or "").strip()
     if not text:
         fallback = "skill succeeded" if success else "skill failed"
-        failure_mode = None if success else "request_capability_failed"
+        failure_mode = None if success else "request_skill_failed"
         return fallback, failure_mode, None, None, bool(success)
 
     feedback = _parse_agent_execution_feedback(text)
     if feedback is None:
-        failure_mode = None if success else "request_capability_failed"
+        failure_mode = None if success else "request_skill_failed"
         return text, failure_mode, None, text, bool(success)
 
     summary = feedback.get("summary") or (
@@ -341,7 +341,7 @@ def _normalize_skill_result_for_memory(
     failure_mode = (
         None
         if memory_success
-        else (failure_reason or outcome or "request_capability_failed")
+        else (failure_reason or outcome or "request_skill_failed")
     )
     recovery_hint = feedback.get("next_hint")
     verification_summary = _verification_summary_from_feedback(feedback)

@@ -68,7 +68,7 @@ class GetHealthResponse(_message.Message):
         version: str | None = ...,
     ) -> None: ...
 
-class ExecuteCapabilityRequest(_message.Message):
+class ExecuteSkillRequest(_message.Message):
     __slots__ = (
         "arguments",
         "episode_id",
@@ -115,7 +115,7 @@ class ExecuteCapabilityRequest(_message.Message):
         metadata: _struct_pb2.Struct | _Mapping | None = ...,
     ) -> None: ...
 
-class ExecuteCapabilityResponse(_message.Message):
+class ExecuteSkillResponse(_message.Message):
     __slots__ = (
         "error_code",
         "error_message",
@@ -150,7 +150,7 @@ class ExecuteCapabilityResponse(_message.Message):
         metrics: _struct_pb2.Struct | _Mapping | None = ...,
     ) -> None: ...
 
-class CancelCapabilityRequest(_message.Message):
+class CancelSkillRequest(_message.Message):
     __slots__ = ("service_id", "skill_id")
     SERVICE_ID_FIELD_NUMBER: _ClassVar[int]
     SKILL_ID_FIELD_NUMBER: _ClassVar[int]
@@ -160,7 +160,7 @@ class CancelCapabilityRequest(_message.Message):
         self, service_id: str | None = ..., skill_id: str | None = ...
     ) -> None: ...
 
-class CancelCapabilityResponse(_message.Message):
+class CancelSkillResponse(_message.Message):
     __slots__ = ("accepted", "error_code", "error_message", "summary")
     ACCEPTED_FIELD_NUMBER: _ClassVar[int]
     SUMMARY_FIELD_NUMBER: _ClassVar[int]

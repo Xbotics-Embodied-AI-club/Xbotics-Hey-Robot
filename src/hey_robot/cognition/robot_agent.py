@@ -492,7 +492,7 @@ class RobotAgentService:
         self.turn_sessions.lease_robot(robot_key, "__agent_turn__")
         self.core._turn_submitted_skill_id = None
         try:
-            result_text = await self.core.request_capability(
+            result_text = await self.core.request_skill(
                 capability,
                 objective,
                 slots=slots,
@@ -506,9 +506,9 @@ class RobotAgentService:
                 reply_text=reply_text,
                 skill_submitted=True,
                 task_finished=False,
-                tool="request_capability",
+                tool="request_skill",
                 metadata={
-                    "tool": "request_capability",
+                    "tool": "request_skill",
                     "args": args,
                     "result": result_text,
                     "skill_id": skill_id,
@@ -520,7 +520,7 @@ class RobotAgentService:
         except Exception as exc:
             result_text = str(exc)
             reply_text = present_tool_result_for_user(
-                tool="request_capability",
+                tool="request_skill",
                 args=args,
                 result=result_text,
                 success=False,
@@ -529,9 +529,9 @@ class RobotAgentService:
                 reply_text=reply_text,
                 skill_submitted=False,
                 task_finished=False,
-                tool="request_capability",
+                tool="request_skill",
                 metadata={
-                    "tool": "request_capability",
+                    "tool": "request_skill",
                     "args": args,
                     "result": result_text,
                     "skill_id": None,
@@ -689,7 +689,7 @@ class RobotAgentService:
                 final=False,
                 metadata={
                     "source": "skill_progress",
-                    "tool": "request_capability",
+                    "tool": "request_skill",
                     "skill_id": skill.skill_id,
                     "skill_name": skill.name,
                 },

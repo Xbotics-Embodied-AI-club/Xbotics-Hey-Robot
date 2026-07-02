@@ -16,13 +16,13 @@ from hey_robot.skill_os.builtins.navigation_adapter import planner_output_to_pri
 def _spec(settings: dict | None = None):
     config = DeploymentConfig.from_dict(
         {
-            "capability_services": {
+            "model_services": {
                 "vln_nav": {
-                    "type": "vln_service",
+                    "type": "vln_planner",
                     "enabled": True,
                     "robot_id": "xlerobot",
                     "target": "127.0.0.1:9091",
-                    "skill_names": ["navigate_to", "approach_object"],
+                    "provides": ["navigate_to", "approach_object"],
                     "backend": "internvla_n1_system2",
                     "control_mode": "planner_only",
                     "mock_mode": True,
@@ -31,7 +31,7 @@ def _spec(settings: dict | None = None):
             }
         }
     )
-    return config.capability_services["vln_nav"]
+    return config.model_services["vln_nav"]
 
 
 class _FakeS2Model:

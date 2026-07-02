@@ -19,14 +19,22 @@ class VLAManipulationSkill(BaseSkill):
             "required": ["task_prompt"],
         },
         required_resources=("arm", "gripper", "camera"),
-        external_capability="vla_manipulation",
+        required_model_service="vla_manipulation",
         safety_level="motion",
         timeout_sec=30.0,
         feedback_mode="vision",
     )
 
     async def execute(self, ctx, arguments):
-        result = await ctx.capabilities.call(self.spec.name, dict(arguments))
+        if ctx.model_services is None:
+            return SkillResult(
+                success=False,
+                summary="vla_manipulation requires a VLA model service",
+                status="failed",
+                failure_mode="model_service_unavailable",
+                error="model service port is unavailable",
+            )
+        result = await ctx.model_services.call(self.spec.name, dict(arguments))
         return SkillResult(
             success=bool(result.success),
             summary=str(result.summary),

@@ -1,19 +1,19 @@
 """Foundation service clients."""
 
-from hey_robot.foundation.clients.manager import CapabilityRuntime
-from hey_robot.foundation.clients.mock import MockCapabilityClient
+from hey_robot.foundation.clients.manager import ModelServiceRegistry
+from hey_robot.foundation.clients.mock import MockModelServiceClient
 from hey_robot.foundation.clients.models import (
-    CapabilityClient,
-    CapabilityExecutionRequest,
-    CapabilityExecutionResult,
-    CapabilityHealth,
+    ModelServiceClient,
+    ServiceHealth,
+    ServiceInvocationRequest,
+    ServiceInvocationResult,
 )
 
 __all__ = [
-    "CapabilityClient",
-    "CapabilityExecutionRequest",
-    "CapabilityExecutionResult",
-    "CapabilityHealth",
-    "CapabilityRuntime",
-    "MockCapabilityClient",
+    "MockModelServiceClient",
+    "ModelServiceClient",
+    "ModelServiceRegistry",
+    "ServiceHealth",
+    "ServiceInvocationRequest",
+    "ServiceInvocationResult",
 ]

@@ -1,4 +1,4 @@
-# ruff: noqa: N802 — gRPC stub method names are defined in .proto, not our choice
+# ruff: noqa: N802 鈥?gRPC stub method names are defined in .proto, not our choice
 from __future__ import annotations
 
 import asyncio
@@ -8,12 +8,12 @@ import pytest
 
 from hey_robot.config import DeploymentConfig
 from hey_robot.foundation.clients import (
-    CapabilityExecutionRequest,
-    CapabilityRuntime,
-    MockCapabilityClient,
+    MockModelServiceClient,
+    ModelServiceRegistry,
+    ServiceInvocationRequest,
 )
-from hey_robot.foundation.contract.v1 import capability_pb2
-from hey_robot.foundation.transport.grpc.client import GrpcCapabilityClient
+from hey_robot.foundation.contract.v1 import model_service_pb2
+from hey_robot.foundation.transport.grpc.client import GrpcModelServiceClient
 from hey_robot.protocol import Envelope, SkillIntent
 from hey_robot.skill_os import load_skill_registry
 
@@ -21,12 +21,12 @@ from hey_robot.skill_os import load_skill_registry
 def _config() -> DeploymentConfig:
     return DeploymentConfig.from_dict(
         {
-            "capability_services": {
+            "model_services": {
                 "arm_vla": {
-                    "type": "mock_vla_service",
+                    "type": "mock_vla_policy",
                     "enabled": True,
                     "robot_id": "xlerobot",
-                    "skill_names": ["set_gripper"],
+                    "provides": ["set_gripper"],
                     "success": False,
                     "failure_mode": "policy_timeout",
                     "error": "timed out",
@@ -36,13 +36,13 @@ def _config() -> DeploymentConfig:
                     "type": "mock",
                     "enabled": False,
                     "robot_id": "xlerobot",
-                    "skill_names": ["set_gripper"],
+                    "provides": ["set_gripper"],
                 },
                 "other_robot": {
                     "type": "mock",
                     "enabled": True,
                     "robot_id": "other",
-                    "skill_names": ["set_gripper"],
+                    "provides": ["set_gripper"],
                 },
             }
         }
@@ -50,7 +50,7 @@ def _config() -> DeploymentConfig:
 
 
 def test_capability_runtime_routes_enabled_service_by_skill_and_robot() -> None:
-    runtime = CapabilityRuntime(_config())
+    runtime = ModelServiceRegistry(_config())
 
     match = runtime.service_for("set_gripper", "xlerobot")
 
@@ -58,7 +58,7 @@ def test_capability_runtime_routes_enabled_service_by_skill_and_robot() -> None:
     service_id, spec, client = match
     assert service_id == "arm_vla"
     assert spec.robot_id == "xlerobot"
-    assert isinstance(client, MockCapabilityClient)
+    assert isinstance(client, MockModelServiceClient)
     assert runtime.service_for("set_gripper", "missing") is None
     assert runtime.service_for("unknown_skill", "xlerobot") is None
 
@@ -66,46 +66,46 @@ def test_capability_runtime_routes_enabled_service_by_skill_and_robot() -> None:
 def test_capability_runtime_prefers_first_matching_enabled_service() -> None:
     config = DeploymentConfig.from_dict(
         {
-            "capability_services": {
+            "model_services": {
                 "arm_vla_primary": {
                     "type": "mock",
                     "enabled": True,
                     "robot_id": "xlerobot",
-                    "skill_names": ["set_gripper"],
+                    "provides": ["set_gripper"],
                 },
                 "arm_vla_secondary": {
                     "type": "mock",
                     "enabled": True,
                     "robot_id": "xlerobot",
-                    "skill_names": ["set_gripper"],
+                    "provides": ["set_gripper"],
                 },
             }
         }
     )
 
-    runtime = CapabilityRuntime(config)
+    runtime = ModelServiceRegistry(config)
     match = runtime.service_for("set_gripper", "xlerobot")
 
     assert match is not None
     service_id, _spec, client = match
     assert service_id == "arm_vla_primary"
-    assert isinstance(client, MockCapabilityClient)
+    assert isinstance(client, MockModelServiceClient)
 
 
 def test_capability_runtime_allows_global_service_when_robot_id_not_specified() -> None:
     config = DeploymentConfig.from_dict(
         {
-            "capability_services": {
+            "model_services": {
                 "shared_vla": {
                     "type": "mock",
                     "enabled": True,
-                    "skill_names": ["set_gripper"],
+                    "provides": ["set_gripper"],
                 },
             }
         }
     )
 
-    runtime = CapabilityRuntime(config)
+    runtime = ModelServiceRegistry(config)
     match = runtime.service_for("set_gripper", "xlerobot")
 
     assert match is not None
@@ -114,7 +114,7 @@ def test_capability_runtime_allows_global_service_when_robot_id_not_specified() 
     assert spec.robot_id == ""
 
 
-def test_capability_runtime_routes_vla_service_to_grpc_client(
+def test_capability_runtime_routes_vla_policy_to_grpc_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -122,31 +122,31 @@ def test_capability_runtime_routes_vla_service_to_grpc_client(
         lambda target: target,
     )
     monkeypatch.setattr(
-        "hey_robot.foundation.transport.grpc.client.capability_pb2_grpc.CapabilityServiceStub",
+        "hey_robot.foundation.transport.grpc.client.model_service_pb2_grpc.ModelServiceStub",
         lambda _channel: object(),
     )
     config = DeploymentConfig.from_dict(
         {
-            "capability_services": {
+            "model_services": {
                 "arm_vla": {
-                    "type": "vla_service",
+                    "type": "vla_policy",
                     "enabled": True,
                     "robot_id": "xlerobot",
                     "target": "127.0.0.1:9090",
-                    "skill_names": ["vla_manipulation"],
+                    "provides": ["vla_manipulation"],
                 }
             }
         }
     )
 
-    runtime = CapabilityRuntime(config)
+    runtime = ModelServiceRegistry(config)
     match = runtime.service_for("vla_manipulation", "xlerobot")
 
     assert match is not None
-    assert isinstance(match[2], GrpcCapabilityClient)
+    assert isinstance(match[2], GrpcModelServiceClient)
 
 
-def test_capability_runtime_routes_vln_service_to_grpc_client(
+def test_capability_runtime_routes_vln_planner_to_grpc_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -154,46 +154,46 @@ def test_capability_runtime_routes_vln_service_to_grpc_client(
         lambda target: target,
     )
     monkeypatch.setattr(
-        "hey_robot.foundation.transport.grpc.client.capability_pb2_grpc.CapabilityServiceStub",
+        "hey_robot.foundation.transport.grpc.client.model_service_pb2_grpc.ModelServiceStub",
         lambda _channel: object(),
     )
     config = DeploymentConfig.from_dict(
         {
-            "capability_services": {
+            "model_services": {
                 "vln_nav": {
-                    "type": "vln_service",
+                    "type": "vln_planner",
                     "enabled": True,
                     "robot_id": "xlerobot",
                     "target": "127.0.0.1:9091",
-                    "skill_names": ["navigate_to", "approach_object"],
+                    "provides": ["navigate_to", "approach_object"],
                 }
             }
         }
     )
 
-    runtime = CapabilityRuntime(config)
+    runtime = ModelServiceRegistry(config)
     match = runtime.service_for("navigate_to", "xlerobot")
 
     assert match is not None
     service_id, spec, client = match
     assert service_id == "vln_nav"
-    assert spec.type == "vln_service"
-    assert isinstance(client, GrpcCapabilityClient)
+    assert spec.type == "vln_planner"
+    assert isinstance(client, GrpcModelServiceClient)
 
 
 def test_mock_capability_client_records_execution_and_cancel() -> None:
-    runtime = CapabilityRuntime(_config())
+    runtime = ModelServiceRegistry(_config())
     match = runtime.service_for("set_gripper", "xlerobot")
     assert match is not None
     _, _, client = match
-    assert isinstance(client, MockCapabilityClient)
+    assert isinstance(client, MockModelServiceClient)
     intent = SkillIntent(
         envelope=Envelope(robot_id="xlerobot"),
         skill_id="skill1",
         name="set_gripper",
         objective="close the gripper",
     )
-    request = CapabilityExecutionRequest(
+    request = ServiceInvocationRequest(
         service_id="arm_vla",
         intent=intent,
         contract=load_skill_registry().robot_skill_catalog().get("set_gripper"),
@@ -221,7 +221,7 @@ def test_grpc_capability_client_maps_health_execute_and_cancel(
     class FakeStub:
         async def GetHealth(self, request, **kwargs):
             recorded["health_requests"].append((request, kwargs.get("timeout")))
-            return capability_pb2.GetHealthResponse(
+            return model_service_pb2.GetHealthResponse(
                 service_id="arm_vla",
                 name="arm_vla",
                 robot_id="xlerobot",
@@ -233,18 +233,18 @@ def test_grpc_capability_client_maps_health_execute_and_cancel(
                 version="grpc-v1",
             )
 
-        async def ExecuteCapability(self, request, **kwargs):
+        async def ExecuteSkill(self, request, **kwargs):
             recorded["execute_requests"].append((request, kwargs.get("timeout")))
-            return capability_pb2.ExecuteCapabilityResponse(
+            return model_service_pb2.ExecuteSkillResponse(
                 success=True,
                 status="completed",
                 summary="done",
                 metrics=_struct(frames=12),
             )
 
-        async def CancelCapability(self, request, **kwargs):
+        async def CancelSkill(self, request, **kwargs):
             recorded["cancel_requests"].append((request, kwargs.get("timeout")))
-            return capability_pb2.CancelCapabilityResponse(
+            return model_service_pb2.CancelSkillResponse(
                 accepted=True, summary="cancel requested"
             )
 
@@ -253,23 +253,23 @@ def test_grpc_capability_client_maps_health_execute_and_cancel(
         lambda target: target,
     )
     monkeypatch.setattr(
-        "hey_robot.foundation.transport.grpc.client.capability_pb2_grpc.CapabilityServiceStub",
+        "hey_robot.foundation.transport.grpc.client.model_service_pb2_grpc.ModelServiceStub",
         lambda _: FakeStub(),
     )
     spec = DeploymentConfig.from_dict(
         {
-            "capability_services": {
+            "model_services": {
                 "arm_vla": {
-                    "type": "vla_service",
+                    "type": "vla_policy",
                     "robot_id": "xlerobot",
                     "target": "127.0.0.1:9090",
-                    "skill_names": ["set_gripper"],
+                    "provides": ["set_gripper"],
                     "health_timeout_sec": 1.5,
                 }
             }
         }
-    ).capability_services["arm_vla"]
-    client = GrpcCapabilityClient("arm_vla", spec)
+    ).model_services["arm_vla"]
+    client = GrpcModelServiceClient("arm_vla", spec)
     intent = SkillIntent(
         envelope=Envelope(robot_id="xlerobot", trace_id="trace-1", episode_id="ep-1"),
         skill_id="skill1",
@@ -282,7 +282,7 @@ def test_grpc_capability_client_maps_health_execute_and_cancel(
     health = asyncio.run(client.health())
     result = asyncio.run(
         client.execute(
-            CapabilityExecutionRequest(
+            ServiceInvocationRequest(
                 service_id="arm_vla",
                 intent=intent,
                 contract=load_skill_registry().robot_skill_catalog().get("set_gripper"),
@@ -326,23 +326,23 @@ def test_grpc_capability_client_health_reports_connection_errors(
         "hey_robot.foundation.transport.grpc.client.grpc.aio.AioRpcError", FakeRpcError
     )
     monkeypatch.setattr(
-        "hey_robot.foundation.transport.grpc.client.capability_pb2_grpc.CapabilityServiceStub",
+        "hey_robot.foundation.transport.grpc.client.model_service_pb2_grpc.ModelServiceStub",
         lambda _: FailingStub(),
     )
     spec = DeploymentConfig.from_dict(
         {
-            "capability_services": {
+            "model_services": {
                 "arm_vla": {
-                    "type": "vla_service",
+                    "type": "vla_policy",
                     "robot_id": "xlerobot",
                     "target": "127.0.0.1:9090",
-                    "skill_names": ["set_gripper"],
+                    "provides": ["set_gripper"],
                 }
             }
         }
-    ).capability_services["arm_vla"]
+    ).model_services["arm_vla"]
 
-    health = asyncio.run(GrpcCapabilityClient("arm_vla", spec).health())
+    health = asyncio.run(GrpcModelServiceClient("arm_vla", spec).health())
 
     assert health.online is False
     assert health.loaded is False
@@ -361,7 +361,7 @@ def test_grpc_capability_client_execute_reports_rpc_errors(
             return "execution timed out"
 
     class FailingStub:
-        async def ExecuteCapability(self, request, **_kwargs):
+        async def ExecuteSkill(self, request, **_kwargs):
             del request
             raise FakeRpcError()
 
@@ -373,22 +373,22 @@ def test_grpc_capability_client_execute_reports_rpc_errors(
         "hey_robot.foundation.transport.grpc.client.grpc.aio.AioRpcError", FakeRpcError
     )
     monkeypatch.setattr(
-        "hey_robot.foundation.transport.grpc.client.capability_pb2_grpc.CapabilityServiceStub",
+        "hey_robot.foundation.transport.grpc.client.model_service_pb2_grpc.ModelServiceStub",
         lambda _: FailingStub(),
     )
     spec = DeploymentConfig.from_dict(
         {
-            "capability_services": {
+            "model_services": {
                 "arm_vla": {
-                    "type": "vla_service",
+                    "type": "vla_policy",
                     "robot_id": "xlerobot",
                     "target": "127.0.0.1:9090",
-                    "skill_names": ["set_gripper"],
+                    "provides": ["set_gripper"],
                 }
             }
         }
-    ).capability_services["arm_vla"]
-    client = GrpcCapabilityClient("arm_vla", spec)
+    ).model_services["arm_vla"]
+    client = GrpcModelServiceClient("arm_vla", spec)
     intent = SkillIntent(
         envelope=Envelope(robot_id="xlerobot", trace_id="trace-1"),
         skill_id="skill1",
@@ -398,7 +398,7 @@ def test_grpc_capability_client_execute_reports_rpc_errors(
 
     result = asyncio.run(
         client.execute(
-            CapabilityExecutionRequest(
+            ServiceInvocationRequest(
                 service_id="arm_vla",
                 intent=intent,
                 contract=load_skill_registry().robot_skill_catalog().get("set_gripper"),
@@ -409,7 +409,7 @@ def test_grpc_capability_client_execute_reports_rpc_errors(
 
     assert result.success is False
     assert result.status == "failed"
-    assert result.failure_mode == "capability_unavailable"
+    assert result.failure_mode == "model_service_unavailable"
     assert result.summary == "execution timed out"
     assert result.error == "execution timed out"
     assert result.error_code == "DEADLINE_EXCEEDED"
@@ -422,7 +422,7 @@ def test_grpc_capability_client_cancel_propagates_rpc_errors(
         pass
 
     class FailingStub:
-        async def CancelCapability(self, request, **_kwargs):
+        async def CancelSkill(self, request, **_kwargs):
             del request
             raise FakeRpcError("cancel failed")
 
@@ -431,27 +431,27 @@ def test_grpc_capability_client_cancel_propagates_rpc_errors(
         lambda target: target,
     )
     monkeypatch.setattr(
-        "hey_robot.foundation.transport.grpc.client.capability_pb2_grpc.CapabilityServiceStub",
+        "hey_robot.foundation.transport.grpc.client.model_service_pb2_grpc.ModelServiceStub",
         lambda _: FailingStub(),
     )
     spec = DeploymentConfig.from_dict(
         {
-            "capability_services": {
+            "model_services": {
                 "arm_vla": {
-                    "type": "vla_service",
+                    "type": "vla_policy",
                     "robot_id": "xlerobot",
                     "target": "127.0.0.1:9090",
-                    "skill_names": ["set_gripper"],
+                    "provides": ["set_gripper"],
                 }
             }
         }
-    ).capability_services["arm_vla"]
+    ).model_services["arm_vla"]
 
     with pytest.raises(FakeRpcError, match="cancel failed"):
-        asyncio.run(GrpcCapabilityClient("arm_vla", spec).cancel("skill1"))
+        asyncio.run(GrpcModelServiceClient("arm_vla", spec).cancel("skill1"))
 
 
 def _struct(**kwargs):
-    message = capability_pb2.ExecuteCapabilityRequest().arguments
+    message = model_service_pb2.ExecuteSkillRequest().arguments
     message.update(kwargs)
     return message

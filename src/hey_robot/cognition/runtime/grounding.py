@@ -94,8 +94,8 @@ def is_perception_evidence_record(name: str, arguments: dict, *, success: bool) 
         return False
     if is_perception_tool(name):
         return True
-    return name == "request_capability" and is_perception_skill_name(
-        str(arguments.get("capability") or "")
+    return name == "request_skill" and is_perception_skill_name(
+        str(arguments.get("skill") or "")
     )
 
 

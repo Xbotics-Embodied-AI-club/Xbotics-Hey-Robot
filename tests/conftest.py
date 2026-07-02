@@ -1,8 +1,13 @@
 import json
+import os
+import platform
 import sys
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
+if platform.system() == "Windows" and os.environ.get("MUJOCO_GL") == "egl":
+    os.environ["MUJOCO_GL"] = "wgl"
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"

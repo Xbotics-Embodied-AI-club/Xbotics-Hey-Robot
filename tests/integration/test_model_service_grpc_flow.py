@@ -5,18 +5,18 @@ import asyncio
 import grpc
 
 from hey_robot.config import DeploymentConfig
-from hey_robot.foundation.clients import CapabilityExecutionRequest, CapabilityRuntime
-from hey_robot.foundation.contract.v1 import capability_pb2_grpc
-from hey_robot.foundation.transport.grpc.client import GrpcCapabilityClient
+from hey_robot.foundation.clients import ModelServiceRegistry, ServiceInvocationRequest
+from hey_robot.foundation.contract.v1 import model_service_pb2_grpc
+from hey_robot.foundation.transport.grpc.client import GrpcModelServiceClient
 from hey_robot.foundation.transport.grpc.server import (
-    VLACapabilityServicer,
-    VLAServiceState,
+    ModelServiceServicer,
+    ModelServiceState,
 )
 from hey_robot.protocol import Envelope, SkillIntent
 from hey_robot.skill_os import load_skill_registry
 
 
-def test_deployment_style_capability_grpc_flow(tmp_path) -> None:
+def test_deployment_style_model_service_grpc_flow(tmp_path) -> None:
     class FakeExecutor:
         def health(self) -> dict[str, object]:
             return {
@@ -58,12 +58,12 @@ def test_deployment_style_capability_grpc_flow(tmp_path) -> None:
                         "settings": {"codec": "skill"},
                     }
                 },
-                "capability_services": {
+                "model_services": {
                     "arm_vla": {
-                        "type": "vla_service",
+                        "type": "vla_policy",
                         "enabled": True,
                         "robot_id": "xlerobot",
-                        "skill_names": ["set_gripper"],
+                        "provides": ["set_gripper"],
                         "resources": ["gripper"],
                         "timeout_sec": 20,
                         "target": "127.0.0.1:0",
@@ -71,10 +71,10 @@ def test_deployment_style_capability_grpc_flow(tmp_path) -> None:
                 },
             }
         )
-        spec = config.capability_services["arm_vla"]
+        spec = config.model_services["arm_vla"]
         server = grpc.aio.server()
-        capability_pb2_grpc.add_CapabilityServiceServicer_to_server(
-            VLACapabilityServicer(VLAServiceState("arm_vla", spec), FakeExecutor()),  # type: ignore[arg-type]
+        model_service_pb2_grpc.add_ModelServiceServicer_to_server(
+            ModelServiceServicer(ModelServiceState("arm_vla", spec), FakeExecutor()),  # type: ignore[arg-type]
             server,
         )
         port = server.add_insecure_port("127.0.0.1:0")
@@ -92,9 +92,9 @@ def test_deployment_style_capability_grpc_flow(tmp_path) -> None:
                 arguments={"action": "close"},
                 objective="close the gripper",
             )
-            client = GrpcCapabilityClient("arm_vla", spec)
+            client = GrpcModelServiceClient("arm_vla", spec)
             result = await client.execute(
-                CapabilityExecutionRequest(
+                ServiceInvocationRequest(
                     service_id="arm_vla",
                     intent=intent,
                     contract=load_skill_registry()
@@ -114,16 +114,16 @@ def test_deployment_style_capability_grpc_flow(tmp_path) -> None:
     asyncio.run(run_once())
 
 
-def test_foundation_composite_capability_flow_keeps_skill_surface() -> None:
+def test_foundation_model_service_flow_keeps_skill_surface() -> None:
     async def run_once() -> None:
         config = DeploymentConfig.from_dict(
             {
-                "capability_services": {
+                "model_services": {
                     "arm_vla": {
-                        "type": "vla_service",
+                        "type": "vla_policy",
                         "enabled": True,
                         "robot_id": "xlerobot",
-                        "skill_names": ["set_gripper"],
+                        "provides": ["set_gripper"],
                         "resources": ["gripper"],
                         "timeout_sec": 20,
                         "target": "127.0.0.1:9191",
@@ -132,11 +132,11 @@ def test_foundation_composite_capability_flow_keeps_skill_surface() -> None:
             }
         )
 
-        match = CapabilityRuntime(config).service_for("set_gripper", "xlerobot")
+        match = ModelServiceRegistry(config).service_for("set_gripper", "xlerobot")
 
         assert match is not None
         service_id, spec, _client = match
         assert service_id == "arm_vla"
-        assert spec.skill_names == ("set_gripper",)
+        assert spec.provides == ("set_gripper",)
 
     asyncio.run(run_once())

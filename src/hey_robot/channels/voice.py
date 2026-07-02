@@ -109,10 +109,7 @@ def _is_internal_or_technical_reply(reply: AgentReply) -> bool:
         return True
     if looks_like_internal_user_reply(text):
         return True
-    return (
-        reply.metadata.get("tool") == "request_capability"
-        and "subgoal_success:" in text
-    )
+    return reply.metadata.get("tool") == "request_skill" and "subgoal_success:" in text
 
 
 _REPEATED_CHAR_PATTERN = re.compile(r"(.)\1{2,}")

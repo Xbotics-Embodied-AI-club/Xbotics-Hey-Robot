@@ -9,19 +9,19 @@ RobotAgentService
   -> RobotAgentLoop
   -> RobotAgentCore
   -> AgentRuntime
-  -> request_capability / request_perception
+  -> request_skill / request_perception
   -> SkillGateway
   -> SkillIntent
   -> SkillControllerService
-  -> SkillRuntime / CapabilityRuntime
-  -> RobotRuntime / Capability Services
+  -> SkillRuntime / ModelServiceRegistry
+  -> RobotRuntime / ModelServices
 ```
 
 ## 边界规则
 
 - Agent 代码不直接提交 `RobotAction`。
 - Agent 代码不依赖 driver primitive。
-- LLM 自主动作必须通过 `request_capability`。
+- LLM 自主动作必须通过 `request_skill`。
 - direct action、busy-turn interrupt 也必须通过 `SkillGateway`。
 - `SkillGateway` 是 Agent 层维护的唯一 `SkillIntent` 构造和提交边界。
 - `AgentRuntime` 负责 message protocol、message window 和 response policy。

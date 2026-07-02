@@ -1,13 +1,13 @@
 syntax = "proto3";
 
-package hey_robot.capability.v1;
+package hey_robot.model_service.v1;
 
 import "google/protobuf/struct.proto";
 
-service CapabilityService {
+service ModelService {
   rpc GetHealth(GetHealthRequest) returns (GetHealthResponse);
-  rpc ExecuteCapability(ExecuteCapabilityRequest) returns (ExecuteCapabilityResponse);
-  rpc CancelCapability(CancelCapabilityRequest) returns (CancelCapabilityResponse);
+  rpc ExecuteSkill(ExecuteSkillRequest) returns (ExecuteSkillResponse);
+  rpc CancelSkill(CancelSkillRequest) returns (CancelSkillResponse);
 }
 
 message GetHealthRequest {
@@ -28,7 +28,7 @@ message GetHealthResponse {
   string version = 11;
 }
 
-message ExecuteCapabilityRequest {
+message ExecuteSkillRequest {
   string service_id = 1;
   string trace_id = 2;
   string episode_id = 3;
@@ -41,7 +41,7 @@ message ExecuteCapabilityRequest {
   google.protobuf.Struct metadata = 10;
 }
 
-message ExecuteCapabilityResponse {
+message ExecuteSkillResponse {
   bool success = 1;
   string status = 2;
   string summary = 3;
@@ -51,12 +51,12 @@ message ExecuteCapabilityResponse {
   google.protobuf.Struct metrics = 7;
 }
 
-message CancelCapabilityRequest {
+message CancelSkillRequest {
   string service_id = 1;
   string skill_id = 2;
 }
 
-message CancelCapabilityResponse {
+message CancelSkillResponse {
   bool accepted = 1;
   string summary = 2;
   string error_code = 3;

@@ -12,12 +12,12 @@ User Channel
       -> RobotAgentLoop
       -> RobotAgentCore
       -> AgentRuntime
-      -> request_capability / request_perception
+      -> request_skill / request_perception
       -> SkillGateway
   -> bus topic: skill_intent
   -> SkillControllerService
       -> SkillContractRuntime
-      -> CapabilityRuntime
+      -> ModelServiceRegistry
   -> bus topic: robot_action
   -> RobotService / RobotRuntime
       -> XLeRobotDriver / SO101Driver / LeKiwiDriver / MockRobotDriver
@@ -29,4 +29,4 @@ User Channel
 - Agent 层只做任务理解、上下文组织和 Skill 级决策。
 - Skill 层负责能力契约、资源门禁、就绪检查和执行生命周期。
 - Robot 层负责真实硬件或仿真执行，并通过 `RobotRuntime / PerceptionService` 产出 observation 和 status。
-- VLA 等外部模型能力通过 capability service 暴露，并保持在 Skill 边界之后。
+- VLA 等外部模型能力通过 ModelService 暴露，并保持在 Skill 边界之后。

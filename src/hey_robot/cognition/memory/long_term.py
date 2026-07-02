@@ -459,7 +459,7 @@ def _searchable_text(record: LongTermMemoryRecord) -> str:
 
 def _skill_success(record: LongTermMemoryRecord) -> bool | None:
     metadata = record.metadata
-    if metadata.get("tool") != "request_capability" and isinstance(
+    if metadata.get("tool") != "request_skill" and isinstance(
         metadata.get("success"), bool
     ):
         return bool(metadata["success"])
@@ -483,7 +483,7 @@ def _skill_success(record: LongTermMemoryRecord) -> bool | None:
         return True
     if (
         isinstance(metadata.get("success"), bool)
-        and metadata.get("tool") != "request_capability"
+        and metadata.get("tool") != "request_skill"
     ):
         return bool(metadata["success"])
     return None

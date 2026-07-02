@@ -3,9 +3,10 @@
 """Client and server classes corresponding to protobuf-defined services."""
 
 import grpc
+import warnings
 
 from hey_robot.foundation.contract.v1 import (
-    capability_pb2 as hey__robot_dot_foundation_dot_v1_dot_capability__pb2,
+    model_service_pb2 as hey__robot_dot_model__service_dot_v1_dot_model__service__pb2,
 )
 
 GRPC_GENERATED_VERSION = "1.73.1"
@@ -24,14 +25,14 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f"The grpc package installed is at version {GRPC_VERSION},"
-        + " but the generated code in hey_robot/foundation/contract/v1/capability_pb2_grpc.py depends on"
+        + f" but the generated code in hey_robot/foundation/contract/v1/model_service_pb2_grpc.py depends on"
         + f" grpcio>={GRPC_GENERATED_VERSION}."
         + f" Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}"
         + f" or downgrade your generated code using grpcio-tools<={GRPC_VERSION}."
     )
 
 
-class CapabilityServiceStub:
+class ModelServiceStub(object):
     """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
@@ -41,26 +42,26 @@ class CapabilityServiceStub:
             channel: A grpc.Channel.
         """
         self.GetHealth = channel.unary_unary(
-            "/hey_robot.capability.v1.CapabilityService/GetHealth",
-            request_serializer=hey__robot_dot_foundation_dot_v1_dot_capability__pb2.GetHealthRequest.SerializeToString,
-            response_deserializer=hey__robot_dot_foundation_dot_v1_dot_capability__pb2.GetHealthResponse.FromString,
+            "/hey_robot.model_service.v1.ModelService/GetHealth",
+            request_serializer=hey__robot_dot_model__service_dot_v1_dot_model__service__pb2.GetHealthRequest.SerializeToString,
+            response_deserializer=hey__robot_dot_model__service_dot_v1_dot_model__service__pb2.GetHealthResponse.FromString,
             _registered_method=True,
         )
-        self.ExecuteCapability = channel.unary_unary(
-            "/hey_robot.capability.v1.CapabilityService/ExecuteCapability",
-            request_serializer=hey__robot_dot_foundation_dot_v1_dot_capability__pb2.ExecuteCapabilityRequest.SerializeToString,
-            response_deserializer=hey__robot_dot_foundation_dot_v1_dot_capability__pb2.ExecuteCapabilityResponse.FromString,
+        self.ExecuteSkill = channel.unary_unary(
+            "/hey_robot.model_service.v1.ModelService/ExecuteSkill",
+            request_serializer=hey__robot_dot_model__service_dot_v1_dot_model__service__pb2.ExecuteSkillRequest.SerializeToString,
+            response_deserializer=hey__robot_dot_model__service_dot_v1_dot_model__service__pb2.ExecuteSkillResponse.FromString,
             _registered_method=True,
         )
-        self.CancelCapability = channel.unary_unary(
-            "/hey_robot.capability.v1.CapabilityService/CancelCapability",
-            request_serializer=hey__robot_dot_foundation_dot_v1_dot_capability__pb2.CancelCapabilityRequest.SerializeToString,
-            response_deserializer=hey__robot_dot_foundation_dot_v1_dot_capability__pb2.CancelCapabilityResponse.FromString,
+        self.CancelSkill = channel.unary_unary(
+            "/hey_robot.model_service.v1.ModelService/CancelSkill",
+            request_serializer=hey__robot_dot_model__service_dot_v1_dot_model__service__pb2.CancelSkillRequest.SerializeToString,
+            response_deserializer=hey__robot_dot_model__service_dot_v1_dot_model__service__pb2.CancelSkillResponse.FromString,
             _registered_method=True,
         )
 
 
-class CapabilityServiceServicer:
+class ModelServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
     def GetHealth(self, request, context):
@@ -69,48 +70,48 @@ class CapabilityServiceServicer:
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
-    def ExecuteCapability(self, request, context):
+    def ExecuteSkill(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
-    def CancelCapability(self, request, context):
+    def CancelSkill(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
 
-def add_CapabilityServiceServicer_to_server(servicer, server):
+def add_ModelServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
         "GetHealth": grpc.unary_unary_rpc_method_handler(
             servicer.GetHealth,
-            request_deserializer=hey__robot_dot_foundation_dot_v1_dot_capability__pb2.GetHealthRequest.FromString,
-            response_serializer=hey__robot_dot_foundation_dot_v1_dot_capability__pb2.GetHealthResponse.SerializeToString,
+            request_deserializer=hey__robot_dot_model__service_dot_v1_dot_model__service__pb2.GetHealthRequest.FromString,
+            response_serializer=hey__robot_dot_model__service_dot_v1_dot_model__service__pb2.GetHealthResponse.SerializeToString,
         ),
-        "ExecuteCapability": grpc.unary_unary_rpc_method_handler(
-            servicer.ExecuteCapability,
-            request_deserializer=hey__robot_dot_foundation_dot_v1_dot_capability__pb2.ExecuteCapabilityRequest.FromString,
-            response_serializer=hey__robot_dot_foundation_dot_v1_dot_capability__pb2.ExecuteCapabilityResponse.SerializeToString,
+        "ExecuteSkill": grpc.unary_unary_rpc_method_handler(
+            servicer.ExecuteSkill,
+            request_deserializer=hey__robot_dot_model__service_dot_v1_dot_model__service__pb2.ExecuteSkillRequest.FromString,
+            response_serializer=hey__robot_dot_model__service_dot_v1_dot_model__service__pb2.ExecuteSkillResponse.SerializeToString,
         ),
-        "CancelCapability": grpc.unary_unary_rpc_method_handler(
-            servicer.CancelCapability,
-            request_deserializer=hey__robot_dot_foundation_dot_v1_dot_capability__pb2.CancelCapabilityRequest.FromString,
-            response_serializer=hey__robot_dot_foundation_dot_v1_dot_capability__pb2.CancelCapabilityResponse.SerializeToString,
+        "CancelSkill": grpc.unary_unary_rpc_method_handler(
+            servicer.CancelSkill,
+            request_deserializer=hey__robot_dot_model__service_dot_v1_dot_model__service__pb2.CancelSkillRequest.FromString,
+            response_serializer=hey__robot_dot_model__service_dot_v1_dot_model__service__pb2.CancelSkillResponse.SerializeToString,
         ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-        "hey_robot.capability.v1.CapabilityService", rpc_method_handlers
+        "hey_robot.model_service.v1.ModelService", rpc_method_handlers
     )
     server.add_generic_rpc_handlers((generic_handler,))
     server.add_registered_method_handlers(
-        "hey_robot.capability.v1.CapabilityService", rpc_method_handlers
+        "hey_robot.model_service.v1.ModelService", rpc_method_handlers
     )
 
 
 # This class is part of an EXPERIMENTAL API.
-class CapabilityService:
+class ModelService(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
@@ -129,9 +130,9 @@ class CapabilityService:
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/hey_robot.capability.v1.CapabilityService/GetHealth",
-            hey__robot_dot_foundation_dot_v1_dot_capability__pb2.GetHealthRequest.SerializeToString,
-            hey__robot_dot_foundation_dot_v1_dot_capability__pb2.GetHealthResponse.FromString,
+            "/hey_robot.model_service.v1.ModelService/GetHealth",
+            hey__robot_dot_model__service_dot_v1_dot_model__service__pb2.GetHealthRequest.SerializeToString,
+            hey__robot_dot_model__service_dot_v1_dot_model__service__pb2.GetHealthResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -144,7 +145,7 @@ class CapabilityService:
         )
 
     @staticmethod
-    def ExecuteCapability(
+    def ExecuteSkill(
         request,
         target,
         options=(),
@@ -159,9 +160,9 @@ class CapabilityService:
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/hey_robot.capability.v1.CapabilityService/ExecuteCapability",
-            hey__robot_dot_foundation_dot_v1_dot_capability__pb2.ExecuteCapabilityRequest.SerializeToString,
-            hey__robot_dot_foundation_dot_v1_dot_capability__pb2.ExecuteCapabilityResponse.FromString,
+            "/hey_robot.model_service.v1.ModelService/ExecuteSkill",
+            hey__robot_dot_model__service_dot_v1_dot_model__service__pb2.ExecuteSkillRequest.SerializeToString,
+            hey__robot_dot_model__service_dot_v1_dot_model__service__pb2.ExecuteSkillResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -174,7 +175,7 @@ class CapabilityService:
         )
 
     @staticmethod
-    def CancelCapability(
+    def CancelSkill(
         request,
         target,
         options=(),
@@ -189,9 +190,9 @@ class CapabilityService:
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/hey_robot.capability.v1.CapabilityService/CancelCapability",
-            hey__robot_dot_foundation_dot_v1_dot_capability__pb2.CancelCapabilityRequest.SerializeToString,
-            hey__robot_dot_foundation_dot_v1_dot_capability__pb2.CancelCapabilityResponse.FromString,
+            "/hey_robot.model_service.v1.ModelService/CancelSkill",
+            hey__robot_dot_model__service_dot_v1_dot_model__service__pb2.CancelSkillRequest.SerializeToString,
+            hey__robot_dot_model__service_dot_v1_dot_model__service__pb2.CancelSkillResponse.FromString,
             options,
             channel_credentials,
             insecure,

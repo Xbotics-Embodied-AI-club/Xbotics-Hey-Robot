@@ -17,7 +17,7 @@ def test_agent_templates_define_embodied_persona_and_message_channels() -> None:
 
     assert templates.soul.strip()
     assert (
-        "`request_capability(capability, objective, slots, interrupt, wait_policy)`"
+        "`request_skill(skill, objective, slots, interrupt, wait_policy)`"
         in system_prompt
     )
     assert (
@@ -33,7 +33,7 @@ def test_agent_templates_define_embodied_persona_and_message_channels() -> None:
         in system_prompt
     )
     assert "`wait(reason)`" in system_prompt
-    assert "调用 `request_capability` 执行 `set_gripper`" in system_prompt
+    assert "调用 `request_skill` 执行 `set_gripper`" in system_prompt
     assert "不要输出内部工具名、skill name、skill_id、trace_id" in system_prompt
     assert "request_quick_action" not in system_prompt
     assert "get_last_execution_feedback" not in system_prompt

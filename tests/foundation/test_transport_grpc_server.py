@@ -7,34 +7,34 @@ import pytest
 
 from hey_robot.cli.main import CLI_ACTIONS
 from hey_robot.config import DeploymentConfig
-from hey_robot.foundation.contract.v1 import capability_pb2
+from hey_robot.foundation.contract.v1 import model_service_pb2
 from hey_robot.foundation.transport.grpc.server import (
     DEFAULT_ARM_CALIBRATION_DIR,
     LeRobotVLAExecutor,
-    VLACapabilityService,
-    VLACapabilityServicer,
-    VLNCapabilityService,
-    build_capability_service,
+    ModelServiceServicer,
+    VLAPolicyService,
+    VLNPlannerService,
+    build_model_service,
 )
 
 
 def _spec(settings: dict):
     config = DeploymentConfig.from_dict(
         {
-            "capability_services": {
+            "model_services": {
                 "arm_vla": {
-                    "type": "vla_service",
+                    "type": "vla_policy",
                     "enabled": True,
                     "robot_id": "xlerobot",
                     "target": "127.0.0.1:9090",
-                    "skill_names": ["vla_manipulation"],
+                    "provides": ["vla_manipulation"],
                     "timeout_sec": 5,
                     **settings,
                 }
             }
         }
     )
-    return config.capability_services["arm_vla"]
+    return config.model_services["arm_vla"]
 
 
 def test_vla_executor_health_reports_missing_configuration() -> None:
@@ -403,7 +403,7 @@ def test_vla_executor_reports_control_loop_failure(monkeypatch) -> None:
     assert "ValueError" in result["summary"]
 
 
-def test_vla_capability_servicer_health_execute_cancel() -> None:
+def test_vla_model_servicer_health_execute_cancel() -> None:
     class FakeExecutor:
         def __init__(self) -> None:
             self.executed: list[dict[str, Any]] = []
@@ -432,16 +432,16 @@ def test_vla_capability_servicer_health_execute_cancel() -> None:
         def cancel(self) -> None:
             self.cancelled += 1
 
-    service = VLACapabilityService(
+    service = VLAPolicyService(
         DeploymentConfig.from_dict(
             {
-                "capability_services": {
+                "model_services": {
                     "arm_vla": {
-                        "type": "vla_service",
+                        "type": "vla_policy",
                         "enabled": True,
                         "robot_id": "xlerobot",
                         "target": "127.0.0.1:9090",
-                        "skill_names": ["vla_manipulation"],
+                        "provides": ["vla_manipulation"],
                         "port": 9191,
                         "host": "127.0.0.1",
                         "policy_type": "pi05",
@@ -456,27 +456,27 @@ def test_vla_capability_servicer_health_execute_cancel() -> None:
         service_id="arm_vla",
     )
     fake_executor = FakeExecutor()
-    servicer = VLACapabilityServicer(service.state, cast(Any, fake_executor))
+    servicer = ModelServiceServicer(service.state, cast(Any, fake_executor))
 
     async def run() -> None:
         health = await servicer.GetHealth(
-            capability_pb2.GetHealthRequest(service_id="arm_vla"), None
+            model_service_pb2.GetHealthRequest(service_id="arm_vla"), None
         )
         assert health.busy is False
         assert dict(health.metrics)["policy_type"] == "pi05"
 
         service.state.busy = True
-        busy = await servicer.ExecuteCapability(
-            capability_pb2.ExecuteCapabilityRequest(
+        busy = await servicer.ExecuteSkill(
+            model_service_pb2.ExecuteSkillRequest(
                 service_id="arm_vla", skill_id="skill-1"
             ),
             None,
         )
-        assert busy.failure_mode == "capability_busy"
+        assert busy.failure_mode == "model_service_busy"
 
         service.state.busy = False
-        result = await servicer.ExecuteCapability(
-            capability_pb2.ExecuteCapabilityRequest(
+        result = await servicer.ExecuteSkill(
+            model_service_pb2.ExecuteSkillRequest(
                 service_id="arm_vla",
                 skill_id="skill-2",
                 skill_name="vla_manipulation",
@@ -489,12 +489,12 @@ def test_vla_capability_servicer_health_execute_cancel() -> None:
         assert fake_executor.executed[0]["skill_id"] == "skill-2"
 
         health2 = await servicer.GetHealth(
-            capability_pb2.GetHealthRequest(service_id="arm_vla"), None
+            model_service_pb2.GetHealthRequest(service_id="arm_vla"), None
         )
         assert dict(health2.metrics)["last_result"]["summary"] == "ok"
 
-        cancelled = await servicer.CancelCapability(
-            capability_pb2.CancelCapabilityRequest(
+        cancelled = await servicer.CancelSkill(
+            model_service_pb2.CancelSkillRequest(
                 service_id="arm_vla", skill_id="skill-2"
             ),
             None,
@@ -505,7 +505,7 @@ def test_vla_capability_servicer_health_execute_cancel() -> None:
     asyncio.run(run())
 
 
-def test_vla_capability_service_start_and_stop(monkeypatch) -> None:
+def test_vla_model_service_start_and_stop(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
     class FakeServer:
@@ -533,20 +533,20 @@ def test_vla_capability_service_start_and_stop(monkeypatch) -> None:
     )
     added = {}
     monkeypatch.setattr(
-        "hey_robot.foundation.transport.grpc.server.capability_pb2_grpc.add_CapabilityServiceServicer_to_server",
+        "hey_robot.foundation.transport.grpc.server.model_service_pb2_grpc.add_ModelServiceServicer_to_server",
         lambda servicer, server: added.update({"servicer": servicer, "server": server}),
     )
 
-    service = VLACapabilityService(
+    service = VLAPolicyService(
         DeploymentConfig.from_dict(
             {
-                "capability_services": {
+                "model_services": {
                     "arm_vla": {
-                        "type": "vla_service",
+                        "type": "vla_policy",
                         "enabled": True,
                         "robot_id": "xlerobot",
                         "target": "127.0.0.1:9090",
-                        "skill_names": ["vla_manipulation"],
+                        "provides": ["vla_manipulation"],
                         "port": 9191,
                         "host": "127.0.0.1",
                     }
@@ -567,16 +567,16 @@ def test_vla_capability_service_start_and_stop(monkeypatch) -> None:
     asyncio.run(run())
 
 
-def test_build_capability_service_supports_vln_service() -> None:
+def test_build_model_service_supports_vln_planner() -> None:
     config = DeploymentConfig.from_dict(
         {
-            "capability_services": {
+            "model_services": {
                 "vln_nav": {
-                    "type": "vln_service",
+                    "type": "vln_planner",
                     "enabled": True,
                     "robot_id": "xlerobot",
                     "target": "127.0.0.1:9091",
-                    "skill_names": ["navigate_to", "approach_object"],
+                    "provides": ["navigate_to", "approach_object"],
                     "backend": "internvla_n1_system2",
                     "control_mode": "planner_only",
                     "mock_mode": True,
@@ -585,17 +585,17 @@ def test_build_capability_service_supports_vln_service() -> None:
         }
     )
 
-    service = build_capability_service(config, service_id="vln_nav")
+    service = build_model_service(config, service_id="vln_nav")
 
-    assert isinstance(service, VLNCapabilityService)
+    assert isinstance(service, VLNPlannerService)
     assert service.service_id == "vln_nav"
     assert service.port == 9091
 
 
-def test_build_capability_service_rejects_unknown_type() -> None:
+def test_build_model_service_rejects_unknown_type() -> None:
     config = DeploymentConfig.from_dict(
         {
-            "capability_services": {
+            "model_services": {
                 "bad": {
                     "type": "unknown_service",
                     "enabled": True,
@@ -605,12 +605,12 @@ def test_build_capability_service_rejects_unknown_type() -> None:
         }
     )
 
-    with pytest.raises(ValueError, match="unsupported capability service type"):
-        build_capability_service(config, service_id="bad")
+    with pytest.raises(ValueError, match="unsupported model service type"):
+        build_model_service(config, service_id="bad")
 
 
-def test_capability_service_cli_action_is_registered() -> None:
-    assert CLI_ACTIONS["capability-service"] == "hey_robot.cli.capability_service:main"
+def test_model_service_cli_action_is_registered() -> None:
+    assert CLI_ACTIONS["model-service"] == "hey_robot.cli.model_service:main"
 
 
 def _raise_import_error():
@@ -618,6 +618,6 @@ def _raise_import_error():
 
 
 def _struct(**kwargs):
-    message = capability_pb2.ExecuteCapabilityRequest().arguments
+    message = model_service_pb2.ExecuteSkillRequest().arguments
     message.update(kwargs)
     return message

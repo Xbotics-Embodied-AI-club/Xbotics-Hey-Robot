@@ -406,7 +406,7 @@ class TaskRunManager:
         episode_id = turn.envelope.episode_id
         if not episode_id:
             return
-        if result_tool in {"request_capability", "final_response"} and skill_id:
+        if result_tool in {"request_skill", "final_response"} and skill_id:
             active_task = self.task_runs.load_active(episode_id)
             already_bound = bool(
                 active_task

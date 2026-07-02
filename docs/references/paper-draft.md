@@ -38,7 +38,7 @@ Hey Robot 的核心观点是：LLM 循环只是具身系统中的一个认知组
 
 LimX COSA 等系统提出了一个重要方向：具身机器人需要 Agentic OS，而不是单个大模型。这样的系统需要管理认知、技能、记忆、感知和运动。
 
-Hey Robot 与这个方向一致，但范围更窄。COSA 面向完整人形机器人自主，包括全身控制、移动操作、类小脑基础模型、实时运动生成和全尺寸人形机器人部署。Hey Robot 当前目标是一个 COSA-aligned XLeRobot runtime：上层强调任务理解、对话连续性、主动感知和恢复；中层强调 semantic Skill OS、技能契约、调度和组合；下层通过 VLA capability service 以及未来 foundation services 连接真实机器人执行。
+Hey Robot 与这个方向一致，但范围更窄。COSA 面向完整人形机器人自主，包括全身控制、移动操作、类小脑基础模型、实时运动生成和全尺寸人形机器人部署。Hey Robot 当前目标是一个 COSA-aligned XLeRobot runtime：上层强调任务理解、对话连续性、主动感知和恢复；中层强调 semantic Skill OS、技能契约、调度和组合；下层通过 VLA ModelService 以及未来 foundation services 连接真实机器人执行。
 
 Hey Robot 不主张解决完整人形小脑基础模型。它更像是小型机器人平台上的 COSA-aligned 三层运行时，重点是：
 
@@ -110,12 +110,12 @@ User Channel
       -> MemoryBroker
       -> RobotAgentCore
           -> AgentRuntime
-          -> request_capability / request_perception
+          -> request_skill / request_perception
           -> SkillGateway
           -> SkillIntent
   -> SkillControllerService
       -> SkillContractRuntime
-      -> CapabilityRuntime
+      -> ModelServiceRegistry
   -> RobotService / RobotRuntime / CapabilityService
   -> RobotObservation / RobotStatus / SkillResult
 ```
@@ -168,7 +168,7 @@ Hey Robot 将对话状态与任务状态绑定，而不是只保存聊天历史�
 - 必需资源是否可用（arm、gripper、camera、base）。
 - 机器人状态是否允许执行（电量、急停、硬件就绪、readiness gate）。
 - 是否与正在执行的技能发生资源冲突。
-- capability service 是否可用（如 VLA foundation backend）。
+- ModelService 是否可用（如 VLA foundation backend）。
 
 这相当于把 LLM 的动作提议放进确定性的安全和可行性门控。
 
@@ -219,7 +219,7 @@ restore → build → run → save
 
 ### 6.3 Semantic Skill OS
 
-当前 XLeRobot 代码中的 skill surface 已先收敛到真实可验证能力。real/sim 配置默认启用 11 个非 VLA skill；VLA 入口 `vla_manipulation` 已注册，并可通过独立 capability service 部署，但默认不加入 `skills.enabled`。
+当前 XLeRobot 代码中的 skill surface 已先收敛到真实可验证能力。real/sim 配置默认启用 11 个非 VLA skill；VLA 入口 `vla_manipulation` 已注册，并可通过独立 ModelService 部署，但默认不加入 `skills.enabled`。
 
 | Skill | 当前状态 | 说明 |
 | --- | --- | --- |
@@ -238,11 +238,11 @@ restore → build → run → save
 
 因此当前系统可以验证感知、底盘、跟随、安全、机械臂和夹爪原子能力；暂不把 VLA 抓取、放置、交付等自然语言操作任务暴露给 Agent。后续 VLA 稳定后，`vla_manipulation` 可以加入 deployment 的 `skills.enabled`。
 
-`SkillContractRuntime` 在每个 skill 执行前检查：skill 存在性、必需参数、resource lock（arm/gripper/camera/base）、电量阈值、急停状态、readiness gate 和 capability service availability。这相当于把 LLM 的动作提议放进确定性的安全和可行性门控。
+`SkillContractRuntime` 在每个 skill 执行前检查：skill 存在性、必需参数、resource lock（arm/gripper/camera/base）、电量阈值、急停状态、readiness gate 和 ModelService availability。这相当于把 LLM 的动作提议放进确定性的安全和可行性门控。
 
-### 6.4 Capability Services
+### 6.4 ModelServices
 
-VLA 等长时间运行、模型驱动的能力通过独立的 `capability_service` 暴露，使用 gRPC transport。当前 `arm_vla` capability service 封装 LeRobot policy server，通过 `ExecuteCapability` RPC 调用。机器人驱动专注硬件执行边界，capability services 通过 deployment profile 启用、关闭或替换。
+VLA 等长时间运行、模型驱动的能力通过独立的 `model_service` 暴露，使用 gRPC transport。当前 `arm_vla` ModelService 封装 LeRobot policy server，通过 `ExecuteCapability` RPC 调用。机器人驱动专注硬件执行边界，ModelServices 通过 deployment profile 启用、关闭或替换。
 
 `classic backend` 在本文中只作为硬件 bring-up、fallback 和 ablation baseline（实验条件 C7）。最终系统呈现以 foundation backend 为主。
 
@@ -265,7 +265,7 @@ Recovery state 进入 `TaskSessionView`，对 UI 可见。未解决 recovery 前
 
 ### 6.7 任务驾驶舱
 
-产品化视图 `TaskSessionView` 通过 `/cockpit` API 提供聚合的任务状态、timeline、scene evidence 和 recovery 信息。当前代码中没有独立的 `request_quick_action` Agent 工具；用户、语音和 Web 入口仍通过 Gateway、Agent、`request_capability`、`SkillGateway` 和 SkillController 这条主链路提交机器人能力请求。
+产品化视图 `TaskSessionView` 通过 `/cockpit` API 提供聚合的任务状态、timeline、scene evidence 和 recovery 信息。当前代码中没有独立的 `request_quick_action` Agent 工具；用户、语音和 Web 入口仍通过 Gateway、Agent、`request_skill`、`SkillGateway` 和 SkillController 这条主链路提交机器人能力请求。
 
 ## 7. 实验设计
 
@@ -343,7 +343,7 @@ Hey Robot 和 COSA-like Agentic OS 的共同点是：都认为机器人不能只
 - 恢复剧本仍是手工设计。
 - 语义记忆还不是完整世界模型。
 - 交互状态目前主要覆盖任务相关对话，不追求开放域闲聊。
-- 真实机器人成功率强依赖机械臂、夹爪、相机、VLA capability service 和后续 foundation services 的稳定性。
+- 真实机器人成功率强依赖机械臂、夹爪、相机、VLA ModelService 和后续 foundation services 的稳定性。
 
 ### 8.5 未来工作
 

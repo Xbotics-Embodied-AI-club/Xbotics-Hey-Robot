@@ -18,7 +18,7 @@ _MOTION_CAMERA_MAX_VALID_AGE_MS = 30_000
 
 @dataclass(frozen=True)
 class SkillGatewayRequest:
-    capability: str
+    skill: str
     objective: str
     slots: dict[str, Any] | None = None
     interrupt: bool = False
@@ -59,26 +59,24 @@ class SkillGateway:
 
     async def submit(self, request: SkillGatewayRequest) -> str:
         task_text = self.get_task()
-        capability = (request.capability or "").strip()
-        if not capability:
-            raise ValueError("capability must not be empty")
+        skill = (request.skill or "").strip()
+        if not skill:
+            raise ValueError("skill must not be empty")
 
         objective = (request.objective or "").replace("__TASK__", task_text).strip()
         if not objective:
             raise ValueError("objective must not be empty")
 
         slots = dict(request.slots or {})
-        if self._recovery_required() and not is_recovery_safe_capability(
-            capability, slots
-        ):
+        if self._recovery_required() and not is_recovery_safe_capability(skill, slots):
             raise RuntimeError(
                 "recovery required; inspect, stop, reset, or open the gripper before issuing another skill"
             )
 
-        contract = self.skill_catalog.get(capability)
+        contract = self.skill_catalog.get(skill)
         envelope = self.current_envelope()
         safety_decision = evaluate_skill_request(
-            capability=capability,
+            capability=skill,
             objective=objective,
             contract=contract,
             task=task_text,
@@ -94,14 +92,14 @@ class SkillGateway:
             "actuate",
         }:
             camera_block = _check_camera_health_for_motion(
-                skill_name=capability,
+                skill_name=skill,
                 episode_id=envelope.episode_id,
                 task_runtime=self.task_runtime,
             )
             if camera_block:
                 raise RuntimeError(camera_block)
             consecutive_block = _check_consecutive_motion(
-                skill_name=capability,
+                skill_name=skill,
                 runtime_state=self.runtime_state,
             )
             if consecutive_block:
@@ -109,7 +107,7 @@ class SkillGateway:
 
         intent = SkillIntent(
             envelope=envelope,
-            name=capability,
+            name=skill,
             objective=objective,
             arguments=slots,
             interrupt=bool(request.interrupt),
@@ -135,12 +133,12 @@ class SkillGateway:
         if wait_policy == "return_handle":
             return (
                 f"{request.result_prefix}_submitted: "
-                f"skill_id={intent.skill_id} capability={intent.name}"
+                f"skill_id={intent.skill_id} skill={intent.name}"
             )
         if wait_policy == "wait_acceptance":
             return (
                 f"{request.result_prefix}_accepted: "
-                f"skill_id={intent.skill_id} capability={intent.name}"
+                f"skill_id={intent.skill_id} skill={intent.name}"
             )
         if wait_policy != "wait_result":
             raise ValueError(f"unknown wait_policy: {request.wait_policy}")

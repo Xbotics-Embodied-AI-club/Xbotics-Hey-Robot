@@ -111,7 +111,7 @@ def test_xlerobot_deployment_uses_native_skill_policy() -> None:
         config.robots["xlerobot"].settings["components"]["arm"]["type"] == "so101_arm"
     )
     assert "vla" not in config.robots["xlerobot"].settings["components"]
-    assert config.capability_services == {}
+    assert config.model_services == {}
     assert config.policies["embodied_skills"].freq_hz == 1.0
 
 
@@ -179,7 +179,7 @@ def test_xlerobot_executor_rejects_direct_perception_execution() -> None:
     assert result.data["failure_mode"] == "wrong_execution_boundary"
 
 
-def test_xlerobot_executor_rejects_legacy_skill_names() -> None:
+def test_xlerobot_executor_rejects_legacy_provides() -> None:
     class FakeClient:
         pass
 

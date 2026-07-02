@@ -45,10 +45,10 @@ def test_build_provider_resolves_model_from_env(monkeypatch) -> None:
 def test_required_tool_choice_rejects_text_only_provider_response() -> None:
     response = _validate_required_tool_call(
         ReasoningResponse(
-            content="```tool_call request_capability({})```", finish_reason="stop"
+            content="```tool_call request_skill({})```", finish_reason="stop"
         ),
         "required",
-        [{"type": "function", "function": {"name": "request_capability"}}],
+        [{"type": "function", "function": {"name": "request_skill"}}],
     )
 
     assert response.finish_reason == "error"
@@ -169,9 +169,9 @@ def test_assistant_history_preserves_tool_calls() -> None:
         tool_calls=[
             ReasoningToolCall(
                 id="call_1",
-                name="request_capability",
+                name="request_skill",
                 arguments={
-                    "capability": "camera_inspect",
+                    "skill": "camera_inspect",
                     "objective": "capture front view",
                     "interrupt": False,
                 },
@@ -183,7 +183,7 @@ def test_assistant_history_preserves_tool_calls() -> None:
 
     assert payload["role"] == "assistant"
     assert payload["tool_calls"][0]["id"] == "call_1"
-    assert payload["tool_calls"][0]["function"]["name"] == "request_capability"
+    assert payload["tool_calls"][0]["function"]["name"] == "request_skill"
 
 
 def test_build_provider_deterministic_feedback_purpose() -> None:

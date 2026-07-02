@@ -6,36 +6,36 @@ import grpc
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct
 
-from hey_robot.config import CapabilityServiceSpec
+from hey_robot.config import ModelServiceSpec
 from hey_robot.foundation.clients.models import (
-    CapabilityExecutionRequest,
-    CapabilityExecutionResult,
-    CapabilityHealth,
+    ServiceHealth,
+    ServiceInvocationRequest,
+    ServiceInvocationResult,
 )
-from hey_robot.foundation.contract.v1 import capability_pb2, capability_pb2_grpc
+from hey_robot.foundation.contract.v1 import model_service_pb2, model_service_pb2_grpc
 
 
-class GrpcCapabilityClient:
-    def __init__(self, service_id: str, spec: CapabilityServiceSpec) -> None:
+class GrpcModelServiceClient:
+    def __init__(self, service_id: str, spec: ModelServiceSpec) -> None:
         if not spec.target:
-            raise ValueError(f"capability service {service_id} missing gRPC target")
+            raise ValueError(f"model service {service_id} missing gRPC target")
         self.service_id = service_id
         self.spec = spec
         self.target = str(spec.target).strip()
-        # 标准化 gRPC 目标地址：移除 grpc:// 前缀（gRPC 不识别该 scheme）
+        # gRPC targets do not accept a grpc:// scheme.
         self.target = self.target.removeprefix("grpc://")
         self._channel = grpc.aio.insecure_channel(self.target)
-        self._stub = capability_pb2_grpc.CapabilityServiceStub(self._channel)
+        self._stub = model_service_pb2_grpc.ModelServiceStub(self._channel)
 
-    async def health(self) -> CapabilityHealth:
+    async def health(self) -> ServiceHealth:
         timeout = float(self.spec.settings.get("health_timeout_sec", 2.0))
         try:
             response = await self._stub.GetHealth(
-                capability_pb2.GetHealthRequest(service_id=self.service_id),
+                model_service_pb2.GetHealthRequest(service_id=self.service_id),
                 timeout=timeout,
             )
         except grpc.aio.AioRpcError as exc:
-            return CapabilityHealth(
+            return ServiceHealth(
                 name=self.service_id,
                 online=False,
                 loaded=False,
@@ -44,7 +44,7 @@ class GrpcCapabilityClient:
                 error=f"{exc.code().name}: {exc.details()}",
                 error_code=exc.code().name,
             )
-        return CapabilityHealth(
+        return ServiceHealth(
             name=response.name or self.service_id,
             online=bool(response.online),
             loaded=bool(response.loaded),
@@ -58,9 +58,9 @@ class GrpcCapabilityClient:
         )
 
     async def execute(
-        self, request: CapabilityExecutionRequest
-    ) -> CapabilityExecutionResult:
-        payload = capability_pb2.ExecuteCapabilityRequest(
+        self, request: ServiceInvocationRequest
+    ) -> ServiceInvocationResult:
+        payload = model_service_pb2.ExecuteSkillRequest(
             service_id=request.service_id,
             trace_id=request.intent.envelope.trace_id,
             episode_id=request.intent.envelope.episode_id or "",
@@ -73,19 +73,19 @@ class GrpcCapabilityClient:
             metadata=_dict_to_struct(dict(request.intent.metadata)),
         )
         try:
-            response = await self._stub.ExecuteCapability(
+            response = await self._stub.ExecuteSkill(
                 payload, timeout=request.timeout_sec + 5.0
             )
         except grpc.aio.AioRpcError as exc:
-            return CapabilityExecutionResult(
+            return ServiceInvocationResult(
                 success=False,
                 status="failed",
-                summary=exc.details() or "capability execution failed",
-                failure_mode="capability_unavailable",
+                summary=exc.details() or "model service invocation failed",
+                failure_mode="model_service_unavailable",
                 error=exc.details() or None,
                 error_code=exc.code().name,
             )
-        return CapabilityExecutionResult(
+        return ServiceInvocationResult(
             success=bool(response.success),
             status=response.status or ("completed" if response.success else "failed"),
             summary=response.summary or ("completed" if response.success else "failed"),
@@ -96,8 +96,8 @@ class GrpcCapabilityClient:
         )
 
     async def cancel(self, skill_id: str) -> None:
-        await self._stub.CancelCapability(
-            capability_pb2.CancelCapabilityRequest(
+        await self._stub.CancelSkill(
+            model_service_pb2.CancelSkillRequest(
                 service_id=self.service_id, skill_id=skill_id
             ),
             timeout=2.0,
@@ -111,11 +111,7 @@ def _dict_to_struct(value: dict[str, Any]) -> Struct:
 
 
 def _struct_to_dict(value: Struct) -> dict[str, Any]:
-    """使用 MessageToDict 递归转换嵌套 protobuf Struct 为纯 Python dict。
-
-    dict(value) 只转换第一层，内层的 Struct/ListValue 仍为 protobuf 对象，
-    导致 isinstance(x, dict) / isinstance(x, list) 检查失败。
-    """
+    """Recursively convert a protobuf Struct into plain Python values."""
     if value is None:
         return {}
     return MessageToDict(value, preserving_proto_field_name=True)  # type: ignore[no-any-return]

@@ -267,7 +267,7 @@ robots:
     safety:
       max_abs_action: null
 
-capability_services: {}
+model_services: {}
 
 policies:
   embodied_skills:

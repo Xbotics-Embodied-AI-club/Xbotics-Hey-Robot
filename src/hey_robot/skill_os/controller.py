@@ -11,9 +11,9 @@ from hey_robot.config import DeploymentConfig, PolicySpec
 from hey_robot.events import EventKind, RuntimeEvent
 from hey_robot.events.bus import BusEventPublisher
 from hey_robot.foundation.clients import (
-    CapabilityExecutionRequest,
-    CapabilityExecutionResult,
-    CapabilityRuntime,
+    ModelServiceRegistry,
+    ServiceInvocationRequest,
+    ServiceInvocationResult,
 )
 from hey_robot.human_follow import HumanFollowServiceClient
 from hey_robot.logging import HeyRobotLogger
@@ -32,7 +32,7 @@ from hey_robot.skill_os.composition import SkillExecutionPlan
 from hey_robot.skill_os.context import SkillContext
 from hey_robot.skill_os.contracts import SkillContractRuntime
 from hey_robot.skill_os.event_sink import SkillEventSink
-from hey_robot.skill_os.ports import CapabilityPort, PerceptionPort, RobotActionPort
+from hey_robot.skill_os.ports import ModelServicePort, PerceptionPort, RobotActionPort
 from hey_robot.skill_os.registry import registry_from_config
 from hey_robot.skill_os.runtime import SkillInvoke, SkillRuntime
 from hey_robot.skill_os.scheduler import SkillRun, SkillScheduler
@@ -76,7 +76,7 @@ class SkillControllerService:
             contracts=self.contracts,
             runtime_dir=config.resources.runtime_dir,
         )
-        self.capabilities = CapabilityRuntime(config)
+        self.model_services = ModelServiceRegistry(config)
         self.states = {
             policy_id: _SkillControllerState(
                 spec=spec,
@@ -677,22 +677,24 @@ class SkillControllerService:
             "message": step_summary or f"{name} completed",
         }
 
-    async def _invoke_capability(
+    async def _invoke_model_service(
         self,
         run: SkillRun,
         name: str,
         _arguments: dict[str, Any],
-    ) -> CapabilityExecutionResult:
-        capability = self.capabilities.service_for(name, run.intent.envelope.robot_id)
-        if capability is None:
-            raise RuntimeError(f"{name} requires a deployed capability service")
-        service_id, spec, client = capability
+    ) -> ServiceInvocationResult:
+        model_service = self.model_services.service_for(
+            name, run.intent.envelope.robot_id
+        )
+        if model_service is None:
+            raise RuntimeError(f"{name} requires a deployed model service")
+        service_id, spec, client = model_service
         health = await client.health()
         if not health.online or not health.loaded or health.busy:
             reason = health.error or (
-                f"capability {service_id} is busy"
+                f"model service {service_id} is busy"
                 if health.busy
-                else f"capability {service_id} is not deployed or model is not loaded"
+                else f"model service {service_id} is not deployed or model is not loaded"
             )
             raise RuntimeError(reason)
         # 将 skill 层 enriched 的参数（如 observation/images）合并到 intent，
@@ -707,10 +709,10 @@ class SkillControllerService:
                 RobotSkillAction(name, dict(_arguments)),
             ),
             strategy="runtime_trace",
-            notes=("Recorded from actual capability execution.",),
+            notes=("Recorded from actual model service invocation.",),
         )
         result = await client.execute(
-            CapabilityExecutionRequest(
+            ServiceInvocationRequest(
                 service_id=service_id,
                 intent=run.intent,
                 contract=contract,
@@ -877,8 +879,8 @@ class SkillControllerService:
             robot_id=run.intent.envelope.robot_id,
             robot=robot,
             perception=PerceptionPort(robot),
-            capabilities=CapabilityPort(
-                lambda name, arguments: self._invoke_capability(run, name, arguments)
+            model_services=ModelServicePort(
+                lambda name, arguments: self._invoke_model_service(run, name, arguments)
             ),
             observation=state.latest_observation,
             current_observation=lambda: state.latest_observation,

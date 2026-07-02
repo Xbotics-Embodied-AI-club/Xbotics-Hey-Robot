@@ -8,6 +8,8 @@ omit =
     src/hey_robot/monitoring/*
     src/hey_robot/providers/openai_compat_provider.py
     src/hey_robot/channels/feishu/transport.py
+    src/hey_robot/foundation/contract/v1/model_service_pb2.py
+    src/hey_robot/foundation/contract/v1/model_service_pb2_grpc.py
     src/hey_robot/robots/components/*
     src/hey_robot/robots/lekiwi/*
     src/hey_robot/robots/so101/*

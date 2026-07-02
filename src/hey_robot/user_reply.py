@@ -21,8 +21,8 @@ def present_tool_result_for_user(
 ) -> str | None:
     """Convert internal tool results into user-facing text."""
 
-    if tool == "request_capability":
-        return _present_capability_result(args=args, result=result, success=success)
+    if tool == "request_skill":
+        return _present_skill_result(args=args, result=result, success=success)
     if tool == "request_perception":
         return _present_perception_result(result)
     payload = _json_object(result)
@@ -83,12 +83,12 @@ def present_runtime_event_for_user(*, kind: str, payload: dict[str, Any]) -> str
     return None
 
 
-def _present_capability_result(
+def _present_skill_result(
     *, args: dict[str, Any], result: str, success: bool | None
 ) -> str | None:
-    capability = str(args.get("capability") or args.get("name") or "").strip()
+    skill = str(args.get("skill") or args.get("name") or "").strip()
     payload = _json_object(result)
-    if capability == "inspect_scene":
+    if skill == "inspect_scene":
         if payload is not None:
             return _present_inspect_scene_payload(payload, success=success)
         clean = _clean_user_text(result)
@@ -103,7 +103,7 @@ def _present_capability_result(
         return clean
     if success is False:
         return "这个动作没有成功完成。"
-    if capability:
+    if skill:
         return "动作已经完成。"
     return None
 

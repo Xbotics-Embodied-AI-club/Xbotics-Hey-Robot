@@ -508,7 +508,7 @@ def test_task_runtime_result_text_for_agent_includes_normal_task_continuation_af
             "skill": "vla_manipulation",
             "backend": "foundation",
             "implementation_name": "vla_manipulation",
-            "implementation_kind": "capability_service",
+            "implementation_kind": "model_service",
         },
     )
     runtime.record_scene_memory(
@@ -999,7 +999,7 @@ def test_task_runtime_does_not_create_second_attempt_for_completed_skill_turn(
 
     runtime.observe_turn_result(
         turn=turn,
-        result_tool="request_capability",
+        result_tool="request_skill",
         reply_text="stopped",
         task_finished=True,
         skill_id="skill1",

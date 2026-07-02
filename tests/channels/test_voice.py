@@ -538,7 +538,7 @@ def test_voice_channel_does_not_speak_internal_execution_feedback(monkeypatch) -
                 envelope=Envelope(channel="voice"),
                 text="Execution feedback for skill skill1:\n- subgoal_success: True",
                 final=True,
-                metadata={"tool": "request_capability"},
+                metadata={"tool": "request_skill"},
             )
         )
     )
@@ -570,7 +570,7 @@ def test_voice_channel_does_not_speak_internal_tool_summary(monkeypatch) -> None
                 envelope=Envelope(channel="voice"),
                 text="scene inspected",
                 final=True,
-                metadata={"tool": "request_capability"},
+                metadata={"tool": "request_skill"},
             )
         )
     )

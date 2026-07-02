@@ -23,7 +23,7 @@ Hey Robot 是一个面向真实机器人部署的具身 Agent runtime。它以 X
 - 支持 MuJoCo 仿真和 XLeRobot 真机部署。
 - 支持 Web、CLI、语音、飞书等用户入口。
 - 内置 task cockpit：展示任务状态、timeline、scene evidence 和 recovery。
-- VLA 能力通过独立 capability service 接入，不塞进 robot driver。
+- VLA 能力通过独立 ModelService 接入，不塞进 robot driver。
 - 支持 execution feedback、resource gate、readiness gate、timeout 和恢复流程。
 
 ## 架构
@@ -48,9 +48,9 @@ flowchart TD
 
 - `Robot` 只表示身体和硬件执行边界。
 - `Skill` 是 Agent 调用机器人能力的统一入口。
-- Agent 通过 `request_capability` 调用机器人 skill，不直接提交 `RobotAction`。
+- Agent 通过 `request_skill` 调用机器人 skill，不直接提交 `RobotAction`。
 - `RobotService / RobotRuntime / PerceptionService` 负责 observation 与相机帧发布。
-- VLA 能力通过独立 capability service 接入，当前作为可选扩展能力逐步验证。
+- VLA 能力通过独立 ModelService 接入，当前作为可选扩展能力逐步验证。
 
 ## 快速开始
 
@@ -154,7 +154,7 @@ move_arm_joints
 set_gripper
 ```
 
-VLA 能力作为可选扩展能力接入，建议在 capability service 稳定后再开放给 Agent 使用。
+VLA 能力作为可选扩展能力接入，建议在 ModelService 稳定后再开放给 Agent 使用。
 
 ## 安全提示
 
@@ -211,7 +211,7 @@ frontend/shared/            Web 前端公共样式和脚本
 proto/                      capability protobuf 协议源文件
 src/hey_robot/cognition/    Agentic cognition、主循环、核心决策、任务状态
 src/hey_robot/skill_os/     Skill 注册、合约、调度控制器和内置技能
-src/hey_robot/foundation/   VLA/VLN capability service、catalog 与 gRPC transport
+src/hey_robot/foundation/   VLA/VLN ModelService、catalog 与 gRPC transport
 src/hey_robot/robot_runtime/ Robot runtime 和机器人驱动
 src/hey_robot/robot_runtime/observations/  观察流水线和运行时感知快照
 src/hey_robot/cognition/perception/        场景理解

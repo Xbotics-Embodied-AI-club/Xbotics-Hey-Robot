@@ -77,7 +77,7 @@ def test_long_term_memory_query_prefers_latest_skill_experience_for_same_argumen
         key="vla_manipulation",
         summary='Execution feedback:\n- outcome: failed\n- failure_reason: "unsupported mock skill"',
         metadata={
-            "tool": "request_capability",
+            "tool": "request_skill",
             "success": True,
             "arguments": {
                 "name": "vla_manipulation",

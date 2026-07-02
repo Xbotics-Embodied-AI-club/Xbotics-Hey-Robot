@@ -3,12 +3,12 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from hey_robot.foundation.clients import CapabilityExecutionResult
+from hey_robot.foundation.clients import ServiceInvocationResult
 
 RobotInvoker = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
-CapabilityInvoker = Callable[
+ModelServiceInvoker = Callable[
     [str, dict[str, Any]],
-    Awaitable[CapabilityExecutionResult],
+    Awaitable[ServiceInvocationResult],
 ]
 
 
@@ -68,11 +68,11 @@ class PerceptionPort:
         return await self.run("human_follow", arguments)
 
 
-class CapabilityPort:
-    def __init__(self, invoke: CapabilityInvoker) -> None:
+class ModelServicePort:
+    def __init__(self, invoke: ModelServiceInvoker) -> None:
         self._invoke = invoke
 
     async def call(
         self, name: str, arguments: dict[str, Any]
-    ) -> CapabilityExecutionResult:
+    ) -> ServiceInvocationResult:
         return await self._invoke(name, dict(arguments))

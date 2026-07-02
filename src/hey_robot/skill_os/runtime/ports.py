@@ -16,7 +16,7 @@ class SkillOSPort(Protocol):
     ) -> SkillResult: ...
 
 
-class FoundationCapabilityPort(Protocol):
+class ModelServiceRuntimePort(Protocol):
     async def execute(
         self,
         service_id: str,

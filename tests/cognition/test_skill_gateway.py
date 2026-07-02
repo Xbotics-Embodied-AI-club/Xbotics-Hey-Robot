@@ -118,7 +118,7 @@ def test_skill_gateway_nonblocking_wait_policies(
     result = asyncio.run(
         gateway.submit(
             SkillGatewayRequest(
-                capability="inspect_scene",
+                skill="inspect_scene",
                 objective="inspect current scene",
                 wait_policy=wait_policy,  # type: ignore[arg-type]
             )
@@ -126,7 +126,7 @@ def test_skill_gateway_nonblocking_wait_policies(
     )
 
     assert result.startswith(expected_prefix)
-    assert "capability=inspect_scene" in result
+    assert "skill=inspect_scene" in result
 
 
 def test_skill_gateway_wait_result_resolves_and_clears_pending_future() -> None:
@@ -141,7 +141,7 @@ def test_skill_gateway_wait_result_resolves_and_clears_pending_future() -> None:
     result = asyncio.run(
         gateway.submit(
             SkillGatewayRequest(
-                capability="inspect_scene",
+                skill="inspect_scene",
                 objective="inspect current scene",
                 wait_policy="wait_result",
             )
@@ -159,7 +159,7 @@ def test_skill_gateway_recovery_guard_blocks_unsafe_skill() -> None:
         asyncio.run(
             gateway.submit(
                 SkillGatewayRequest(
-                    capability="set_gripper",
+                    skill="set_gripper",
                     objective="close the gripper",
                     slots={"action": "close"},
                     enforce_motion_guards=False,

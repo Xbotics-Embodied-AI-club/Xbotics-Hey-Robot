@@ -113,13 +113,13 @@ class _VLNNavigationSkill(BaseSkill):
     capability_name = ""
 
     async def execute(self, ctx, arguments):
-        if ctx.capabilities is None:
+        if ctx.model_services is None:
             return SkillResult(
                 success=False,
-                summary=f"{self.spec.name} requires a foundation VLN capability",
+                summary=f"{self.spec.name} requires a VLN model service",
                 status="failed",
-                failure_mode="capability_unavailable",
-                error="foundation capability port is unavailable",
+                failure_mode="model_service_unavailable",
+                error="model service port is unavailable",
             )
         max_steps = max(1, int(arguments.get("max_steps") or 1))
         execute_primitives = bool(arguments.get("execute_primitives", True))
@@ -129,7 +129,7 @@ class _VLNNavigationSkill(BaseSkill):
 
         for step_index in range(max_steps):
             payload = _vln_payload(ctx, arguments)
-            result = await ctx.capabilities.call(self.capability_name, payload)
+            result = await ctx.model_services.call(self.capability_name, payload)
             planner_data = _extract_vln_planner(result)
             command: PrimitiveCommand | None = None
             try:
@@ -241,7 +241,7 @@ class NavigateToSkill(_VLNNavigationSkill):
         required_resources=("camera",),
         dependencies=("inspect_scene",),
         driver_primitives=("move_base", "turn_base", "stop_motion"),
-        external_capability="navigate_to",
+        required_model_service="navigate_to",
         safety_level="motion",
         timeout_sec=60.0,
         agent_visible=True,
@@ -274,7 +274,7 @@ class ApproachObjectSkill(_VLNNavigationSkill):
         required_resources=("camera",),
         dependencies=("inspect_scene",),
         driver_primitives=("move_base", "turn_base", "stop_motion"),
-        external_capability="approach_object",
+        required_model_service="approach_object",
         safety_level="motion",
         timeout_sec=60.0,
         agent_visible=True,

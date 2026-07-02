@@ -1,27 +1,27 @@
-from hey_robot.foundation.contract.v1.capability_pb2 import (
-    CancelCapabilityRequest,
-    CancelCapabilityResponse,
-    ExecuteCapabilityRequest,
-    ExecuteCapabilityResponse,
+from hey_robot.foundation.contract.v1.model_service_pb2 import (
+    CancelSkillRequest,
+    CancelSkillResponse,
+    ExecuteSkillRequest,
+    ExecuteSkillResponse,
     GetHealthRequest,
     GetHealthResponse,
 )
-from hey_robot.foundation.contract.v1.capability_pb2_grpc import (
-    CapabilityService,
-    CapabilityServiceServicer,
-    CapabilityServiceStub,
-    add_CapabilityServiceServicer_to_server,
+from hey_robot.foundation.contract.v1.model_service_pb2_grpc import (
+    ModelService,
+    ModelServiceServicer,
+    ModelServiceStub,
+    add_ModelServiceServicer_to_server,
 )
 
 __all__ = [
-    "CancelCapabilityRequest",
-    "CancelCapabilityResponse",
-    "CapabilityService",
-    "CapabilityServiceServicer",
-    "CapabilityServiceStub",
-    "ExecuteCapabilityRequest",
-    "ExecuteCapabilityResponse",
+    "CancelSkillRequest",
+    "CancelSkillResponse",
+    "ExecuteSkillRequest",
+    "ExecuteSkillResponse",
     "GetHealthRequest",
     "GetHealthResponse",
-    "add_CapabilityServiceServicer_to_server",
+    "ModelService",
+    "ModelServiceServicer",
+    "ModelServiceStub",
+    "add_ModelServiceServicer_to_server",
 ]

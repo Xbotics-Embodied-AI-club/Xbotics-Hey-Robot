@@ -35,7 +35,7 @@ _PRODUCTION_TOOL_MODULES = frozenset(
         "get_robot_status",
         "get_task_context",
         "propose_capability",
-        "request_capability",
+        "request_skill",
         "request_perception",
         "search_memory",
         "wait",

@@ -10,7 +10,7 @@ from hey_robot.skill_os.context import SkillContext
 from hey_robot.skill_os.contracts import SkillContractDecision, SkillContractRuntime
 from hey_robot.skill_os.registry import SkillRegistry
 from hey_robot.skill_os.runtime.ports import (
-    FoundationCapabilityPort,
+    ModelServiceRuntimePort,
     RobotRuntimePort,
     SkillOSPort,
 )
@@ -105,7 +105,7 @@ class SkillRuntime:
 
 
 __all__ = [
-    "FoundationCapabilityPort",
+    "ModelServiceRuntimePort",
     "RobotRuntimePort",
     "SkillContextFactory",
     "SkillInvoke",

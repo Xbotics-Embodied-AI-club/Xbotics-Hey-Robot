@@ -24,7 +24,7 @@
 
 - 新增硬件原语时，需要扩展 Driver 和对应执行适配器；
 - 新增传感器能力时，需要扩展感知或 Driver 适配器；
-- 新增外部模型或服务时，需要实现 capability service，并在配置中启用；
+- 新增外部模型或服务时，需要实现 ModelService，并在配置中启用；
 - 只有底层能力已经存在时，Skill 才能只靠组合获得新语义能力。
 
 ## 2. 唯一运行链路
@@ -39,7 +39,7 @@ deployment skills.modules
   -> SkillRuntime.validate / execute
   -> BaseSkill.execute
   -> SkillContext ports
-  -> Driver / Perception / Capability Service
+  -> Driver / Perception / ModelService
 ```
 
 系统没有静态默认 Skill catalog、兼容 Registry 或第二执行器。`BaseSkill.spec` 是契约的唯一事实源，`SkillRuntime.execute()` 是顶层和嵌套 Skill 的唯一执行入口。
@@ -118,7 +118,7 @@ Skill 只能通过以下端口访问系统能力：
 ```text
 ctx.robot          已有机器人动作
 ctx.perception     已有感知能力
-ctx.capabilities   已配置的外部能力服务
+ctx.model_services   已配置的外部能力服务
 ctx.invoke         其他已注册 Skill
 ```
 
@@ -140,7 +140,7 @@ ctx.invoke         其他已注册 Skill
 - `required_resources`：如 `camera`、`base`、`arm`、`gripper`；
 - `dependencies`：执行时调用的子 Skill；
 - `driver_primitives`：该 Skill 直接需要当前 robot driver 支持的运行时原语；
-- `external_capability`：该 Skill 直接依赖的外部服务能力；
+- `required_model_service`：该 Skill 直接依赖的外部服务能力；
 - `supported_robots`：支持的机器人族；
 - `safety_level`：`observe`、`normal`、`motion`、`stop` 等；
 - `timeout_sec`：运行上限；
@@ -196,9 +196,9 @@ skills:
 
 需要：
 
-1. 实现 capability service；
+1. 实现 ModelService；
 2. 在配置中声明该服务提供的能力名；
-3. 创建隐藏的 capability Skill，设置 `external_capability`；
+3. 创建隐藏的 capability Skill，设置 `required_model_service`；
 4. 由语义 Skill 通过 `ctx.invoke()` 调用。
 
 ### 8.3 新硬件原语

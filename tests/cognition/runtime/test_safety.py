@@ -7,11 +7,11 @@ from hey_robot.cognition.runtime.tool_executor import ToolExecutor
 from hey_robot.cognition.tools.registry import ToolRegistry
 
 
-def test_robot_safety_hook_blocks_request_capability_on_estop():
+def test_robot_safety_hook_blocks_request_skill_on_estop():
     registry = ToolRegistry()
     registry.register_simple(
-        "request_capability",
-        lambda capability, objective: f"issued {capability}: {objective}",
+        "request_skill",
+        lambda skill, objective: f"issued {skill}: {objective}",
         safety_level="actuate",
     )
     executor = ToolExecutor(
@@ -21,8 +21,8 @@ def test_robot_safety_hook_blocks_request_capability_on_estop():
 
     result = asyncio.run(
         executor.execute(
-            "request_capability",
-            {"capability": "open_drawer", "objective": "open drawer"},
+            "request_skill",
+            {"skill": "open_drawer", "objective": "open drawer"},
         )
     )
 
@@ -49,8 +49,8 @@ def test_robot_safety_hook_allows_unmanaged_actuation_tool_on_estop():
 def test_robot_safety_hook_blocks_compound_skill_objective():
     registry = ToolRegistry()
     registry.register_simple(
-        "request_capability",
-        lambda capability, objective: f"issued {capability}: {objective}",
+        "request_skill",
+        lambda skill, objective: f"issued {skill}: {objective}",
         safety_level="actuate",
     )
     executor = ToolExecutor(
@@ -60,9 +60,9 @@ def test_robot_safety_hook_blocks_compound_skill_objective():
 
     result = asyncio.run(
         executor.execute(
-            "request_capability",
+            "request_skill",
             {
-                "capability": "vla_manipulation",
+                "skill": "vla_manipulation",
                 "objective": "pick up the cup then place it",
             },
         )
@@ -75,8 +75,8 @@ def test_robot_safety_hook_blocks_compound_skill_objective():
 def test_robot_safety_hook_requires_status_snapshot_for_skill_submission():
     registry = ToolRegistry()
     registry.register_simple(
-        "request_capability",
-        lambda capability, objective: f"issued {capability}: {objective}",
+        "request_skill",
+        lambda skill, objective: f"issued {skill}: {objective}",
         safety_level="actuate",
     )
     executor = ToolExecutor(
@@ -86,8 +86,8 @@ def test_robot_safety_hook_requires_status_snapshot_for_skill_submission():
 
     result = asyncio.run(
         executor.execute(
-            "request_capability",
-            {"capability": "open_drawer", "objective": "open drawer"},
+            "request_skill",
+            {"skill": "open_drawer", "objective": "open drawer"},
         )
     )
 
@@ -98,8 +98,8 @@ def test_robot_safety_hook_requires_status_snapshot_for_skill_submission():
 def test_robot_safety_hook_allows_skill_submission_with_valid_frame_snapshot():
     registry = ToolRegistry()
     registry.register_simple(
-        "request_capability",
-        lambda capability, objective: f"issued {capability}: {objective}",
+        "request_skill",
+        lambda skill, objective: f"issued {skill}: {objective}",
         safety_level="actuate",
     )
     executor = ToolExecutor(
@@ -109,8 +109,8 @@ def test_robot_safety_hook_allows_skill_submission_with_valid_frame_snapshot():
 
     result = asyncio.run(
         executor.execute(
-            "request_capability",
-            {"capability": "open_drawer", "objective": "open drawer"},
+            "request_skill",
+            {"skill": "open_drawer", "objective": "open drawer"},
         )
     )
 
@@ -121,8 +121,8 @@ def test_robot_safety_hook_allows_skill_submission_with_valid_frame_snapshot():
 def test_robot_safety_hook_blocks_consecutive_base_motion_without_perception():
     registry = ToolRegistry()
     registry.register_simple(
-        "request_capability",
-        lambda capability, objective: f"issued {capability}: {objective}",
+        "request_skill",
+        lambda skill, objective: f"issued {skill}: {objective}",
         safety_level="actuate",
     )
     executor = ToolExecutor(
@@ -133,9 +133,9 @@ def test_robot_safety_hook_blocks_consecutive_base_motion_without_perception():
                     "frame_id": 42,
                     "recent_tool_calls": [
                         {
-                            "name": "request_capability",
+                            "name": "request_skill",
                             "arguments": {
-                                "capability": "move_base",
+                                "skill": "move_base",
                                 "objective": "move forward",
                             },
                             "success": True,
@@ -148,8 +148,8 @@ def test_robot_safety_hook_blocks_consecutive_base_motion_without_perception():
 
     result = asyncio.run(
         executor.execute(
-            "request_capability",
-            {"capability": "move_base", "objective": "move forward again"},
+            "request_skill",
+            {"skill": "move_base", "objective": "move forward again"},
         )
     )
 
@@ -160,8 +160,8 @@ def test_robot_safety_hook_blocks_consecutive_base_motion_without_perception():
 def test_robot_safety_hook_allows_base_motion_after_perception_evidence():
     registry = ToolRegistry()
     registry.register_simple(
-        "request_capability",
-        lambda capability, objective: f"issued {capability}: {objective}",
+        "request_skill",
+        lambda skill, objective: f"issued {skill}: {objective}",
         safety_level="actuate",
     )
     executor = ToolExecutor(
@@ -172,9 +172,9 @@ def test_robot_safety_hook_allows_base_motion_after_perception_evidence():
                     "frame_id": 42,
                     "recent_tool_calls": [
                         {
-                            "name": "request_capability",
+                            "name": "request_skill",
                             "arguments": {
-                                "capability": "move_base",
+                                "skill": "move_base",
                                 "objective": "move forward",
                             },
                             "success": True,
@@ -195,8 +195,8 @@ def test_robot_safety_hook_allows_base_motion_after_perception_evidence():
 
     result = asyncio.run(
         executor.execute(
-            "request_capability",
-            {"capability": "move_base", "objective": "move forward again"},
+            "request_skill",
+            {"skill": "move_base", "objective": "move forward again"},
         )
     )
 
@@ -207,8 +207,8 @@ def test_robot_safety_hook_allows_base_motion_after_perception_evidence():
 def test_robot_safety_hook_does_not_block_after_failed_prior_base_motion():
     registry = ToolRegistry()
     registry.register_simple(
-        "request_capability",
-        lambda capability, objective: f"issued {capability}: {objective}",
+        "request_skill",
+        lambda skill, objective: f"issued {skill}: {objective}",
         safety_level="actuate",
     )
     executor = ToolExecutor(
@@ -219,9 +219,9 @@ def test_robot_safety_hook_does_not_block_after_failed_prior_base_motion():
                     "frame_id": 42,
                     "recent_tool_calls": [
                         {
-                            "name": "request_capability",
+                            "name": "request_skill",
                             "arguments": {
-                                "capability": "move_base",
+                                "skill": "move_base",
                                 "objective": "move forward",
                             },
                             "success": False,
@@ -234,8 +234,8 @@ def test_robot_safety_hook_does_not_block_after_failed_prior_base_motion():
 
     result = asyncio.run(
         executor.execute(
-            "request_capability",
-            {"capability": "move_base", "objective": "retry move forward"},
+            "request_skill",
+            {"skill": "move_base", "objective": "retry move forward"},
         )
     )
 
@@ -246,8 +246,8 @@ def test_robot_safety_hook_does_not_block_after_failed_prior_base_motion():
 def test_robot_safety_hook_does_not_block_non_motion_capability_with_prior_base_motion():
     registry = ToolRegistry()
     registry.register_simple(
-        "request_capability",
-        lambda capability, objective: f"issued {capability}: {objective}",
+        "request_skill",
+        lambda skill, objective: f"issued {skill}: {objective}",
         safety_level="actuate",
     )
     executor = ToolExecutor(
@@ -258,9 +258,9 @@ def test_robot_safety_hook_does_not_block_non_motion_capability_with_prior_base_
                     "frame_id": 42,
                     "recent_tool_calls": [
                         {
-                            "name": "request_capability",
+                            "name": "request_skill",
                             "arguments": {
-                                "capability": "move_base",
+                                "skill": "move_base",
                                 "objective": "move forward",
                             },
                             "success": True,
@@ -273,8 +273,8 @@ def test_robot_safety_hook_does_not_block_non_motion_capability_with_prior_base_
 
     result = asyncio.run(
         executor.execute(
-            "request_capability",
-            {"capability": "inspect_scene", "objective": "inspect the front area"},
+            "request_skill",
+            {"skill": "inspect_scene", "objective": "inspect the front area"},
         )
     )
 

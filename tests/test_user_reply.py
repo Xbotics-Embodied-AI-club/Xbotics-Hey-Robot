@@ -19,8 +19,8 @@ def test_status_tool_reply_preserves_multiline_metrics() -> None:
 
 def test_execution_feedback_summary_strips_robot_state_suffix() -> None:
     reply = present_tool_result_for_user(
-        tool="request_capability",
-        args={"capability": "move_base"},
+        tool="request_skill",
+        args={"skill": "move_base"},
         result=(
             "Execution feedback for skill skill1:\n"
             "- task_success: True\n"
@@ -34,8 +34,8 @@ def test_execution_feedback_summary_strips_robot_state_suffix() -> None:
 
 def test_unknown_named_pose_reply_uses_user_facing_pose_name() -> None:
     reply = present_tool_result_for_user(
-        tool="request_capability",
-        args={"capability": "set_arm_pose"},
+        tool="request_skill",
+        args={"skill": "set_arm_pose"},
         result="unknown named pose: pre_grasp",
         success=False,
     )
@@ -45,8 +45,8 @@ def test_unknown_named_pose_reply_uses_user_facing_pose_name() -> None:
 
 def test_invalid_joint_reply_is_user_facing() -> None:
     reply = present_tool_result_for_user(
-        tool="request_capability",
-        args={"capability": "move_arm_joints"},
+        tool="request_skill",
+        args={"skill": "move_arm_joints"},
         result="unknown joint: wrist_yaw",
         success=False,
     )
@@ -56,9 +56,9 @@ def test_invalid_joint_reply_is_user_facing() -> None:
 
 def test_tool_unavailable_reply_does_not_leak_internal_protocol() -> None:
     reply = present_tool_result_for_user(
-        tool="request_capability",
-        args={"capability": "human_follow"},
-        result="ToolUnavailable: request_capability is not available in this execution context",
+        tool="request_skill",
+        args={"skill": "human_follow"},
+        result="ToolUnavailable: request_skill is not available in this execution context",
         success=False,
     )
 
@@ -68,8 +68,8 @@ def test_tool_unavailable_reply_does_not_leak_internal_protocol() -> None:
 
 def test_consecutive_motion_blocked_reply_is_user_facing() -> None:
     reply = present_tool_result_for_user(
-        tool="request_capability",
-        args={"capability": "move_base"},
+        tool="request_skill",
+        args={"skill": "move_base"},
         result=(
             "ConsecutiveMotionBlocked: last capability 'move_base' was also a "
             "motion/actuation skill. Run inspect_scene first."
@@ -83,8 +83,8 @@ def test_consecutive_motion_blocked_reply_is_user_facing() -> None:
 
 def test_arm_pregrasp_reply_is_user_facing() -> None:
     reply = present_tool_result_for_user(
-        tool="request_capability",
-        args={"capability": "set_arm_pose"},
+        tool="request_skill",
+        args={"skill": "set_arm_pose"},
         result="arm moved to pregrasp",
         success=True,
     )
@@ -100,8 +100,8 @@ def test_model_self_narration_is_internal_reply() -> None:
 
 def test_task_watchdog_alert_reply_is_rephrased() -> None:
     reply = present_tool_result_for_user(
-        tool="request_capability",
-        args={"capability": "move_base"},
+        tool="request_skill",
+        args={"skill": "move_base"},
         result="任务监督告警：robot status stale for 34.6s",
         success=False,
     )
