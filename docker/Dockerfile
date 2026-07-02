@@ -35,8 +35,8 @@ COPY configs ./configs
 RUN python -m pip install --upgrade pip \
     && python -m pip install -e ".[all]"
 
-LABEL org.opencontainers.image.title="hey-robot-runtime" \
-      org.opencontainers.image.description="Hey Robot unified runtime image" \
+LABEL org.opencontainers.image.title="hey-robot" \
+      org.opencontainers.image.description="Embodied-native Agent Harness with an asynchronous fast/slow architecture" \
       org.opencontainers.image.source="local" \
       org.opencontainers.image.vendor="hey-robot" \
       org.opencontainers.image.base.name="python:${PYTHON_VERSION}-slim" \

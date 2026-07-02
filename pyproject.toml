@@ -1,13 +1,13 @@
 [project]
 name = "hey-robot"
 version = "1.0.0"
-description = "Hey Robot: Production-Grade Distributed VLA/VLM Robot System"
+description = "Embodied-native Agent Harness with an asynchronous fast/slow architecture"
 authors = [{ name = "Hey Robot Contributors" }]
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { text = "MIT" }
 
-# Core runtime dependencies (minimal)
+# Core dependencies (minimal)
 dependencies = [
     "numpy>=1.24.0",
     "pillow>=10.0.0",
