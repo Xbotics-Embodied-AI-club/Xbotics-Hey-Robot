@@ -4,45 +4,77 @@
   <sub><a href="../README.md">简体中文</a> | English</sub>
 </div>
 
-Hey Robot is an embodied Agent runtime for real robot deployment. The current main target is XLeRobot, combining an SO101 arm, a LeKiwi mobile base, camera observation, battery/status monitoring, and an LLM Agent runtime into a schedulable and recoverable robot system.
+Hey Robot is an embodied-native Agent Harness for real robots that does not build
+on a general-purpose LLM agent framework. It uses an asynchronous fast/slow
+architecture: the upper LLM Agent handles long-horizon cognition and task planning,
+while the lower VLA/VLN, Skill OS, and Robot Runtime handle short-horizon embodied
+decision-making and execution.
+
+XLeRobot is the current primary embodiment, with MuJoCo simulation and real-hardware
+deployment. “Embodied-native” means that the core Agent Runtime,
+tool protocol, task state, and execution-feedback loop are implemented around the
+constraints of the physical world rather than adapted from a general chat-agent
+framework.
 
 > Status: active development. The XLeRobot simulation and real-robot paths have both been brought up. Hardware changes should still be validated in simulation first.
 
 ## Features
 
-- LLM Agent runtime for robot tasks.
+- First-party Embodied Agent Harness without a general-purpose LLM agent orchestrator.
+- Asynchronous fast/slow architecture separating long-horizon cognition from short-horizon embodied execution.
 - Skill-layer abstraction: the Agent requests skills instead of directly controlling hardware.
 - MuJoCo simulation and XLeRobot real-robot deployment.
 - Web, CLI, voice, and Feishu user channels.
-- Task cockpit for task state, timeline, scene evidence, and recovery.
-- VLA ModelService integration through an independent ModelService.
+- Tasks UI for task state, timeline, scene evidence, and recovery.
+- VLA/VLN integration through independently deployed ModelServices.
 - Execution feedback, resource gates, readiness gates, timeouts, and recovery flow.
 
 ## Architecture
 
+The fast/slow view describes decision hierarchy:
+
+- **Slow system:** Agent/Cognition for language understanding, goal decomposition,
+  memory, long-horizon planning, and recovery.
+- **Fast system:** Foundation Models, Skill OS, and Robot Runtime for VLA/VLN
+  inference, short-horizon skill loops, safety gates, and physical execution.
+
+“Fast” means closer to embodied control and operating on a shorter decision horizon;
+it does not imply hard real-time Python or model inference. The four layers below
+describe how the two systems map to code and deployment boundaries.
+
 ```mermaid
 flowchart TD
     U[User Channels<br/>Web / Voice / Feishu / CLI]
-    A[Agent Layer<br/>Task understanding / Skill request]
-    S[Skill Layer<br/>Contracts / Scheduling / Resource gates]
-    R[Robot Layer<br/>Simulation / Real robot execution]
-    V[ModelService<br/>VLA / gRPC]
+    G[Gateway + NATS<br/>Identity / Episodes / Routing]
+    A[Agent Layer<br/>Tasks / Memory / Tool loop]
+    S[Skill OS<br/>Contracts / Scheduling / Resource gates]
+    F[Foundation Model Layer<br/>VLA / VLN / gRPC]
+    R[Robot Runtime<br/>MuJoCo / Real robot]
 
-    U -->|User request| A
+    U -->|User request| G
+    G -->|UserTurn| A
     A -->|Skill request| S
     S -->|Robot action| R
-    S -->|Optional| V
+    S -->|Model request| F
+    F -->|Plan or action result| S
     R -->|Status / Observation| A
-    A -->|Reply| U
+    A -->|Reply| G
+    G --> U
 ```
 
 Core boundaries:
 
+- The Gateway owns channel normalization, identity, episode allocation, and routing; it does not make robot decisions.
 - `Robot` represents the body and hardware execution boundary.
 - `Skill` is the unified capability entry point for the Agent.
 - The Agent requests robot skills through `request_skill` and does not submit `RobotAction` directly.
 - `RobotService / RobotRuntime / PerceptionService` publish observations and camera frames.
-- VLA capabilities are integrated through an independent ModelService and are treated as optional extensions.
+- VLA/VLN run as independent ModelServices. Skill OS owns the control loop and Robot Runtime remains the only hardware execution boundary.
+
+`hey-robot run` starts Gateway, Agent, Task Supervisor, Skill Controller, and Robot
+Service as separate services in one asyncio process. They still communicate through
+NATS. ModelServices and the NATS broker run as separate processes, and the main
+services can also be split through their individual CLI commands.
 
 ## Quick Start
 
@@ -122,7 +154,7 @@ uv run hey-robot inspect --config configs\xlerobot.real.windows.yaml
 uv run python scripts\robots\xlerobot\diagnose.py --config configs\xlerobot.real.windows.yaml
 ```
 
-Start the full runtime:
+Start the full system:
 
 ```powershell
 uv run hey-robot run --config configs\xlerobot.real.windows.yaml
@@ -145,6 +177,11 @@ set_gripper
 ```
 
 VLA support is integrated as an optional ModelService extension and should be exposed to the Agent only after the ModelService is stable.
+
+The experimental `configs/xlerobot.sim.vla_vln.yaml` profile additionally enables
+VLA/VLN skills. It is not the default real-robot surface: VLN requires an initialized
+InternNav checkout and model, while VLA does not yet have a real `model_path` and is
+currently suitable only for interface integration.
 
 ## Safety
 
@@ -184,7 +221,7 @@ The next focus is better robot interaction and long-horizon task capability in s
 
 - Agent: memory, planning, and multi-turn correction.
 - Skill: VLA, VLN, WAM, and other foundation model capabilities.
-- Runtime: execution feedback, failure recovery, and task-state tracking.
+- System reliability: execution feedback, failure recovery, and task-state tracking.
 
 ## Repository Layout
 
@@ -193,7 +230,7 @@ configs/                    deployment configs
 docs/                       architecture, operations, development docs
 frontend/views/             Web UI views
 frontend/shared/            shared Web CSS and JS
-proto/                      capability protobuf sources
+proto/                      ModelService protobuf sources
 src/hey_robot/cognition/    Agentic cognition, loop, core, task state
 src/hey_robot/skill_os/     Skill registry, contracts, scheduler, builtin skills
 src/hey_robot/foundation/   VLA/VLN ModelService, catalog, gRPC transport
@@ -208,14 +245,14 @@ tests/                      unit and integration tests
 
 The primary documentation language is Chinese. Start from the root [README](../README.md).
 
-- [Runtime shape](./overview/runtime-shape.md)
+- [Deployment and execution shape](./overview/runtime-shape.md)
 - [System architecture](./architecture/system-architecture.md)
 - [Agent and skill boundaries](./architecture/agent-skill-boundaries.md)
-- [Capability RPC protocol](./architecture/capability-rpc-proto.md)
+- [ModelService RPC protocol](./architecture/capability-rpc-proto.md)
 - [Deployment matrix](./operations/deployment-matrix.md)
 - [XLeRobot real deployment](./operations/xlerobot-real.md)
 - [XLeRobot simulation deployment](./operations/xlerobot-sim.md)
-- [Runtime scripts](./operations/runtime-scripts.md)
+- [Operations script index](./operations/runtime-scripts.md)
 - [Skill extension guide](./development/skill-extension.md)
 - [Contributing guide](./development/contributing.md)
 

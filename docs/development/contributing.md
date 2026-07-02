@@ -28,7 +28,7 @@ git checkout -b <your-branch>
 用 `-` 连接词，英文小写，控制在 3-5 个词以内：
 
 ```
-feature/embodied-agent-runtime
+feature/embodied-agent-harness
 fix/sim-camera-calibration
 refactor/skill-backend-decouple
 ```

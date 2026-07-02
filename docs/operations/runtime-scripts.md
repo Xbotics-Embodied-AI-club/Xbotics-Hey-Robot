@@ -33,7 +33,7 @@ uv run python scripts/robots/xlerobot/diagnose.py --scan-cameras
 指定串口：
 
 ```bash
-uv run python scripts/robots/xlerobot/diagnose.py --serial-port /dev/ttyUSB0
+uv run python scripts/robots/xlerobot/diagnose.py --serial-port /dev/ttyACM0
 ```
 
 ### 子系统检查
@@ -58,7 +58,8 @@ uv run python scripts/robots/xlerobot/check_arm.py
 uv run python scripts/robots/xlerobot/scan_cameras.py
 ```
 
-打开截图确认每个 device_id 对应哪个物理摄像头，然后更新配置文件中的 `cameras.<name>.device_id`。
+打开截图确认每个 device_id 对应哪个物理摄像头，然后更新配置文件中的
+`robots.<robot_id>.components.cameras.<name>.device_id`。
 
 ## 模型下载
 

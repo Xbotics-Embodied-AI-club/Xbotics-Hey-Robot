@@ -2,6 +2,9 @@
 
 本文说明重构后的唯一 Skill 扩展方式。目标是让二次开发者在组合已有机器人能力时，只关注 Skill 层和部署配置，不需要修改 Agent、Controller、消息总线或具体硬件驱动。
 
+在异步快慢双系统中，Skill 属于下层快系统：它接收慢系统给出的目标，在受约束的短时域
+内调用 Foundation Model 或 Robot Runtime，并把进度和结果异步反馈给上层。
+
 ## 1. 先给结论
 
 如果新能力只组合系统已经具备的能力，开发者只需：
@@ -24,7 +27,7 @@
 
 - 新增硬件原语时，需要扩展 Driver 和对应执行适配器；
 - 新增传感器能力时，需要扩展感知或 Driver 适配器；
-- 新增外部模型或服务时，需要实现 ModelService，并在配置中启用；
+- 新增外部模型或服务时，需要实现 Foundation Model executor/ModelService，并在配置中启用；
 - 只有底层能力已经存在时，Skill 才能只靠组合获得新语义能力。
 
 ## 2. 唯一运行链路
@@ -39,7 +42,7 @@ deployment skills.modules
   -> SkillRuntime.validate / execute
   -> BaseSkill.execute
   -> SkillContext ports
-  -> Driver / Perception / ModelService
+  -> Robot Runtime / Perception / gRPC ModelService
 ```
 
 系统没有静态默认 Skill catalog、兼容 Registry 或第二执行器。`BaseSkill.spec` 是契约的唯一事实源，`SkillRuntime.execute()` 是顶层和嵌套 Skill 的唯一执行入口。
@@ -81,7 +84,7 @@ class InspectTargetSkill(BaseSkill):
         )
 ```
 
-Skill 只实现 `execute()`。系统不再提供 `plan()`；实际执行轨迹由运行时根据真实发生的动作记录，避免计划和执行形成两个事实源。
+Skill 只实现 `execute()`。系统不再提供 `plan()`；实际执行轨迹由执行控制器根据真实发生的动作记录，避免计划和执行形成两个事实源。
 
 ## 4. 组合已有 Skill
 
@@ -109,7 +112,7 @@ class InspectThenStopSkill(BaseSkill):
         return SkillResult(success=True, summary="Inspection completed and motion stopped.")
 ```
 
-必须同时在 `dependencies` 中声明所有子 Skill。部署校验会递归检查依赖是否存在，以及依赖的外部 capability 是否可用。
+必须同时在 `dependencies` 中声明所有子 Skill。部署校验会递归检查依赖是否存在，以及依赖的外部 ModelService 是否可用。
 
 ## 5. SkillContext 边界
 
@@ -178,7 +181,7 @@ skills:
 
 - `modules` 决定加载哪些注册模块；
 - `enabled` 是当前部署对 Agent 开放的显式能力面；
-- 未注册、重名、不支持当前机器人或缺少外部 capability，部署校验会失败；
+- 未注册、重名、不支持当前机器人或缺少外部 ModelService，部署校验会失败；
 - `driver_primitives` 声明的原语不被当前 robot driver 支持时，部署校验会失败；
 - 未列入 `enabled` 的内部依赖仍可由已启用 Skill 调用，但不会直接暴露给 Agent。
 
@@ -198,8 +201,12 @@ skills:
 
 1. 实现 ModelService；
 2. 在配置中声明该服务提供的能力名；
-3. 创建隐藏的 capability Skill，设置 `required_model_service`；
+3. 创建模型驱动 Skill，设置 `required_model_service`；
 4. 由语义 Skill 通过 `ctx.invoke()` 调用。
+
+`required_model_service`、Skill 实现传给 `ctx.model_services.call(name, ...)` 的
+`name`，以及 deployment 中 `model_services.<id>.provides` 必须一致。仅通过静态部署
+校验还不足以发现实现调用名不一致，必须添加一次真实 `ModelServiceRegistry` 路由测试。
 
 ### 8.3 新硬件原语
 
@@ -223,10 +230,10 @@ skills:
 - 嵌套 `ctx.invoke()` 的调用参数和失败传播；
 - Registry 能加载模块且拒绝重名；
 - 部署配置能启用 Skill；
-- 机器人族不匹配或 capability 缺失时启动失败；
+- 机器人族不匹配或 ModelService 缺失时启动失败；
 - 涉及资源的 Skill 具备冲突测试；
 - 新硬件原语具备 Driver 或仿真集成测试。
 
 ## 10. 完成标准
 
-一个普通语义 Skill 的提交不应修改 Agent、Controller、Runtime、协议和 Driver。若必须修改这些模块，应先判断新增的是系统级机制、外部 capability，还是全新的硬件原语，而不是把它伪装成普通 Skill 扩展。
+一个普通语义 Skill 的提交不应修改 Agent、Controller、Robot Runtime、协议和 Driver。若必须修改这些模块，应先判断新增的是系统级机制、Foundation Model 服务，还是全新的硬件原语，而不是把它伪装成普通 Skill 扩展。

@@ -8,7 +8,13 @@
   <sub>简体中文 | <a href="docs/README_EN.md">English</a></sub>
 </div>
 
-Hey Robot 是一个面向真实机器人部署的具身 Agent runtime。它以 XLeRobot 为当前主线机器人形态，将 SO101 机械臂、LeKiwi 移动底盘、相机观察、电池/状态监控和 LLM Agent 运行时组合成一个可调度、可观察、可恢复的机器人系统。
+Hey Robot 是一个不依赖通用 LLM Agent 框架、面向真实机器人原生构建的
+Embodied Agent Harness。它采用异步快慢双系统架构：上层 LLM Agent 负责长程认知与
+任务规划，下层 VLA/VLN、Skill OS 和 Robot Runtime 负责短时域具身决策与执行。
+
+项目目前以 XLeRobot 为主要载体，支持 MuJoCo 仿真和真机部署。这里的“原生”是指
+核心 Agent Runtime、tool protocol、任务状态与执行闭环均围绕物理世界自主实现，而不是
+将通用聊天 Agent 框架改造成机器人控制器。
 
 > 项目状态：当前处于 active development。XLeRobot 仿真和真机链路均已跑通，仍建议任何硬件改动先在仿真中验证。
 
@@ -18,39 +24,58 @@ Hey Robot 是一个面向真实机器人部署的具身 Agent runtime。它以 X
 
 ## 特性
 
-- 面向机器人任务的 LLM Agent runtime。
+- 自主实现的 Embodied Agent Harness，不依赖通用 LLM Agent 编排框架。
+- 异步快慢双系统：上层长程认知与下层短时域具身执行解耦。
 - Skill 层抽象：Agent 只请求机器人能力，不直接控制硬件。
 - 支持 MuJoCo 仿真和 XLeRobot 真机部署。
 - 支持 Web、CLI、语音、飞书等用户入口。
-- 内置 task cockpit：展示任务状态、timeline、scene evidence 和 recovery。
-- VLA 能力通过独立 ModelService 接入，不塞进 robot driver。
+- 内置 tasks UI：展示任务状态、timeline、scene evidence 和 recovery。
+- VLA/VLN 能力通过独立 ModelService 接入，不塞进 robot driver。
 - 支持 execution feedback、resource gate、readiness gate、timeout 和恢复流程。
 
 ## 架构
 
+快慢双系统描述的是决策层级：
+
+- **慢系统**：上层 Agent/Cognition，负责语言理解、目标分解、记忆、长程规划和恢复。
+- **快系统**：下层 Foundation Model、Skill OS 和 Robot Runtime，负责 VLA/VLN
+  推理、短时域技能闭环、安全门控和机器人执行。
+
+这里的“快”表示更靠近具身控制、决策周期更短，不承诺模型推理或 Python 执行路径具备
+硬实时性能。四层架构则描述这套双系统在代码和部署中的具体边界：
+
 ```mermaid
 flowchart TD
     U[用户入口<br/>Web / 语音 / 飞书 / CLI]
-    A[Agent 层<br/>理解任务 / 调用能力]
-    S[Skill 层<br/>合约 / 调度 / 资源门禁]
-    R[Robot 层<br/>仿真 / 真机执行]
-    V[外部能力<br/>VLA / gRPC]
+    G[Gateway + NATS<br/>身份 / Episode / 消息路由]
+    A[Agent 层<br/>任务 / 记忆 / 主动感知 / Tool loop]
+    S[Skill OS<br/>合约 / 调度 / 资源门禁]
+    F[Foundation Model 层<br/>VLA / VLN / gRPC]
+    R[Robot Runtime<br/>MuJoCo / 真机]
 
-    U -->|用户指令| A
+    U -->|用户指令| G
+    G -->|UserTurn| A
     A -->|能力请求| S
     S -->|机器人动作| R
-    S -->|可选| V
+    S -->|模型请求| F
+    F -->|规划或动作结果| S
     R -->|状态 / 观察| A
-    A -->|回复| U
+    A -->|回复| G
+    G --> U
 ```
 
 核心边界：
 
+- Gateway 负责用户入口、身份归一化、Episode 分配和消息路由，不参与机器人决策。
 - `Robot` 只表示身体和硬件执行边界。
 - `Skill` 是 Agent 调用机器人能力的统一入口。
 - Agent 通过 `request_skill` 调用机器人 skill，不直接提交 `RobotAction`。
 - `RobotService / RobotRuntime / PerceptionService` 负责 observation 与相机帧发布。
-- VLA 能力通过独立 ModelService 接入，当前作为可选扩展能力逐步验证。
+- VLA/VLN 通过独立 ModelService 接入；模型服务只返回规划或动作结果，闭环和硬件执行仍由 Skill OS 与 Robot Runtime 负责。
+
+`hey-robot run` 默认把 Gateway、Agent、Task Supervisor、Skill Controller 和 Robot Service
+作为同一 asyncio 进程中的独立服务启动；这些服务仍通过 NATS 协议通信。ModelService 和
+NATS broker 是独立进程，也可以使用各自 CLI 将主服务进一步拆分部署。
 
 ## 快速开始
 
@@ -120,7 +145,7 @@ uv run hey-robot run --config configs/xlerobot.sim.ubuntu.yaml
 http://127.0.0.1:8080
 ```
 
-仿真环境适合验证 Agent、Skill、Web/task cockpit 和机器人执行链路，不需要真实机器人硬件。
+仿真环境适合验证 Agent、Skill、Web tasks UI 和机器人执行链路，不需要真实机器人硬件。
 
 ## XLeRobot 真机
 
@@ -132,7 +157,7 @@ uv run hey-robot inspect --config configs\xlerobot.real.windows.yaml
 uv run python scripts\robots\xlerobot\diagnose.py --config configs\xlerobot.real.windows.yaml
 ```
 
-启动完整 runtime：
+启动完整系统：
 
 ```powershell
 uv run hey-robot run --config configs\xlerobot.real.windows.yaml
@@ -155,6 +180,10 @@ set_gripper
 ```
 
 VLA 能力作为可选扩展能力接入，建议在 ModelService 稳定后再开放给 Agent 使用。
+
+实验配置 `configs/xlerobot.sim.vla_vln.yaml` 额外开放 VLN 与 VLA skill。它不代表默认
+真机能力面：其中 VLN 需要单独初始化 InternNav 和模型，VLA 尚未配置真实 `model_path`，
+当前只能用于接口联调。使用前请阅读仿真部署文档中的限制说明。
 
 ## 安全提示
 
@@ -199,7 +228,7 @@ uv run pytest -q --no-cov
 
 - Agent：增强 memory、plan 和多轮纠偏能力。
 - Skill：接入 VLA、VLN、WAM 等基础模型能力。
-- Runtime：完善执行反馈、失败恢复和任务状态追踪。
+- 系统可靠性：完善执行反馈、失败恢复和任务状态追踪。
 
 ## 目录结构
 
@@ -208,7 +237,7 @@ configs/                    部署配置文件
 docs/                       架构、部署、开发文档
 frontend/views/             Web 前端页面
 frontend/shared/            Web 前端公共样式和脚本
-proto/                      capability protobuf 协议源文件
+proto/                      ModelService protobuf 协议源文件
 src/hey_robot/cognition/    Agentic cognition、主循环、核心决策、任务状态
 src/hey_robot/skill_os/     Skill 注册、合约、调度控制器和内置技能
 src/hey_robot/foundation/   VLA/VLN ModelService、catalog 与 gRPC transport
@@ -221,10 +250,10 @@ tests/                      单元测试和集成测试
 
 ## 文档
 
-- [运行时形态](docs/overview/runtime-shape.md)
+- [部署与运行形态](docs/overview/runtime-shape.md)
 - [系统架构](docs/architecture/system-architecture.md)
 - [Agent 与 Skill 边界](docs/architecture/agent-skill-boundaries.md)
-- [Capability RPC 协议](docs/architecture/capability-rpc-proto.md)
+- [ModelService RPC 协议](docs/architecture/capability-rpc-proto.md)
 - [部署矩阵](docs/operations/deployment-matrix.md)
 - [XLeRobot 真机部署](docs/operations/xlerobot-real.md)
 - [XLeRobot 仿真部署](docs/operations/xlerobot-sim.md)

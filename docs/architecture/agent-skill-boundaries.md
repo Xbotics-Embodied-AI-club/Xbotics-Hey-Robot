@@ -2,6 +2,10 @@
 
 本文记录 Agent 层简化重构后的边界契约。
 
+从快慢双系统视角看，Agent/Cognition 是上层慢系统，Skill OS、Foundation Model 和
+Robot Runtime 构成下层快系统。本文件描述二者最关键的提交边界：慢系统只能表达
+`SkillIntent`，不能绕过 Skill OS 直接产生机器人动作。
+
 ## 主链路
 
 ```text
@@ -13,8 +17,9 @@ RobotAgentService
   -> SkillGateway
   -> SkillIntent
   -> SkillControllerService
-  -> SkillRuntime / ModelServiceRegistry
-  -> RobotRuntime / ModelServices
+  -> SkillRuntime
+      -> RobotRuntime
+      -> optional ModelServiceRegistry / gRPC ModelService
 ```
 
 ## 边界规则
@@ -25,6 +30,18 @@ RobotAgentService
 - direct action、busy-turn interrupt 也必须通过 `SkillGateway`。
 - `SkillGateway` 是 Agent 层维护的唯一 `SkillIntent` 构造和提交边界。
 - `AgentRuntime` 负责 message protocol、message window 和 response policy。
+- Foundation Model 返回规划或动作结果，但不能绕过 Skill OS 直接访问 Robot Runtime。
+- Robot Runtime 不依赖 cognition、Skill OS 或 Foundation backend。
+
+## Deployment surface
+
+`skills.mode` 决定 Agent 能看到的能力层级：
+
+- `production` 只允许启用 `agent_visible=True` 的 semantic skill；
+- `bringup` 允许显式启用 primitive，便于联调机器人。
+
+当前仓库 real/sim 配置使用 `bringup`。即使 primitive 对 Agent 可见，它仍必须通过
+`request_skill -> SkillGateway -> SkillControllerService`，不能变成直接 RobotAction。
 
 ## 当前模块拆分
 
@@ -41,3 +58,5 @@ RobotAgentService
 - 在 gateway 外直接构造 `SkillIntent(...)`
 - Agent 模块直接依赖 `RobotAction`
 - Agent 层依赖底层 driver primitive
+- Foundation backend 导入 cognition 或 Skill OS
+- Robot Runtime 导入上层系统模块

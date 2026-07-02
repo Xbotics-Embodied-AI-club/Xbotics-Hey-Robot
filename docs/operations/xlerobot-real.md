@@ -4,10 +4,11 @@ XLeRobot 是 Hey Robot 的组合式真实机器人 embodiment：
 
 - **SO101**：六自由度机械臂 + 夹爪（Feetech 舵机 ID 1-6）
 - **LeKiwi**：三轮全向移动底盘（Feetech 舵机 ID 7-9）
-- **OpenCVCamera**：双路摄像头（头部 front + 腕部 wrist）
+- **OpenCVCamera**：Ubuntu/S600 默认双路（front + wrist），Windows 默认一路 front
 - **ServoBusBattery**：通过舵机总线读取电池电压
 
-Agent 和 Skill 层不绑定具体机器人形态，上层发送 `SkillAction`，robot driver 判断目标 embodiment 是否能执行。
+Agent 和 Skill 层不绑定具体机器人形态。Agent 提交 `SkillIntent`，Skill OS 将实际
+primitive 编码为 `RobotAction`，robot driver 最后判断目标 embodiment 是否能执行。
 
 ## 配置文件
 
@@ -15,14 +16,15 @@ Agent 和 Skill 层不绑定具体机器人形态，上层发送 `SkillAction`�
 |---|---|
 | Windows | `configs/xlerobot.real.windows.yaml` |
 | Ubuntu | `configs/xlerobot.real.ubuntu.yaml` |
+| RDK S600 | `configs/xlerobot.real.s600.yaml` |
 
 ## 平台差异
 
 | 配置项 | Windows | Ubuntu |
 |---|---|---|
-| 串口 | `COM5` | `/dev/ttyUSB0` |
+| 串口 | `COM5` | `/dev/ttyACM0` |
 | 摄像头后端 | `dshow` | `v4l2` |
-| 摄像头 device_id | `1` | `0`（头）、`1`（腕） |
+| 摄像头 device_id | `1`（front） | `4`（front）、`2`（wrist） |
 | 音频设备 | 设备索引号 | `null`（PulseAudio 默认） |
 | 路径分隔 | `\` | `/` |
 | 命令前缀 | `uv run python scripts\...` | `uv run python scripts/...` |
@@ -81,7 +83,8 @@ uv run python scripts/robots/xlerobot/scan_cameras.py
 - 哪个 `/dev/videoN` 是头部（front）
 - 哪个 `/dev/videoN` 是腕部（wrist）
 
-如果和配置不一致，修改 `cameras.front.device_id` 和 `cameras.wrist.device_id`。
+如果和配置不一致，修改 `components.cameras.front.device_id`，以及存在时的
+`components.cameras.wrist.device_id`。
 
 ### 6. 连接机器人，运行诊断
 
@@ -119,10 +122,10 @@ uv run hey-robot inspect --config configs/xlerobot.real.ubuntu.yaml
 | 配置项 | 根据诊断调整 |
 |---|---|
 | `serial_bus.port` | 按实际串口修改 |
-| `cameras.front.device_id` | 按摄像头扫描结果 |
-| `cameras.wrist.device_id` | 按摄像头扫描结果 |
-| `base.*_id` | 按舵机扫描结果 |
-| `arm.joint_ids.*` | 按舵机扫描结果 |
+| `components.cameras.front.device_id` | 按摄像头扫描结果 |
+| `components.cameras.wrist.device_id` | 按摄像头扫描结果；Windows 默认没有该项 |
+| `components.base.*_id` | 按舵机扫描结果 |
+| `components.arm.joint_ids.*` | 按舵机扫描结果 |
 
 ### 9. 启动系统
 
@@ -143,7 +146,9 @@ hey-robot run --config configs/xlerobot.real.ubuntu.yaml
 > newgrp dialout     # 当前终端立即生效，或重新登录
 > ```
 
-所有服务在单进程中启动：robot service → skill controller → task supervisor → agent → gateway。
+主服务在同一 asyncio 进程中并发启动：robot service、skill controller、task
+supervisor、agent 和 gateway。它们各自连接 NATS，不要依赖列表顺序作为 readiness
+顺序；应观察各服务的 ready/health 日志。
 
 ## 建议验证顺序
 
@@ -157,7 +162,7 @@ hey-robot run --config configs/xlerobot.real.ubuntu.yaml
 6. `set_gripper` 可用
 7. readiness gate 阻止不安全的动作
 8. failure 进入 recovery flow
-9. VLA 稳定后把 `vla_manipulation` 加入 `skills.enabled`
+9. 只有完成独立 ModelService、observation 和真机安全验证后，才设计 VLA deployment
 
 ## 启用的 Skills（11 个）
 
@@ -177,99 +182,66 @@ hey-robot run --config configs/xlerobot.real.ubuntu.yaml
 | 操作 | `move_arm_joints` | 控制机械臂关节 |
 | 操作 | `set_gripper` | 控制夹爪开合 |
 
-`vla_manipulation` 已注册 ModelService，默认不加入 `skills.enabled`。VLA 稳定后手动添加。
+`vla_manipulation` Skill 已注册，但当前三份真机配置的 `model_services` 都为空，也没有把
+VLA 加入 `skills.enabled`。因此默认真机系统不具备可启动的 VLA 服务。
 
-## 双摄像头配置
+## 摄像头配置
+
+Ubuntu/S600 默认双摄像头：
 
 ```yaml
-cameras:
-  front:        # 头部，1280x720
-  wrist:        # 腕部，640x480
+components:
+  cameras:
+    front:        # 头部，1280x720
+    wrist:        # 腕部，640x480
 ```
+
+Windows 默认只配置 `front`。新增 wrist 前先扫描设备，并确认相机不会被其他进程占用。
 
 ## 语音配置
 
-- **ASR**：本地 sherpa-onnx（离线，模型在 `models/asr/`）
+- **ASR**：Windows 为 Doubao，Ubuntu 为本地 sherpa-onnx，S600 为 OpenAI-compatible
 - **TTS**：云端 Doubao（火山引擎），需 `ARK_API_KEY`
 - **唤醒词**：`小白`、`机器人`、`robot`
 
-如需切换云端 ASR，将 `channels.voice.asr.provider` 从 `sherpa_onnx` 改为 `doubao`。
+具体以所选 YAML 的 `channels.voice.asr.provider` 为准。使用 sherpa-onnx 时模型位于
+`models/asr/`；使用云端 provider 时确认对应 API key 和 endpoint。
 
 ---
 
-# VLA ModelService
+# VLA ModelService 状态
 
-VLA 在系统中不属于 robot driver，而是独立的 `model_service`。Agent 只请求 skill，是否走 VLA 由 `SkillControllerService` 和 `ModelServiceRegistry` 决定。
-
-## 链路
+VLA 的架构位置已经确定，但当前真机 deployment 尚未交付：
 
 ```text
-Agent
-  -> vla_manipulation
+Agent request_skill
   -> SkillControllerService
   -> ModelServiceRegistry
-  -> VLAPolicyService
-  -> LeRobot RobotClient
-  -> LeRobot policy_server
-  -> SO101 arm + cameras
+  -> gRPC VLAPolicyService
+  -> one-step policy result
+  -> Skill OS converts result to guarded primitives
+  -> RobotRuntime / XLeRobotDriver
 ```
 
-## 先关闭 VLA 验证 native skills
+当前代码和配置的事实边界：
 
-```yaml
-model_services:
-  arm_vla:
-    enabled: false
-```
+- 真机 YAML 中没有 ModelService entry，不能直接运行 `--service-id arm_vla`；
+- 默认真机 Skill surface 只有前述 11 个 native skill；
+- VLA executor 的内部测试路径只能用于协议测试；
+- real path 仍依赖 LeRobot RobotClient 的 arm/camera config，尚未完全成为只消费系统注入
+  observation 的纯推理服务；
+- `pick_object` / `place_object` 还需要对齐 Skill 调用名与 ModelService `provides`。
 
-关闭后普通 robot skills 不受影响。
+启用真机 VLA 前至少需要：
 
-## 开启 VLA
+1. 新建独立 deployment profile，不直接修改已验证的 native profile；
+2. 配置 gRPC target、policy server、checkpoint、arm 和 camera mapping；
+3. 验证 `GetHealth` 的 online/loaded/busy；
+4. 添加 observation -> inference -> primitive -> RobotStatus 的端到端测试；
+5. 在仿真和空载机械臂上验证动作范围、取消和超时；
+6. 最后才把 semantic VLA skill 加入 `skills.enabled`。
 
-配置位置：`model_services.arm_vla.settings`
-
-Ubuntu 配置使用 `policy_runtime: groot_zmq`，通过 ZMQ 连接 policy server。Windows 配置使用 `policy_runtime: lerobot_single_arm`。
-
-关键参数：
-
-| 参数 | 说明 |
-|---|---|
-| `policy_host` / `policy_port` | Policy server 地址 |
-| `task_prompt` | 任务提示词 |
-| `arm` | 机械臂标识 |
-| `cameras` | 摄像头列表，`camera_key_map` 对齐 model observation keys |
-| `execution_time` | 单次执行时长 |
-| `action_horizon` | 动作 chunk 长度 |
-
-## 启动顺序
-
-先启动 LeRobot policy server：
-
-```bash
-uv run python -m lerobot.async_inference.policy_server --host=0.0.0.0 --port=8080
-```
-
-再启动 VLA ModelService：
-
-```bash
-uv run hey-robot model-service --config configs/xlerobot.real.ubuntu.yaml --service-id arm_vla
-```
-
-## 更换模型
-
-通过配置切换，不需要改代码：
-
-```yaml
-policy_type: pi05
-policy_name: Grigorij/pi05_collect_tissue_23_02
-task_prompt: "Pick up tissue."
-```
-
-需确认：
-
-- `policy_type` 和 checkpoint 类型匹配
-- `camera_key_map` 的 key 与模型训练时 observation key 对齐
-- `task_prompt` 与训练任务接近
+在这些条件完成前，不应把当前真机配置描述为支持 VLA 抓取。
 
 ## 常见问题
 
@@ -281,5 +253,6 @@ task_prompt: "Pick up tissue."
 | 摄像头打不开 | 检查 `device_id` 和 `backend`（v4l2/dshow），确认未被占用 |
 | 飞书消息收不到 | 检查 `allow_from` 是否包含 `"*"` 或你的 open_id |
 | 语音识别为空 | 检查麦克风，确认 `models/asr/` 四个模型文件完整 |
-| VLA health.loaded=false | 检查 `policy_host/port`、`policy_type`、`task_prompt` |
-| 动作不稳定 | 降低 `execution_time`，确认 calibration 和 camera key 对齐训练配置 |
+| VLA service 不存在 | 当前真机配置未声明 ModelService；使用单独实验 profile |
+| VLA health.loaded=false | 检查 gRPC service 配置、policy server 和 checkpoint |
+| VLA 动作不稳定 | 停止真机测试，先回到仿真和空载校准 |
