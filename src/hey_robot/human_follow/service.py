@@ -11,10 +11,7 @@ from hey_robot.logging import HeyRobotLogger
 from hey_robot.protocol import Topics
 from hey_robot.robot_runtime.observations.frame_stream import decode_frame_packet
 from hey_robot.skill_os.perception.human_follow import (
-    FollowController,
-    TargetTracker,
-    VelocityCommand,
-    detect_people,
+    HumanFollowRunner,
     load_detector,
 )
 
@@ -120,33 +117,6 @@ class HumanFollowService:
 
     async def _run_session(self, session: _Session) -> None:
         args = session.arguments
-        tracker = TargetTracker(
-            max_age=int(args.get("max_tracking_age") or 30),
-            min_iou=float(args.get("min_iou_threshold") or 0.3),
-        )
-        controller = FollowController(
-            target_distance=float(args.get("target_distance_m") or 0.7),
-            target_width_ratio=float(args.get("target_width_ratio") or 0.35),
-            target_height_ratio=float(args.get("target_height_ratio") or 1.0),
-            kp_linear=float(args.get("kp_linear") or 0.35),
-            kp_angular=float(args.get("kp_angular") or 1.0),
-            max_linear_speed=float(args.get("max_linear_speed") or 0.3),
-            max_backward_speed=float(args.get("max_backward_speed") or 0.2),
-            allow_backward=bool(args.get("allow_backward", True)),
-            max_angular_speed=float(args.get("max_angular_speed") or 1.0),
-            dead_zone_x=float(args.get("dead_zone_x") or 0.15),
-            dead_zone_area=float(args.get("dead_zone_area") or 0.1),
-        )
-        duration_raw = args.get("duration_sec")
-        max_steps = int(args.get("max_steps") or 0)
-        if duration_raw is None and max_steps <= 0:
-            duration_raw = 120.0
-        duration = float(duration_raw) if duration_raw is not None else None
-        deadline = time.monotonic() + duration if duration else None
-        current = VelocityCommand(0.0, 0.0, 0.0)
-        last_frame_id: int | None = None
-        sequence = 0
-        last_progress_at = 0.0
         command_topic = self.topics.for_robot(
             self.topics.base_velocity_stream, session.robot_id
         )
@@ -155,81 +125,78 @@ class HumanFollowService:
             "skill_id": session.skill_id,
             "session_id": session.session_id,
         }
-        await self.bus.publish(command_topic, {**base, "action": "open"})
-        await self._publish_session(session, kind="progress", phase="starting")
-        result: dict[str, Any] = {
-            "success": True,
-            "summary": "human follow stopped",
-        }
+        sequence = 0
+        last_progress_at = 0.0
+
+        async def get_frame():
+            nonlocal sequence
+            event = self._frame_events[session.robot_id]
+            try:
+                await asyncio.wait_for(event.wait(), timeout=0.5)
+            except TimeoutError:
+                return None
+            event.clear()
+            return self._frames[session.robot_id]
+
+        async def apply_velocity(vx, vy, wz):
+            nonlocal sequence
+            sequence += 1
+            now = time.time()
+            await self.bus.publish(
+                command_topic,
+                {
+                    **base,
+                    "action": "velocity",
+                    "sequence": sequence,
+                    "vx": vx,
+                    "vy": vy,
+                    "wz": wz,
+                    "expires_at": now + 0.3,
+                    "watchdog_ms": 400,
+                },
+            )
+
+        async def emit_progress(**payload):
+            nonlocal last_progress_at
+            if time.monotonic() - last_progress_at < 0.5:
+                return
+            last_progress_at = time.monotonic()
+            serialized = dict(payload)
+            target = serialized.pop("target", None)
+            if target is not None:
+                serialized["target"] = {
+                    "bbox": list(getattr(target, "bbox", [])),
+                    "confidence": getattr(target, "confidence", None),
+                    "area": getattr(target, "area", None),
+                }
+            detections = serialized.get("detections")
+            if isinstance(detections, list):
+                serialized["detections"] = len(detections)
+            await self._publish_session(
+                session,
+                kind="progress",
+                **serialized,
+            )
+
+        async def on_start():
+            await self.bus.publish(command_topic, {**base, "action": "open"})
+            await self._publish_session(session, kind="progress", phase="starting")
+
+        async def on_stop():
+            await self.bus.publish(command_topic, {**base, "action": "close"})
+
+        runner = HumanFollowRunner(
+            args,
+            get_frame=get_frame,
+            apply_velocity=apply_velocity,
+            emit_progress=emit_progress,
+            is_stopped=lambda: session.stop.is_set(),
+            on_start=on_start,
+            on_stop=on_stop,
+        )
+
         try:
-            while not session.stop.is_set():
-                if deadline is not None and time.monotonic() >= deadline:
-                    result["summary"] = "human follow completed"
-                    break
-                if max_steps > 0 and sequence >= max_steps:
-                    result["summary"] = "human follow completed"
-                    break
-                event = self._frame_events[session.robot_id]
-                try:
-                    await asyncio.wait_for(event.wait(), timeout=0.5)
-                except TimeoutError:
-                    await self._publish_session(
-                        session, kind="progress", phase="waiting_for_camera"
-                    )
-                    continue
-                event.clear()
-                metadata, image = self._frames[session.robot_id]
-                frame_id = int(metadata.get("frame_id") or 0)
-                if frame_id == last_frame_id:
-                    continue
-                last_frame_id = frame_id
-                detections = await asyncio.to_thread(detect_people, image)
-                target = tracker.update(detections)
-                height, width = image.shape[:2]
-                command = controller.compute_velocity(
-                    target, frame_width=width, frame_height=height
-                )
-                phase = "following"
-                if command is None:
-                    if not controller.is_searching():
-                        continue
-                    command = controller.compute_search_velocity()
-                    phase = "searching"
-                if controller.is_target_lost():
-                    result = {
-                        "success": False,
-                        "summary": "person lost during human follow",
-                        "failure_mode": "person_lost",
-                        "error": "person lost during human follow",
-                    }
-                    break
-                current = controller.smooth_velocity(current, command, alpha=0.3)
-                sequence += 1
-                now = time.time()
-                await self.bus.publish(
-                    command_topic,
-                    {
-                        **base,
-                        "action": "velocity",
-                        "sequence": sequence,
-                        "frame_id": frame_id,
-                        "vx": current.vx,
-                        "vy": current.vy,
-                        "wz": current.vz,
-                        "expires_at": now + 0.3,
-                        "watchdog_ms": 400,
-                    },
-                )
-                if time.monotonic() - last_progress_at >= 0.5:
-                    await self._publish_session(
-                        session,
-                        kind="progress",
-                        phase=phase,
-                        frame_id=frame_id,
-                        command={"vx": current.vx, "vy": current.vy, "wz": current.vz},
-                        detections=len(detections),
-                    )
-                    last_progress_at = time.monotonic()
+            result = await runner.run()
         except asyncio.CancelledError:
             result = {"success": False, "summary": "human follow interrupted"}
             raise
@@ -241,7 +208,6 @@ class HumanFollowService:
                 "error": str(exc),
             }
         finally:
-            await self.bus.publish(command_topic, {**base, "action": "close"})
             await self._publish_session(session, kind="result", **result)
             self._sessions.pop(session.session_id, None)
 

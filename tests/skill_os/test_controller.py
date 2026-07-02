@@ -498,15 +498,12 @@ def test_skill_controller_executes_human_follow_as_plugin_skill(
     from hey_robot.skill_os.base import SkillResult as PluginSkillResult
     from hey_robot.skill_os.builtins.navigation import HumanFollowSkill
 
-    async def keep_observation(_ctx, observation):
-        return observation
-
     monkeypatch.setattr(
         "hey_robot.skill_os.builtins.navigation.load_detector",
         lambda _path=None: None,
     )
     monkeypatch.setattr(
-        "hey_robot.skill_os.builtins.navigation.detect_people",
+        "hey_robot.skill_os.perception.human_follow.detect_people",
         lambda _image: [
             types.SimpleNamespace(
                 bbox=(60, 10, 70, 30),
@@ -515,10 +512,6 @@ def test_skill_controller_executes_human_follow_as_plugin_skill(
                 area=200,
             )
         ],
-    )
-    monkeypatch.setattr(
-        "hey_robot.skill_os.builtins.navigation._refresh_observation",
-        keep_observation,
     )
 
     service = _service(tmp_path)
@@ -530,8 +523,10 @@ def test_skill_controller_executes_human_follow_as_plugin_skill(
             ImageRef(uri="media://local/images/xlerobot/frame.jpg", camera="front")
         ],
     )
-    service.media_resolver.resolve_images = (  # type: ignore[method-assign]
-        lambda _refs: [np.zeros((100, 100, 3), dtype=np.uint8)]
+    # Provide camera frame directly (no more resolve_images / media store round-trip).
+    state.latest_camera_frame = (
+        {"robot_id": "xlerobot", "camera": "front", "frame_id": 1},
+        np.zeros((100, 100, 3), dtype=np.uint8),
     )
     intent = SkillIntent(
         envelope=Envelope(trace_id="tr1", robot_id="xlerobot"),
@@ -1528,3 +1523,184 @@ class TestOnSkillIntentExceptionScope:
         assert results[0]["status"] == "failed"
         assert results[0]["failure_mode"] == "internal_error"
         assert "invalid execution plan" in results[0]["summary"]
+
+
+def test_camera_auto_injection_in_plugin_context(tmp_path, monkeypatch) -> None:
+    """When a skill requires camera, model service calls get auto-injected with b64 JPEG."""
+    import base64
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    from hey_robot.protocol import RobotSkillSpec
+    from hey_robot.skill_os.composition import SkillExecutionPlan
+    from hey_robot.skill_os.scheduler import SkillRun
+
+    service = _service(tmp_path)
+    state = service.states["embodied_skills"]
+
+    image = np.zeros((16, 16, 3), dtype=np.uint8)
+    image[0, 0] = [255, 0, 0]
+    state.latest_camera_frame = (
+        {"robot_id": "xlerobot", "camera": "front", "frame_id": 42},
+        image,
+    )
+
+    contract = RobotSkillSpec(
+        name="test_skill",
+        description="skill requiring camera",
+        required_resources=("camera",),
+        required_model_service="test_capability",
+    )
+    intent = SkillIntent(
+        envelope=Envelope(trace_id="tr1", robot_id="xlerobot"),
+        skill_id="test1",
+        name="test_skill",
+        arguments={"target": "cup"},
+        objective="test",
+    )
+    run = SkillRun(
+        intent=intent,
+        skill_name="test_skill",
+        implementation_name="test_skill",
+        implementation_kind="plugin",
+        contract=contract,
+        execution_plan=SkillExecutionPlan(actions=()),
+    )
+
+    captured: list[dict] = []
+
+    async def fake_invoke_model_service(_run, _name, arguments):
+        captured.append(dict(arguments))
+
+    monkeypatch.setattr(service, "_invoke_model_service", fake_invoke_model_service)
+
+    ctx = service._plugin_context("embodied_skills", state, run, lambda _n, _a: None)
+
+    asyncio.run(ctx.model_services.call("test_capability", {"target": "cup"}))
+
+    assert len(captured) == 1
+    obs = captured[0]["observation"]
+    assert obs["frame_id"] == 42
+    assert len(obs["images"]) == 1
+    assert obs["images"][0]["camera"] == "front"
+    assert obs["images"][0]["format"] == "jpeg"
+    b64_data = obs["images"][0]["data"]
+    assert isinstance(b64_data, str)
+    decoded = base64.b64decode(b64_data)
+    assert len(decoded) > 0
+    pil_image = Image.open(io.BytesIO(decoded))
+    assert pil_image.size == (16, 16)
+
+
+def test_camera_auto_injection_skips_when_observation_already_present(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Camera injection does not override an explicit observation in arguments."""
+    import numpy as np
+
+    from hey_robot.protocol import RobotSkillSpec
+    from hey_robot.skill_os.composition import SkillExecutionPlan
+    from hey_robot.skill_os.scheduler import SkillRun
+
+    service = _service(tmp_path)
+    state = service.states["embodied_skills"]
+
+    image = np.zeros((16, 16, 3), dtype=np.uint8)
+    state.latest_camera_frame = (
+        {"robot_id": "xlerobot", "camera": "front", "frame_id": 42},
+        image,
+    )
+
+    contract = RobotSkillSpec(
+        name="test_skill",
+        description="skill requiring camera",
+        required_resources=("camera",),
+        required_model_service="test_capability",
+    )
+    intent = SkillIntent(
+        envelope=Envelope(trace_id="tr1", robot_id="xlerobot"),
+        skill_id="test1",
+        name="test_skill",
+        arguments={"target": "cup"},
+        objective="test",
+    )
+    run = SkillRun(
+        intent=intent,
+        skill_name="test_skill",
+        implementation_name="test_skill",
+        implementation_kind="plugin",
+        contract=contract,
+        execution_plan=SkillExecutionPlan(actions=()),
+    )
+
+    captured: list[dict] = []
+
+    async def fake_invoke_model_service(_run, _name, arguments):
+        captured.append(dict(arguments))
+
+    monkeypatch.setattr(service, "_invoke_model_service", fake_invoke_model_service)
+
+    ctx = service._plugin_context("embodied_skills", state, run, lambda _n, _a: None)
+
+    asyncio.run(
+        ctx.model_services.call(
+            "test_capability", {"target": "cup", "observation": {"frame_id": 99}}
+        )
+    )
+
+    assert len(captured) == 1
+    assert captured[0]["observation"]["frame_id"] == 99
+
+
+def test_camera_auto_injection_skips_when_no_frame_available(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """When latest_camera_frame is None, observation is not injected."""
+
+    from hey_robot.protocol import RobotSkillSpec
+    from hey_robot.skill_os.composition import SkillExecutionPlan
+    from hey_robot.skill_os.scheduler import SkillRun
+
+    service = _service(tmp_path)
+    state = service.states["embodied_skills"]
+    state.latest_camera_frame = None
+
+    contract = RobotSkillSpec(
+        name="test_skill",
+        description="skill requiring camera",
+        required_resources=("camera",),
+        required_model_service="test_capability",
+    )
+    intent = SkillIntent(
+        envelope=Envelope(trace_id="tr1", robot_id="xlerobot"),
+        skill_id="test1",
+        name="test_skill",
+        arguments={"target": "cup"},
+        objective="test",
+    )
+    run = SkillRun(
+        intent=intent,
+        skill_name="test_skill",
+        implementation_name="test_skill",
+        implementation_kind="plugin",
+        contract=contract,
+        execution_plan=SkillExecutionPlan(actions=()),
+    )
+
+    captured: list[dict] = []
+
+    async def fake_invoke_model_service(_run, _name, arguments):
+        captured.append(dict(arguments))
+
+    monkeypatch.setattr(service, "_invoke_model_service", fake_invoke_model_service)
+
+    ctx = service._plugin_context("embodied_skills", state, run, lambda _n, _a: None)
+
+    asyncio.run(ctx.model_services.call("test_capability", {"target": "cup"}))
+
+    assert len(captured) == 1
+    assert "observation" not in captured[0]

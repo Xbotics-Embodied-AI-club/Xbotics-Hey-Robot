@@ -56,6 +56,9 @@ backup/*
 
 # Python virtual environment
 venv/*
+.venv/
+.vln-venv/
+.vla-venv/
 
 # Disable upload .env
 .env

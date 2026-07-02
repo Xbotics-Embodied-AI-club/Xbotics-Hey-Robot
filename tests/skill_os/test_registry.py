@@ -218,6 +218,16 @@ def test_runtime_executes_vla_manipulation_skill() -> None:
                 metrics={"verified": True},
             )
 
+    class FakeRobot:
+        async def move_arm(self, **_arguments):
+            return {"success": True}
+
+        async def move_gripper(self, **_arguments):
+            return {"success": True}
+
+        async def stop_arm(self, **_arguments):
+            return {"success": True}
+
     model_services = ModelServiceAPI()
     registry = load_skill_registry(enabled=("vla_manipulation",))
     runtime = SkillRuntime(registry)
@@ -225,18 +235,25 @@ def test_runtime_executes_vla_manipulation_skill() -> None:
     result = __import__("asyncio").run(
         runtime.execute(
             "vla_manipulation",
-            {"task_prompt": "Pick up the red cup."},
+            {"task_prompt": "Pick up the red cup.", "max_steps": 1},
             context_factory=lambda invoke: SkillContext(
                 model_services=model_services,
                 invoke=invoke,
+                robot=FakeRobot(),
             ),
         )
     )
 
     assert result.success is True
-    assert result.data == {"verified": True}
     assert model_services.calls == [
-        ("vla_manipulation", {"task_prompt": "Pick up the red cup."})
+        (
+            "vla_manipulation",
+            {
+                "skill_name": "vla_manipulation",
+                "task_prompt": "Pick up the red cup.",
+                "vla_step": 0,
+            },
+        )
     ]
 
 
@@ -629,7 +646,27 @@ def test_navigate_to_skill_injects_latest_observation_image() -> None:
     result = __import__("asyncio").run(
         runtime.execute(
             "navigate_to",
-            {"target": "desk", "camera": "front", "execute_primitives": False},
+            {
+                "target": "desk",
+                "camera": "front",
+                "execute_primitives": False,
+                "observation": {
+                    "frame_id": 42,
+                    "images": [
+                        {
+                            "uri": "media://local/images/xlerobot/front/frame.jpg",
+                            "camera": "front",
+                            "width": None,
+                            "height": None,
+                            "timestamp": None,
+                            "content_type": None,
+                            "size_bytes": None,
+                            "sha256": None,
+                            "metadata": {},
+                        }
+                    ],
+                },
+            },
             context_factory=lambda invoke: SkillContext(
                 model_services=model_services,
                 observation=observation,

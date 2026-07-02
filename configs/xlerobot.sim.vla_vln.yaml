@@ -1,8 +1,11 @@
-# XLeRobot MuJoCo simulation deployment for local development and testing.
-# Usage: hey-robot run --config configs/xlerobot.sim.windows.yaml
+# XLeRobot MuJoCo simulation with both VLA + VLN model services.
+# Usage:
+#   Start VLN service:  python -m hey_robot.cli.model_service --config configs/xlerobot.sim.vla_vln.yaml --service-id vln_nav
+#   Start VLA service:  python -m hey_robot.cli.model_service --config configs/xlerobot.sim.vla_vln.yaml --service-id vla_manipulation
+#   Start main runtime: hey-robot run --config configs/xlerobot.sim.vla_vln.yaml
 
 deployment:
-  id: xlerobot.sim.windows
+  id: xlerobot.sim.vla_vln
   bus:
     type: nats
     url: nats://127.0.0.1:4222
@@ -11,21 +14,21 @@ deployment:
       robot_status_log_every_frames: 5
 
 logging:
-  level: INFO
+  level: DEBUG
   theme: dark
   json_format: false
-  file_path: logs/xlerobot.sim.windows/app.log
-  json_file_path: logs/xlerobot.sim.windows/app.jsonl
+  file_path: logs/xlerobot.sim.vla_vln/app.log
+  json_file_path: logs/xlerobot.sim.vla_vln/app.jsonl
   throttle_sec: 0.0
 
 resources:
-  runtime_dir: runtime/xlerobot.sim.windows
+  runtime_dir: runtime/xlerobot.sim.vla_vln
   media:
-    root: runtime/xlerobot.sim.windows/media
+    root: runtime/xlerobot.sim.vla_vln/media
     max_items: 64
     image_save_every_n: 1
   episodes:
-    root: runtime/xlerobot.sim.windows/episodes
+    root: runtime/xlerobot.sim.vla_vln/episodes
   events:
     retain: 2000
 
@@ -39,6 +42,11 @@ skills:
     - detect_marker
     - move_base
     - turn_base
+    - navigate_to
+    - approach_object
+    - vla_manipulation
+    - pick_object
+    - place_object
     - human_follow
     - stop_motion
     - reset_posture
@@ -71,7 +79,6 @@ identity:
     "cli:sender:local-user": owner
     "web:sender:web-user": owner
     "voice:sender:voice-user": owner
-    # Replace the Feishu open_id with your actual account after binding/inspection.
     "feishu:sender:ou_160f4368eb2ada4edda22bd33ce435af": owner
 
 channels:
@@ -109,7 +116,7 @@ channels:
     tts_echo_guard_sec: 1.0
     reply_tts: true
     recorder:
-      input_device: 1
+      input_device: null
       sample_rate: 16000
       channels: 1
       block_ms: 100
@@ -119,7 +126,7 @@ channels:
       min_speech_sec: 0.4
       max_speech_sec: 6.0
     asr:
-      provider: sherpa_onnx
+      provider: doubao
       api_key_env: ARK_API_KEY
       endpoint: wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream
       resource_id: volc.seedasr.sauc.duration
@@ -128,12 +135,6 @@ channels:
       bits: 16
       channels: 1
       chunk_ms: 200
-      sherpa_model_dir: models/asr
-      sherpa_tokens: tokens.txt
-      sherpa_encoder: encoder.int8.onnx
-      sherpa_decoder: decoder.onnx
-      sherpa_joiner: joiner.int8.onnx
-      sherpa_provider: cpu
     tts:
       provider: doubao
       enabled: true
@@ -143,7 +144,7 @@ channels:
       endpoint: wss://openspeech.bytedance.com/api/v3/tts/bidirection
       encoding: pcm
       sample_rate: 16000
-      output_device: 3
+      output_device: null
   feishu:
     type: feishu
     enabled: true
@@ -157,7 +158,7 @@ channels:
     domain: feishu
     allow_from:
       - "*"
-    media_root: runtime/xlerobot.sim.windows/media/feishu
+    media_root: runtime/xlerobot.sim.vla_vln/media/feishu
 
 robots:
   sim_robot:
@@ -168,7 +169,6 @@ robots:
     embodiment_profile: xlerobot_sim
     enabled: true
     settings:
-      # Official XLeRobot MuJoCo scene with native fixed cameras.
       mjcf_path: assets/robots/xlerobot/scene.xml
       render_width: 640
       render_height: 480
@@ -178,7 +178,61 @@ robots:
       viewer:
         enabled: false
 
-model_services: {}
+model_services:
+  vln_nav:
+    type: vln_planner
+    robot_id: sim_robot
+    enabled: true
+    target: grpc://127.0.0.1:9091
+    provides:
+      - navigate_to
+      - approach_object
+    timeout_sec: 60.0
+    settings:
+      host: 127.0.0.1
+      port: 9091
+      backend: internvla_n1_system2
+      control_mode: planner_only
+      execute_low_level_control: false
+      mock_mode: false
+      model_path: models/InternVLA-N1-System2
+      device: cuda:1
+      dtype: bf16
+      attn_implementation: sdpa
+      media_root: runtime/xlerobot.sim.vla_vln/media
+      internnav_repo: third_party/InternNav
+      camera: front
+      image_width: 640
+      image_height: 480
+      resize_w: 384
+      resize_h: 384
+      num_history: 8
+      max_new_tokens: 128
+      hfov: 90
+
+  vla_manipulation:
+    type: vla_policy
+    robot_id: sim_robot
+    enabled: true
+    target: grpc://127.0.0.1:9090
+    provides:
+      - vla_manipulation
+    timeout_sec: 60.0
+    settings:
+      host: 127.0.0.1
+      port: 9090
+      backend: lerobot
+      server_address: "localhost:5555"
+      model_path: ""
+      policy_type: "act"
+      arm_port: ""
+      task: ""
+      camera_config: {}
+      policy_device: "cuda"
+      fps: 30
+      actions_per_chunk: 50
+      chunk_size_threshold: 0.5
+      load_on_startup: false
 
 policies:
   embodied_skills:
@@ -197,15 +251,12 @@ agents:
       providers:
         planner:
           type: deepseek
+          model: deepseek-chat
           model_env: DEEPSEEK_MODEL
           api_key_env: DEEPSEEK_API_KEY
           base_url_env: DEEPSEEK_BASE_URL
           temperature: 0.0
           max_tokens: 1024
-          reasoning_effort: high
-          extra_body:
-            thinking:
-              type: enabled
         scene_captioner:
           type: dashscope
           model_env: DASHSCOPE_MODEL
@@ -214,7 +265,7 @@ agents:
           max_tokens: 512
       execution_feedback:
         backend: status
-        media_root: runtime/xlerobot.sim.windows/media
+        media_root: runtime/xlerobot.sim.vla_vln/media
       task_supervisor:
         status_stale_sec: 90.0
         observation_stale_sec: 90.0

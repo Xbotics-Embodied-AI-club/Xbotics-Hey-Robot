@@ -108,7 +108,7 @@ class TestXLeRobotSimSkillAdapter:
             )
 
     def test_vla_manipulation_uses_required_model_service(self) -> None:
-        from hey_robot.skill_os.builtins.model_service import VLAManipulationSkill
+        from hey_robot.skill_os.builtins.manipulation import VLAManipulationSkill
 
         assert VLAManipulationSkill.spec.required_model_service == "vla_manipulation"
         assert VLAManipulationSkill.spec.required_resources == (

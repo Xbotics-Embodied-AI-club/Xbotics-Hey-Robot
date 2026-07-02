@@ -364,3 +364,157 @@ class FollowController:
     @staticmethod
     def _clamp(value: float, min_val: float, max_val: float) -> float:
         return max(min_val, min(value, max_val))
+
+
+class HumanFollowRunner:
+    """Shared human-follow control loop — frame source and velocity sink agnostic.
+
+    Both the NATS service and the local skill use this single implementation.
+    The caller injects *get_frame*, *apply_velocity*, *emit_progress* and
+    *is_stopped* callables that adapt the runner to their specific transport.
+    """
+
+    def __init__(
+        self,
+        arguments: dict[str, Any],
+        *,
+        get_frame: Any = None,
+        apply_velocity: Any = None,
+        emit_progress: Any = None,
+        is_stopped: Any = None,
+        on_start: Any = None,
+        on_stop: Any = None,
+    ) -> None:
+        self._args = arguments
+        self._get_frame = get_frame
+        self._apply_velocity = apply_velocity
+        self._emit_progress = emit_progress
+        self._is_stopped = is_stopped
+        self._on_start = on_start
+        self._on_stop = on_stop
+
+        self.tracker = TargetTracker(
+            max_age=int(arguments.get("max_tracking_age") or 30),
+            min_iou=float(arguments.get("min_iou_threshold") or 0.3),
+        )
+        self.controller = FollowController(
+            target_distance=float(arguments.get("target_distance_m") or 0.7),
+            target_width_ratio=float(arguments.get("target_width_ratio") or 0.35),
+            target_height_ratio=float(arguments.get("target_height_ratio") or 1.0),
+            kp_linear=float(arguments.get("kp_linear") or 0.35),
+            kp_angular=float(arguments.get("kp_angular") or 1.0),
+            max_linear_speed=float(arguments.get("max_linear_speed") or 0.3),
+            max_backward_speed=float(arguments.get("max_backward_speed") or 0.2),
+            allow_backward=bool(arguments.get("allow_backward", True)),
+            max_angular_speed=float(arguments.get("max_angular_speed") or 1.0),
+            dead_zone_x=float(arguments.get("dead_zone_x") or 0.15),
+            dead_zone_area=float(arguments.get("dead_zone_area") or 0.1),
+        )
+
+    async def run(self) -> dict[str, Any]:
+        """Execute the human-follow control loop. Returns a result dict."""
+        import asyncio
+
+        duration_raw = self._args.get("duration_sec")
+        max_steps = int(self._args.get("max_steps") or 0)
+        if duration_raw is None and max_steps <= 0:
+            duration_raw = 120.0
+        duration = float(duration_raw) if duration_raw is not None else None
+        deadline = time.monotonic() + duration if duration else None
+
+        current = VelocityCommand(0.0, 0.0, 0.0)
+        last_frame_id: int | None = None
+        steps = 0
+
+        if self._on_start is not None:
+            await self._on_start()
+
+        result: dict[str, Any] = {"success": True, "summary": "human follow stopped"}
+        try:
+            while not self._is_stopped():
+                if deadline is not None and time.monotonic() >= deadline:
+                    result["summary"] = "human follow completed"
+                    break
+                if max_steps > 0 and steps >= max_steps:
+                    result["summary"] = "human follow completed"
+                    break
+
+                frame = await self._get_frame()
+                if frame is None:
+                    if self._emit_progress is not None:
+                        await self._emit_progress(
+                            phase="waiting_for_camera",
+                            summary="waiting for camera frame",
+                        )
+                    continue
+
+                metadata, image = frame
+                frame_id = int(metadata.get("frame_id") or 0)
+                if frame_id == last_frame_id:
+                    await asyncio.sleep(0.01)
+                    continue
+                last_frame_id = frame_id
+
+                detections = await asyncio.to_thread(detect_people, image)
+                target = self.tracker.update(detections)
+                height, width = image.shape[:2]
+                command = self.controller.compute_velocity(
+                    target, frame_width=width, frame_height=height
+                )
+                phase = "following"
+                if command is None:
+                    if not self.controller.is_searching():
+                        continue
+                    command = self.controller.compute_search_velocity()
+                    phase = "searching"
+                if self.controller.is_target_lost():
+                    result = {
+                        "success": False,
+                        "summary": "person lost during human follow",
+                        "failure_mode": "person_lost",
+                        "error": "person lost during human follow",
+                    }
+                    break
+
+                current = self.controller.smooth_velocity(current, command, alpha=0.3)
+                steps += 1
+                await self._apply_velocity(current.vx, current.vy, current.vz)
+
+                if self._emit_progress is not None:
+                    await self._emit_progress(
+                        phase=phase,
+                        summary="following" if phase == "following" else "searching",
+                        frame_id=frame_id,
+                        detections=detections,
+                        target=target,
+                        command={
+                            "vx": current.vx,
+                            "vy": current.vy,
+                            "wz": current.vz,
+                        },
+                    )
+
+                # Early exit when already in the follow window
+                if (
+                    target is not None
+                    and abs(current.vx) < 0.02
+                    and abs(current.vz) < 0.02
+                    and duration is not None
+                ):
+                    break
+
+        except asyncio.CancelledError:
+            result = {"success": False, "summary": "human follow interrupted"}
+            raise
+        except Exception as exc:
+            result = {
+                "success": False,
+                "summary": str(exc),
+                "failure_mode": "internal_error",
+                "error": str(exc),
+            }
+        finally:
+            if self._on_stop is not None:
+                await self._on_stop()
+
+        return result

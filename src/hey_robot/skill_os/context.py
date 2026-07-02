@@ -26,3 +26,4 @@ class SkillContext:
     invoke: Callable[[str, dict[str, Any] | None], Any] | None = None
     progress: Callable[..., Awaitable[None]] | None = None
     human_follow: Any = None
+    get_camera_frame: Callable[[], tuple[dict[str, Any], Any] | None] | None = None

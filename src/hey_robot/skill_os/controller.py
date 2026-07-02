@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
 import math
 import time
 from dataclasses import dataclass, replace
 from typing import Any
+
+from PIL import Image
 
 from hey_robot.bus.factory import create_bus_client
 from hey_robot.config import DeploymentConfig, PolicySpec
@@ -26,6 +30,7 @@ from hey_robot.protocol import (
 from hey_robot.protocol.messages import from_payload, to_payload
 from hey_robot.robot_runtime.identity import resolve_robot_family
 from hey_robot.robot_runtime.media import LocalMediaStore, MediaResolver
+from hey_robot.robot_runtime.observations.frame_stream import decode_frame_packet
 from hey_robot.skill_os.actions import RobotSkillAction
 from hey_robot.skill_os.catalog import RobotSkillSpec
 from hey_robot.skill_os.composition import SkillExecutionPlan
@@ -48,6 +53,7 @@ class _SkillControllerState:
     latest_status: RobotStatus | None = None
     last_scheduler_decision: dict[str, Any] | None = None
     recently_finished_runs: dict[str, tuple[SkillRun, float, str | None]] | None = None
+    latest_camera_frame: tuple[dict[str, Any], Any] | None = None
 
     @property
     def active_runs(self) -> dict[str, SkillRun]:
@@ -101,6 +107,15 @@ class SkillControllerService:
         await self.bus.subscribe([self.topics.robot_observation], self._on_observation)
         await self.bus.subscribe([self.topics.skill_intent], self._on_skill_intent)
         await self.bus.subscribe([self.topics.robot_status], self._on_status)
+        robot_ids = list({state.spec.robot_id for state in self.states.values()})
+        if robot_ids:
+            await self.bus.subscribe_raw(
+                [
+                    self.topics.for_robot(self.topics.camera_frame, robot_id)
+                    for robot_id in robot_ids
+                ],
+                self._on_camera_frame,
+            )
         await asyncio.gather(
             *(
                 self._skill_loop(policy_id, state)
@@ -121,6 +136,16 @@ class SkillControllerService:
         for state in self.states.values():
             if state.spec.robot_id == observation.envelope.robot_id:
                 state.latest_observation = observation
+
+    async def _on_camera_frame(self, _topic: str, payload: bytes) -> None:
+        try:
+            metadata, image = await asyncio.to_thread(decode_frame_packet, payload)
+        except Exception:
+            return
+        robot_id = str(metadata.get("robot_id") or "")
+        for state in self.states.values():
+            if state.spec.robot_id == robot_id:
+                state.latest_camera_frame = (metadata, image)
 
     async def _on_skill_intent(self, _topic: str, payload: dict[str, Any]) -> None:
         intent = from_payload(SkillIntent, payload)
@@ -874,14 +899,52 @@ class SkillControllerService:
             )
         )
 
+        contract = run.contract
+        requires_camera = contract is not None and "camera" in (
+            contract.required_resources or ()
+        )
+
+        def base_invoke(name: str, arguments: dict[str, Any]) -> Any:
+            return self._invoke_model_service(run, name, arguments)
+
+        if requires_camera:
+            _state_ref = state
+
+            def camera_aware_invoke(name: str, arguments: dict[str, Any]):
+                if "observation" not in arguments and "image_path" not in arguments:
+                    frame = _state_ref.latest_camera_frame
+                    if frame is not None:
+                        metadata, image_array = frame
+                        buf = io.BytesIO()
+                        Image.fromarray(image_array).save(
+                            buf, format="JPEG", quality=85
+                        )
+                        b64_data = base64.b64encode(buf.getvalue()).decode("ascii")
+                        arguments = {
+                            **arguments,
+                            "observation": {
+                                "frame_id": metadata.get("frame_id"),
+                                "images": [
+                                    {
+                                        "camera": metadata.get("camera", "unknown"),
+                                        "format": "jpeg",
+                                        "data": b64_data,
+                                    }
+                                ],
+                            },
+                        }
+                return self._invoke_model_service(run, name, arguments)
+
+            model_invoke = camera_aware_invoke
+        else:
+            model_invoke = base_invoke
+
         return SkillContext(
             skill_id=run.intent.skill_id,
             robot_id=run.intent.envelope.robot_id,
             robot=robot,
             perception=PerceptionPort(robot),
-            model_services=ModelServicePort(
-                lambda name, arguments: self._invoke_model_service(run, name, arguments)
-            ),
+            model_services=ModelServicePort(model_invoke),
             observation=state.latest_observation,
             current_observation=lambda: state.latest_observation,
             resolve_images=self.media_resolver.resolve_images,
@@ -891,6 +954,7 @@ class SkillControllerService:
                 policy_id, state, run, **kwargs
             ),
             human_follow=self.human_follow,
+            get_camera_frame=lambda: state.latest_camera_frame,
         )
 
     async def _plugin_progress(

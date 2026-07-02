@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
-from dataclasses import asdict
 from typing import Any
 
 from hey_robot.protocol import RobotObservation
@@ -13,10 +11,8 @@ from hey_robot.skill_os.builtins.navigation_adapter import (
     planner_output_to_primitive,
 )
 from hey_robot.skill_os.perception.human_follow import (
-    FollowController,
-    TargetTracker,
+    HumanFollowRunner,
     VelocityCommand,
-    detect_people,
     load_detector,
 )
 
@@ -324,261 +320,115 @@ class HumanFollowSkill(BaseSkill):
                 arguments=dict(arguments),
                 progress=getattr(ctx, "progress", None),
             )
-        observation = ctx.observation
-        if observation is None:
+
+        # Local mode: use shared HumanFollowRunner with camera frames from bus.
+        if ctx.get_camera_frame is None:
             return SkillResult(
                 success=False,
-                summary="human follow requires a current observation",
-                failure_mode="observation_unavailable",
-                error="current observation is unavailable",
+                summary="human follow requires camera frame access",
+                failure_mode="camera_unavailable",
+                error="camera frame stream is unavailable",
             )
-        if ctx.resolve_images is None:
-            return SkillResult(
-                success=False,
-                summary="human follow image resolver is unavailable",
-                failure_mode="image_unavailable",
-                error="image resolver is unavailable",
-            )
+
         load_detector(str(arguments.get("model_path") or "models/yolo26n.pt"))
-        await _emit_follow_progress(
-            ctx,
-            phase="starting",
-            summary="preparing human follow",
-            progress=0.05,
-            observation=observation,
-        )
-        duration_raw = arguments.get("duration_sec")
-        duration = (
-            min(3600.0, max(1.0, float(duration_raw)))
-            if duration_raw is not None
-            else None
-        )
-        max_steps = int(arguments.get("max_steps") or 0)
-        if duration is None and max_steps <= 0:
-            max_steps = 300
-        deadline = time.monotonic() + duration if duration is not None else None
-        tracker = TargetTracker(
-            max_age=int(arguments.get("max_tracking_age") or 30),
-            min_iou=float(arguments.get("min_iou_threshold") or 0.3),
-        )
-        controller = FollowController(
-            target_distance=float(arguments.get("target_distance_m") or 0.7),
-            target_width_ratio=float(arguments.get("target_width_ratio") or 0.35),
-            target_height_ratio=float(arguments.get("target_height_ratio") or 1.0),
-            kp_linear=float(arguments.get("kp_linear") or 0.35),
-            kp_angular=float(arguments.get("kp_angular") or 1.0),
-            max_linear_speed=float(arguments.get("max_linear_speed") or 0.3),
-            max_backward_speed=float(arguments.get("max_backward_speed") or 0.2),
-            allow_backward=bool(arguments.get("allow_backward", True)),
-            max_angular_speed=float(arguments.get("max_angular_speed") or 1.0),
-            dead_zone_x=float(arguments.get("dead_zone_x") or 0.15),
-            dead_zone_area=float(arguments.get("dead_zone_area") or 0.1),
-        )
-        current_velocity = VelocityCommand(0.0, 0.0, 0.0)
         steps: list[dict] = []
-        last_processed_frame_id: int | None = None
-        try:
-            while (deadline is None or time.monotonic() < deadline) and (
-                max_steps <= 0 or len(steps) < max_steps
-            ):
-                observation = await _refresh_observation(ctx, observation)
-                frame_id = getattr(observation, "frame_id", None)
-                if frame_id is not None and frame_id == last_processed_frame_id:
-                    await asyncio.sleep(0.01)
-                    continue
-                last_processed_frame_id = frame_id
-                image = _resolve_follow_image(
-                    ctx,
-                    observation,
-                    camera=arguments.get("camera"),
+        finished = asyncio.Event()
+
+        async def get_frame():
+            return ctx.get_camera_frame()
+
+        async def apply_velocity(vx, vy, wz):
+            if abs(vx) < 0.002 and abs(wz) < 0.0002:
+                return
+            await ctx.robot.base_velocity_step(
+                vx=vx,
+                vy=vy,
+                wz=wz,
+                duration_ms=400,
+            )
+            steps.append(
+                {
+                    "success": True,
+                    "skill": "base_velocity_step",
+                    "message": "follow velocity step",
+                    "command": {"vx": vx, "vy": vy, "wz": wz},
+                }
+            )
+
+        async def emit_progress(**payload):
+            phase = payload.get("phase", "following")
+            summary = payload.get("summary", "")
+            command_raw = payload.get("command")
+            if isinstance(command_raw, dict):
+                command = VelocityCommand(
+                    vx=float(command_raw.get("vx") or 0),
+                    vy=float(command_raw.get("vy") or 0),
+                    vz=float(command_raw.get("wz") or 0),
                 )
-                detections = detect_people(image)
-                target = tracker.update(detections)
-                width, height = _frame_size(image)
-                command = controller.compute_velocity(
-                    target, frame_width=width, frame_height=height
-                )
-                mode = "following"
-                if command is None:
-                    if controller.is_searching():
-                        command = controller.compute_search_velocity()
-                        mode = "searching"
-                        await _emit_follow_progress(
-                            ctx,
-                            phase="searching",
-                            summary="target temporarily lost; searching",
-                            progress=0.35,
-                            observation=observation,
-                            detections=detections,
-                            command=command,
-                            mode=mode,
-                        )
-                    else:
-                        await _emit_follow_progress(
-                            ctx,
-                            phase="acquiring",
-                            summary="looking for a person to follow",
-                            progress=0.2,
-                            observation=observation,
-                            detections=detections,
-                            mode="acquiring",
-                        )
-                        await asyncio.sleep(0.02)
-                        continue
-                if controller.is_target_lost():
-                    await ctx.robot.stop_motion()
-                    await _emit_follow_progress(
-                        ctx,
-                        phase="lost",
-                        summary="person lost during human follow",
-                        progress=0.0,
-                        observation=observation,
-                        detections=detections,
-                        command=VelocityCommand(0.0, 0.0, 0.0),
-                        mode="lost",
-                        reason="person_lost",
-                    )
-                    return SkillResult(
-                        success=False,
-                        summary="person lost during human follow",
-                        failure_mode="person_lost",
-                        error="person lost during human follow",
-                        data={"steps": steps, "mode": "lost"},
-                    )
-                current_velocity = controller.smooth_velocity(
-                    current_velocity, command, alpha=0.3
-                )
-                await _emit_follow_progress(
-                    ctx,
-                    phase=mode,
-                    summary="following target" if mode == "following" else mode,
-                    progress=0.6 if mode == "following" else 0.4,
-                    observation=observation,
-                    target=target,
-                    detections=detections,
-                    command=current_velocity,
-                    mode=mode,
-                )
-                applied_steps = await _apply_follow_velocity(ctx, current_velocity)
-                for step in applied_steps:
-                    step["mode"] = mode
-                steps.extend(applied_steps)
-                if (
-                    target is not None
-                    and abs(current_velocity.vx) < 0.02
-                    and abs(current_velocity.vz) < 0.02
-                ):
-                    steps.append(
-                        {
-                            "success": True,
-                            "skill": "human_follow",
-                            "message": "target already within follow window",
-                            "mode": mode,
-                        }
-                    )
-                    if duration is not None:
-                        break
-                if max_steps > 0 and len(steps) >= max_steps:
-                    break
-                await asyncio.sleep(0.01)
-        except asyncio.CancelledError:
-            await ctx.robot.stop_motion()
+            elif isinstance(command_raw, VelocityCommand):
+                command = command_raw
+            else:
+                command = None
             await _emit_follow_progress(
                 ctx,
-                phase="interrupted",
-                summary="human follow interrupted; motion stopped",
-                progress=0.0,
-                observation=observation,
-                command=VelocityCommand(0.0, 0.0, 0.0),
-                mode="interrupted",
-                reason="cancelled",
+                phase=phase,
+                summary=summary,
+                progress=0.5 if phase == "following" else 0.3,
+                observation=ctx.current_observation()
+                if ctx.current_observation
+                else None,
+                target=payload.get("target"),
+                detections=payload.get("detections"),
+                command=command,
+                mode=phase,
             )
+
+        async def on_stop():
+            await ctx.robot.stop_motion()
+
+        runner = HumanFollowRunner(
+            arguments,
+            get_frame=get_frame,
+            apply_velocity=apply_velocity,
+            emit_progress=emit_progress,
+            is_stopped=lambda: finished.is_set(),
+            on_stop=on_stop,
+        )
+
+        try:
+            result = await runner.run()
+        except asyncio.CancelledError:
+            await ctx.robot.stop_motion()
             raise
+
         await ctx.robot.stop_motion()
         await _emit_follow_progress(
             ctx,
-            phase="completed" if duration is not None or max_steps > 0 else "stopped",
-            summary="human follow completed"
-            if duration is not None or max_steps > 0
-            else "human follow stopped",
-            progress=1.0,
-            observation=observation,
+            phase="completed" if result.get("success") else "lost",
+            summary=result.get("summary", "human follow stopped"),
+            progress=1.0 if result.get("success") else 0.0,
+            observation=ctx.current_observation() if ctx.current_observation else None,
             command=VelocityCommand(0.0, 0.0, 0.0),
-            mode="completed" if duration is not None or max_steps > 0 else "running",
+            mode="completed" if result.get("success") else "failed",
         )
         return SkillResult(
-            success=True,
-            summary="human follow completed"
-            if duration is not None or max_steps > 0
-            else "human follow stopped",
+            success=result.get("success", False),
+            summary=result.get("summary", "human follow stopped"),
+            failure_mode=result.get("failure_mode"),
+            error=result.get("error"),
             data={
                 "steps": steps,
-                "mode": "completed"
-                if duration is not None or max_steps > 0
-                else "running",
+                "mode": "completed" if result.get("success") else "failed",
             },
         )
 
 
-async def _refresh_observation(ctx, observation: RobotObservation) -> RobotObservation:
-    # Fast path: read latest frame directly from the driver's continuous stream.
-    # The driver observation loop publishes frames via the message bus;
-    # _on_observation keeps state.latest_observation current. No need for
-    # an expensive sub-skill call just to get a fresh image for detection.
-    if ctx.current_observation is not None:
-        latest = ctx.current_observation()
-        if isinstance(latest, RobotObservation):
-            return latest
-    # Slow fallback: only when the driver stream has not started yet.
-    if ctx.invoke is not None:
-        await ctx.invoke("inspect_scene", {})
-        if ctx.current_observation is not None:
-            latest = ctx.current_observation()
-            if isinstance(latest, RobotObservation):
-                return latest
-    return observation
-
-
-def _vln_payload(ctx, arguments: dict[str, Any]) -> dict[str, Any]:
-    payload = {
+def _vln_payload(_ctx: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Build VLN planner payload — camera frame is auto-injected by the framework."""
+    return {
         key: value
         for key, value in dict(arguments).items()
         if key not in {"execute_primitives", "max_steps"}
-    }
-    if "image_path" in payload:
-        return payload
-    observation = _latest_observation(ctx)
-    if observation is None:
-        return payload
-    image_payload = _observation_payload(observation, camera=payload.get("camera"))
-    if image_payload["images"]:
-        payload["observation"] = image_payload
-    return payload
-
-
-def _latest_observation(ctx) -> RobotObservation | None:
-    if ctx.current_observation is not None:
-        latest = ctx.current_observation()
-        if isinstance(latest, RobotObservation):
-            return latest
-    if isinstance(ctx.observation, RobotObservation):
-        return ctx.observation
-    return None
-
-
-def _observation_payload(
-    observation: RobotObservation,
-    *,
-    camera: object | None = None,
-) -> dict[str, Any]:
-    images = observation.images
-    if camera is not None:
-        selected = [image for image in images if image.camera == str(camera)]
-        if selected:
-            images = selected
-    return {
-        "frame_id": observation.frame_id,
-        "images": [asdict(image) for image in images],
     }
 
 
@@ -646,27 +496,6 @@ async def _emit_vln_progress(
     )
 
 
-def _resolve_follow_image(ctx, observation: RobotObservation, *, camera: object | None):
-    refs = observation.images
-    if camera is not None:
-        filtered = [ref for ref in refs if ref.camera == str(camera)]
-        if filtered:
-            refs = filtered
-    if not refs or ctx.resolve_images is None:
-        return None
-    images = ctx.resolve_images(refs[:1])
-    if not images:
-        return None
-    return images[0]
-
-
-def _frame_size(image) -> tuple[int, int]:
-    if image is None:
-        return (640, 480)
-    height, width = image.shape[:2]
-    return width, height
-
-
 async def _emit_follow_progress(
     ctx,
     *,
@@ -723,24 +552,3 @@ def _first_camera(observation: RobotObservation | None) -> str | None:
     if observation is None or not observation.images:
         return None
     return observation.images[0].camera
-
-
-async def _apply_follow_velocity(ctx, command: VelocityCommand) -> list[dict]:
-    steps: list[dict] = []
-    if abs(command.vx) < 0.002 and abs(command.vz) < 0.0002:
-        return steps
-    await ctx.robot.base_velocity_step(
-        vx=command.vx,
-        vy=command.vy,
-        wz=command.vz,
-        duration_ms=400,
-    )
-    steps.append(
-        {
-            "success": True,
-            "skill": "base_velocity_step",
-            "message": "follow velocity step",
-            "command": {"vx": command.vx, "vy": command.vy, "wz": command.vz},
-        }
-    )
-    return steps

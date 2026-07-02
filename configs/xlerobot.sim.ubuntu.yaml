@@ -39,8 +39,6 @@ skills:
     - detect_marker
     - move_base
     - turn_base
-    - navigate_to
-    - approach_object
     - human_follow
     - stop_motion
     - reset_posture
@@ -173,37 +171,7 @@ robots:
       viewer:
         enabled: false
 
-model_services:
-  vln_nav:
-    type: vln_planner
-    robot_id: sim_robot
-    enabled: true
-    target: grpc://127.0.0.1:9091
-    provides:
-      - navigate_to
-      - approach_object
-    timeout_sec: 60.0
-    settings:
-      host: 127.0.0.1
-      port: 9091
-      backend: internvla_n1_system2
-      control_mode: planner_only
-      execute_low_level_control: false
-      mock_mode: false
-      model_path: models/InternVLA-N1-System2
-      device: cuda:1
-      dtype: bf16
-      attn_implementation: sdpa
-      media_root: runtime/xlerobot.sim.ubuntu/media
-      internnav_repo: third_party/InternNav
-      camera: front
-      image_width: 640
-      image_height: 480
-      resize_w: 384
-      resize_h: 384
-      num_history: 8
-      max_new_tokens: 128
-      hfov: 90
+model_services: {}
 
 policies:
   embodied_skills:

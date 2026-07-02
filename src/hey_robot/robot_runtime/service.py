@@ -105,9 +105,7 @@ class RobotService:
             self._on_base_velocity_stream,
         )
         logger.info(f"robot service 就绪, 已订阅 {self.topics.robot_action}")
-        await asyncio.gather(
-            self._publish_loop(), self._camera_stream_loop(), self._stop.wait()
-        )
+        await asyncio.gather(self._merged_observation_loop(), self._stop.wait())
 
     async def stop(self) -> None:
         self._stop.set()
@@ -117,16 +115,27 @@ class RobotService:
         )
         await self.bus.close()
 
-    async def _publish_loop(self) -> None:
-        period = 1.0 / max(self.publish_hz, 0.1)
+    async def _merged_observation_loop(self) -> None:
+        """Single observation loop that produces both RobotObservation and camera frames.
+
+        One ``driver.observe()`` call per cycle feeds both the observation/status
+        pipeline AND the raw camera frame stream.  The loop runs at the faster of
+        ``publish_hz`` and ``camera_stream_hz`` so neither consumer starves.
+        """
+        period = 1.0 / max(self.publish_hz, self.camera_stream_hz, 0.1)
         while not self._stop.is_set():
             cycle_started = time.monotonic()
-            for runtime in self.runtimes.values():
-                observation = await runtime.observe()
+            for robot_id, runtime in self.runtimes.items():
+                snapshot = await runtime.refresh_observation(
+                    reason="merged_observation_loop"
+                )
                 status = self._status_for_publish(await runtime.status())
-                if self._should_publish_observation(observation):
+
+                # Publish robot observation + status.
+                if self._should_publish_observation(snapshot.observation):
                     await self.bus.publish(
-                        self.topics.robot_observation, to_payload(observation)
+                        self.topics.robot_observation,
+                        to_payload(snapshot.observation),
                     )
                 await self.bus.publish(self.topics.robot_status, to_payload(status))
                 if self._should_log_status(runtime.robot_id, status):
@@ -134,37 +143,27 @@ class RobotService:
                         f"{runtime.robot_id} 心跳 frame={status.frame_id} "
                         f"state={status.state} success={status.success}"
                     )
-            remaining = period - (time.monotonic() - cycle_started)
-            await asyncio.sleep(max(0.0, remaining))
 
-    async def _camera_stream_loop(self) -> None:
-        period = 1.0 / max(self.camera_stream_hz, 0.1)
-        while not self._stop.is_set():
-            cycle_started = time.monotonic()
-            for robot_id, runtime in self.runtimes.items():
-                stream_frames = getattr(runtime.driver, "stream_camera_frames", None)
-                if not callable(stream_frames):
-                    continue
-                frames = await stream_frames(timeout_ms=max(20, int(period * 1000)))
-                for camera, item in frames.items():
-                    image = item.get("image")
-                    frame_id = item.get("frame_id")
-                    if image is None or frame_id is None:
-                        continue
-                    packet = await asyncio.to_thread(
-                        encode_frame_packet,
-                        image,
-                        {
-                            "robot_id": robot_id,
-                            "camera": camera,
-                            "frame_id": int(frame_id),
-                            "captured_at": time.time(),
-                        },
-                    )
-                    await self.bus.publish_raw(
-                        self.topics.for_robot(self.topics.camera_frame, robot_id),
-                        packet,
-                    )
+                # Publish raw camera frames from the same driver observation.
+                driver_obs = snapshot.driver_observation
+                if driver_obs is not None:
+                    for asset in driver_obs.assets:
+                        if asset.kind != "image" or asset.data is None:
+                            continue
+                        packet = await asyncio.to_thread(
+                            encode_frame_packet,
+                            asset.data,
+                            {
+                                "robot_id": robot_id,
+                                "camera": asset.name or "unknown",
+                                "frame_id": snapshot.observation.frame_id,
+                                "captured_at": time.time(),
+                            },
+                        )
+                        await self.bus.publish_raw(
+                            self.topics.for_robot(self.topics.camera_frame, robot_id),
+                            packet,
+                        )
             remaining = period - (time.monotonic() - cycle_started)
             await asyncio.sleep(max(0.0, remaining))
 

@@ -49,7 +49,7 @@ def test_human_follow_service_streams_velocity_inside_single_session(
     )
     service._frame_events["xlerobot"].set()
     monkeypatch.setattr(
-        "hey_robot.human_follow.service.detect_people",
+        "hey_robot.skill_os.perception.human_follow.detect_people",
         lambda _image: [Detection((40, 10, 60, 70), 0.9)],
     )
     session = _Session(
@@ -71,6 +71,42 @@ def test_human_follow_service_streams_velocity_inside_single_session(
     assert velocity["skill_id"] == "skill-1"
     assert velocity["sequence"] == 1
     assert any(payload.get("kind") == "result" for payload in payloads)
+
+
+def test_service_progress_serializes_target_to_json_safe_dict(monkeypatch) -> None:
+    config = DeploymentConfig.from_dict({"robots": {"xlerobot": {"type": "xlerobot"}}})
+    service = HumanFollowService(config)
+    service.bus = FakeBus()  # type: ignore[assignment]
+    service._frames["xlerobot"] = (
+        {"robot_id": "xlerobot", "camera": "front", "frame_id": 1},
+        np.zeros((100, 100, 3), dtype=np.uint8),
+    )
+    service._frame_events["xlerobot"].set()
+    monkeypatch.setattr(
+        "hey_robot.skill_os.perception.human_follow.detect_people",
+        lambda _image: [Detection((40, 10, 60, 70), 0.9)],
+    )
+    session = _Session(
+        robot_id="xlerobot",
+        skill_id="skill-1",
+        session_id="session-1",
+        arguments={"max_steps": 1},
+    )
+    service._sessions[session.session_id] = session
+
+    asyncio.run(service._run_session(session))
+
+    progress = next(
+        payload
+        for _topic, payload in service.bus.published
+        if payload.get("kind") == "progress" and payload.get("phase") == "following"
+    )
+    target = progress.get("target")
+    assert isinstance(target, dict)
+    assert target["bbox"] == [40, 10, 60, 70]
+    assert target["confidence"] == 0.9
+    assert "area" in target
+    assert isinstance(progress.get("detections"), int)
 
 
 def test_robot_service_velocity_stream_rejects_stale_and_out_of_order() -> None:

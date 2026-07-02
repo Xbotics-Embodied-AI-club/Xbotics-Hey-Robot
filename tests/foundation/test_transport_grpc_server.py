@@ -7,10 +7,12 @@ import pytest
 
 from hey_robot.cli.main import CLI_ACTIONS
 from hey_robot.config import DeploymentConfig
-from hey_robot.foundation.contract.v1 import model_service_pb2
-from hey_robot.foundation.transport.grpc.server import (
+from hey_robot.foundation.backends.vla.lerobot.executor import (
     DEFAULT_ARM_CALIBRATION_DIR,
     LeRobotVLAExecutor,
+)
+from hey_robot.foundation.contract.v1 import model_service_pb2
+from hey_robot.foundation.transport.grpc.server import (
     ModelServiceServicer,
     VLAPolicyService,
     VLNPlannerService,

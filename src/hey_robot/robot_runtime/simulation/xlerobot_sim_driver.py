@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import math
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -67,6 +68,20 @@ _ARM_JOINT_NAMES = (
     "wrist_roll",
     "gripper",
 )
+
+
+_EGL_CONTEXT: Any = None
+"""Singleton EGL GL context for headless rendering."""
+
+
+def _ensure_egl_context(width: int = 640, height: int = 480) -> None:
+    global _EGL_CONTEXT
+    if _EGL_CONTEXT is not None:
+        return
+    import mujoco.egl
+
+    _EGL_CONTEXT = mujoco.egl.GLContext(width, height)
+    _EGL_CONTEXT.make_current()
 
 
 def _resolve_mjcf_path(settings: dict[str, Any]) -> Path:
@@ -152,6 +167,10 @@ class XLeRobotSimDriver:
         self._hold_head_camera()
 
         await asyncio.to_thread(mujoco.mj_forward, self.model, self.data)
+
+        # On headless machines (no DISPLAY), initialise EGL before the renderer.
+        if not os.environ.get("DISPLAY"):
+            _ensure_egl_context(480, 640)
 
         # Renderer must be created on the calling thread (owns the GL context).
         self.renderer = mujoco.Renderer(
@@ -510,6 +529,22 @@ class XLeRobotSimDriver:
         self.state = "closed"
 
     # Simulation helpers
+
+    async def stream_camera_frames(
+        self, *, timeout_ms: int = 100
+    ) -> dict[str, dict[str, Any]]:
+        """Stream rendered frames from all scene cameras.
+
+        Returns same shape as XLeRobotDriver.stream_camera_frames so the
+        NATS camera-stream loop works for simulation.
+        """
+        del timeout_ms
+        rendered = self._render_frames()
+        return {
+            name: {"frame_id": self.frame_id, "image": img}
+            for name, img in rendered.items()
+            if img is not None
+        }
 
     # ---- public VLA API ----
 
