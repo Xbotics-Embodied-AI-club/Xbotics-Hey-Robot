@@ -95,7 +95,14 @@ uv sync --dev
 For simulation:
 
 ```bash
-uv sync --dev --extra sim
+uv sync --dev --group sim
+```
+
+For VLA/VLN model services, use separate environments:
+
+```bash
+uv sync --group vla    # VLA model service (LeRobot ACT)
+uv sync --group vln    # VLN model service (InternVLA-N1)
 ```
 
 ### Environment

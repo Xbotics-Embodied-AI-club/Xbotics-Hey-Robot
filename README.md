@@ -96,7 +96,14 @@ uv sync --dev
 如果需要仿真：
 
 ```bash
-uv sync --dev --extra sim
+uv sync --dev --group sim
+```
+
+如需启动 VLA/VLN 模型服务，使用独立环境：
+
+```bash
+uv sync --group vla    # VLA 模型服务（LeRobot ACT）
+uv sync --group vln    # VLN 模型服务（InternVLA-N1）
 ```
 
 ### 3. 配置环境变量

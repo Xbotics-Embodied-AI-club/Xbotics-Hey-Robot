@@ -11,7 +11,7 @@
 | 实验 VLA + VLN | `configs/xlerobot.sim.vla_vln.yaml` |
 
 Windows/Ubuntu 主配置只运行 11 个 native/sim skill，不包含 ModelService。只有实验配置
-声明 `vln_nav` 和 `vla_manipulation`。
+声明 `vln_nav` 和 `manipulate`。
 
 ## 平台差异
 
@@ -24,77 +24,58 @@ Windows/Ubuntu 主配置只运行 11 个 native/sim skill，不包含 ModelServi
 ## 系统执行架构
 
 ```
-┌─────────────────────────────────────────────┐
-│  主进程 (.venv)    →  gateway / agent / Skill OS / robot │
-│  端口 8080 (web)   →  DeepSeek / DashScope    │
-│  端口 4222 (nats)  →  NATS 消息总线            │
-└──────────┬──────────────────────────────────┘
-           │ gRPC (127.0.0.1:9091)
-┌──────────▼──────────────────────────────────┐
-│  VLN 服务 (.vln-venv)  →  InternVLA-N1       │
-│  GPU 1              →  真实模型推理            │
-└─────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│  主进程 (.venv)    →  gateway / agent / Skill OS / robot  │
+│  端口 8080 (web)   →  DeepSeek / DashScope               │
+│  端口 4222 (nats)  →  NATS 消息总线                       │
+│  端口 9090 (grpc)  →  VLA 服务（ACT 模型，进程内加载）     │
+└──────────────────┬──────────────────────────────────────┘
+                   │ gRPC :9091
+┌──────────────────▼──────────────────────┐
+│ VLN 服务                                 │
+│ (.vln-venv)                             │
+│ InternVLA-N1-System2                    │
+│ GPU 1                                   │
+└──────────────────────────────────────────┘
 ```
 
-该图只适用于 `xlerobot.sim.vla_vln.yaml`。普通 sim 配置没有 VLN 服务。实验配置中
-VLN 以独立 gRPC ModelService 运行，Skill OS 调用模型并把输出转换为 Robot Runtime
-primitive；Agent 不直接加载模型。
+该图只适用于 `xlerobot.sim.vla_vln.yaml`。普通 sim 配置没有模型服务。VLA 服务现在直接在
+主进程中加载 ACT 模型（不再需要独立 `.vla-venv`），通过 gRPC 端口 9090 暴露。
+VLN 仍使用独立 venv（huggingface-hub 版本冲突），通过 gRPC 端口 9091 暴露。
+Skill OS 调用模型服务并把输出转换为 Robot Runtime primitive；Agent 不直接加载模型。
 
-## 双环境设置
+## 依赖分组
 
-只有启用实验 VLN 时才需要双环境。主进程和 VLN 服务需要**独立的 Python 虚拟环境**，
-原因是 InternNav 依赖 `huggingface-hub>=0.30.0,<1.0`，而主项目声明
-`huggingface-hub>=1.0.0,<2.0.0`，无法在同一环境共存。
+`pyproject.toml` 使用 `[dependency-groups]` 将不同服务的依赖分开管理，
+避免 huggingface-hub、transformers 等包的版本冲突：
 
-| 环境 | huggingface-hub | 其他依赖 | 用途 |
-|------|:---:|---|------|
-| `.venv/` | `>=1.0,<2.0` | 由项目 lockfile 管理 | 主进程：Agent / Skill OS / Robot Runtime |
-| `.vln-venv/` | `>=0.30,<1.0` | 按 InternNav 要求安装 | VLN 服务：InternVLA-N1 模型推理 |
+| 命令 | 用途 |
+|------|------|
+| `uv sync` | 主运行时（Agent / Skill OS / Robot Runtime / VLA ACT policy） |
+| `uv sync --group sim` | 主运行时 + MuJoCo 仿真 |
+| `uv sync --group vln` | VLN 模型服务（InternVLA-N1 planner） |
+| `uv sync --group dev` | 开发工具链（lint / type-check / test） |
+
+VLA（ACT policy）的依赖（torch、PIL、safetensors、lerobot）已纳入主依赖组，
+不再需要独立 `.vla-venv`。VLN 仍需独立 venv（huggingface-hub 版本冲突）。
 
 ### 创建主环境 (.venv)
 
 ```bash
-uv sync --dev --extra sim
+uv sync --group sim --group dev
 ```
 
 ### 创建 VLN 环境 (.vln-venv)
 
 ```bash
-# 1. 创建独立 venv（用系统 Python 3.12）
+uv sync --group vln
+```
+
+如果需要把环境安装到独立路径（而非当前 `.venv`），先创建 venv 再指定路径：
+
+```bash
 python3.12 -m venv .vln-venv
-source .vln-venv/bin/activate
-
-# 2. 安装 huggingface-hub（必须在 0.30~1.0 之间）
-pip install "huggingface-hub>=0.30.0,<1.0"
-
-# 3. 安装 InternNav 及其依赖
-cd third_party/InternNav
-pip install -e .
-cd ../..
-
-# 4. 安装本项目代码，但不要解析主项目的冲突依赖
-pip install --no-deps -e .
-pip install grpcio protobuf pyyaml python-dotenv imageio pillow numpy
-
-# 5. 验证版本
-python -c "
-import huggingface_hub
-v = huggingface_hub.__version__
-assert v < '1.0', f'huggingface-hub 版本 {v} 冲突，需要 <1.0'
-print(f'✓ huggingface-hub {v} OK')
-"
-```
-
-## 依赖
-
-```bash
-uv sync --extra sim
-```
-
-如果只需要补 MuJoCo：
-
-```bash
-uv pip install "mujoco>=3.3.0"
+uv sync --group vln --python .vln-venv/bin/python
 ```
 
 ## 生成仿真模型
@@ -144,18 +125,19 @@ test -d models/InternVLA-N1-System2
 日志输出 `listening on grpc://127.0.0.1:9091` 只表示 gRPC server 已启动。还应通过
 `GetHealth` 确认 `online=true`、`loaded=true`，不能依赖固定加载时间或显存数字判断。
 
-### 实验 VLA：3. 可选启动接口测试服务
+### 实验 VLA：3. 启动 VLA 服务（可选）
 
-实验配置同时声明了 VLA service。因为 `model_path` 为空，当前只会启用内部测试路径，用于
-验证 gRPC、Skill OS 和 primitive 链路：
+VLA 服务直接在主进程中加载 ACT 模型，通过 gRPC 暴露：
 
 ```bash
 .venv/bin/python -m hey_robot.cli.model_service \
   --config configs/xlerobot.sim.vla_vln.yaml \
-  --service-id vla_manipulation
+  --service-id manipulate
 ```
 
-如果只验证 VLN，可以不启动这个服务，但不要提交 VLA Skill。
+日志输出 `listening on grpc://127.0.0.1:9090` 表示 gRPC server 已启动。模型通过
+配置中的 `model_path` 自动延迟加载，无需单独启动 HTTP 推理服务器。
+如果只验证 VLN，可以不启动这个服务。
 
 ### 实验：4. 启动主进程
 
@@ -183,9 +165,8 @@ curl -s http://localhost:8080/turn -X POST \
 ### 6. 停止
 
 ```bash
-kill $(lsof -t -i:8080)   # 主进程
+kill $(lsof -t -i:8080)   # 主进程（含 VLA 服务）
 kill $(lsof -t -i:9091)   # VLN 服务
-kill $(lsof -t -i:9090)   # 可选 VLA 服务
 ```
 
 ## VLN 配置
@@ -266,12 +247,12 @@ model_services:
 |---|---|---|
 | 导航 | `navigate_to` | 需要 `vln_nav` gRPC 服务 |
 | 导航 | `approach_object` | 需要 `vln_nav` gRPC 服务 |
-| 操作 | `vla_manipulation` | 当前空 `model_path` 只启用接口测试路径 |
-| 操作 | `pick_object` | 实验；当前 service `provides` 与系统调用名尚未对齐 |
-| 操作 | `place_object` | 实验；当前 service `provides` 与系统调用名尚未对齐 |
+| 操作 | `manipulate` | 需要 `manipulate` gRPC 服务，ACT 模型直接加载 |
+| 操作 | `human_follow` | 基于视觉的人体跟随（使用 YOLO 检测器） |
 
-因此该实验配置适合验证分层和消息链路，不应直接作为真实 VLA 抓取成功的证明。真实 VLA
-还需要完成 policy checkpoint、observation 输入和 service routing 的端到端验证。
+VLA 操作已合并为单一 `manipulate` skill，由 ACT policy 直接推理，模型在进程中加载
+（不再需要独立 HTTP 推理服务器或 `.vla-venv`）。已通过 MuJoCo 仿真端到端验证：
+Skill OS → gRPC → ACT 推理 → 解析原语 → 仿真执行，全部链路正常。
 
 ## 常见问题
 
@@ -287,11 +268,8 @@ export MUJOCO_GL=egl
 
 ### VLN 报 huggingface-hub 版本冲突
 
-```
-huggingface-hub>=0.30.0,<1.0 is required, but found huggingface-hub==1.x
-```
-
-说明 VLN 服务用了主环境。必须用 `.vln-venv/bin/python` 启动 VLN 服务。详见上方「双环境设置」。
+说明 VLN 服务用了主环境。VLN 需要 `huggingface-hub==0.33.4`，主运行时不依赖
+huggingface-hub。必须用 `.vln-venv` 启动 VLN 服务。详见上方「依赖分组」。
 
 ### flash_attn 编译/加载失败
 

@@ -1,7 +1,7 @@
 # XLeRobot MuJoCo simulation with both VLA + VLN model services.
 # Usage:
 #   Start VLN service:  python -m hey_robot.cli.model_service --config configs/xlerobot.sim.vla_vln.yaml --service-id vln_nav
-#   Start VLA service:  python -m hey_robot.cli.model_service --config configs/xlerobot.sim.vla_vln.yaml --service-id vla_manipulation
+#   Start manipulate service:  python -m hey_robot.cli.model_service --config configs/xlerobot.sim.vla_vln.yaml --service-id manipulate
 #   Start main runtime: hey-robot run --config configs/xlerobot.sim.vla_vln.yaml
 
 deployment:
@@ -45,9 +45,7 @@ skills:
     - base_velocity_step
     - navigate_to
     - approach_object
-    - vla_manipulation
-    - pick_object
-    - place_object
+    - manipulate
     - human_follow
     - stop_motion
     - reset_posture
@@ -211,23 +209,20 @@ model_services:
       max_new_tokens: 128
       hfov: 90
 
-  vla_manipulation:
+  manipulate:
     type: vla_policy
     robot_id: sim_robot
     enabled: true
     target: grpc://127.0.0.1:9090
     provides:
-      - vla_manipulation
-      - pick_object
-      - place_object
+      - manipulate
     timeout_sec: 60.0
     settings:
       host: 127.0.0.1
       port: 9090
       backend: action_chunk_policy
       backend_mode: action_chunk_policy
-      server_address: "localhost:5555"
-      model_path: ""
+      model_path: "models/so101-act-pick-place_ACT"
       policy_type: "act"
       arm_port: ""
       task: ""
@@ -251,7 +246,7 @@ agents:
     policy_id: embodied_skills
     settings:
       mode: autonomous
-      max_iterations: 6
+      max_iterations: 12
       providers:
         planner:
           type: deepseek
