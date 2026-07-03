@@ -7,7 +7,16 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { text = "MIT" }
 
-# Core dependencies (minimal)
+# Core dependencies — shared by the main runtime.
+# Usage:
+#   uv sync                  → main runtime (Agent / Skill OS / Robot)
+#   uv sync --group sim      → main runtime + MuJoCo simulation
+#   uv sync --group vla      → VLA model service  (lerobot ACT policy)
+#   uv sync --group vln      → VLN model service  (InternVLA-N1 planner)
+#   uv sync --group dev      → lint / type-check / test tooling
+#
+# Note: --group vla and --group vln are mutually exclusive (conflicting
+# huggingface-hub / transformers versions).  Use separate venvs for each.
 dependencies = [
     "numpy>=1.24.0",
     "pillow>=10.0.0",
@@ -34,10 +43,7 @@ dependencies = [
     "lark-oapi>=1.5.0,<2.0.0",
     "websockets>=12.0",
     "torch>=2.0.0",
-    "lerobot==0.5.0",
-    "lerobot[async]==0.5.0",
     "feetech-servo-sdk==1.0.0",
-    "huggingface-hub>=1.0.0,<2.0.0",
     "ultralytics>=8.4.67",
     "wsproto>=1.3.2",
 ]
@@ -51,6 +57,16 @@ build-backend = "hatchling.build"
 
 [tool.uv]
 package = true
+environments = ["sys_platform == 'linux' and python_version == '3.12'"]
+conflicts = [
+    [
+        { group = "vla" },
+        { group = "vln" },
+    ],
+]
+
+[tool.uv.extra-build-dependencies]
+flash-attn = ["torch"]
 
 [tool.black]
 line-length = 88
@@ -66,10 +82,35 @@ exclude = [
     "^src/hey_robot/foundation/contract/v1/model_service_pb2_grpc.py$",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 sim = ["mujoco>=3.3.0"]
 
-[dependency-groups]
+vla = [
+    "lerobot>=0.4.4",
+    "safetensors>=0.7.0",
+]
+
+vln = [
+    "transformers==4.51.0",
+    "huggingface-hub==0.33.4",
+    "diffusers==0.32.2",
+    "accelerate==1.7.0",
+    "flash-attn==2.7.2.post1",
+    "safetensors==0.5.3",
+    "tokenizers==0.21.2",
+    "einops==0.8.1",
+    "triton==3.1.0",
+    "open3d==0.19.0",
+    "tensorboard==2.20.0",
+    "pandas==2.3.1",
+    "pyarrow==21.0.0",
+    "sympy==1.13.1",
+    "hf-xet==1.1.5",
+    "ftfy==6.3.1",
+    "depth-camera-filtering @ git+https://github.com/naokiyokoyama/depth_camera_filtering.git",
+    "diffusion-policy @ git+https://github.com/real-stanford/diffusion_policy.git@5ba07ac6661db573af695b419a7947ecb704690f",
+]
+
 dev = [
     "mypy>=1.0.0",
     "poethepoet>=0.45.0",
