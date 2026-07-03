@@ -1704,3 +1704,79 @@ def test_camera_auto_injection_skips_when_no_frame_available(
 
     assert len(captured) == 1
     assert "observation" not in captured[0]
+
+
+def test_interrupt_active_run_cancels_active_model_service(tmp_path) -> None:
+    from hey_robot.skill_os.composition import SkillExecutionPlan
+    from hey_robot.skill_os.scheduler import SkillRun
+
+    service = _service_with_vla_capability(tmp_path)
+    state = service.states["embodied_skills"]
+    contract = service.plugin_skill_catalog.resolve("vla_manipulation")
+    intent = SkillIntent(
+        envelope=Envelope(trace_id="tr1", robot_id="xlerobot"),
+        skill_id="vla1",
+        name="vla_manipulation",
+        arguments={"task_prompt": "pick cup"},
+        objective="pick",
+    )
+    run = SkillRun(
+        intent=intent,
+        skill_name="vla_manipulation",
+        implementation_name="vla_manipulation",
+        implementation_kind="plugin",
+        contract=contract,
+        execution_plan=SkillExecutionPlan(actions=()),
+    )
+    client = service.model_services.clients["arm_vla"]
+    run.active_model_service_id = "arm_vla"
+    run.active_model_client = client
+    state.scheduler.add(run)
+
+    interrupt = SkillIntent(
+        envelope=Envelope(trace_id="tr2", robot_id="xlerobot"),
+        skill_id="interrupt1",
+        name="interrupt",
+        objective="stop",
+        interrupt=True,
+    )
+
+    asyncio.run(service._interrupt_active_runs("embodied_skills", state, interrupt))
+
+    assert client.cancelled == ["vla1"]
+    assert state.active_runs == {}
+
+
+def test_timeout_cancels_active_model_service(tmp_path) -> None:
+    from hey_robot.skill_os.composition import SkillExecutionPlan
+    from hey_robot.skill_os.scheduler import SkillRun
+
+    service = _service_with_vla_capability(tmp_path)
+    state = service.states["embodied_skills"]
+    contract = service.plugin_skill_catalog.resolve("vla_manipulation")
+    intent = SkillIntent(
+        envelope=Envelope(trace_id="tr1", robot_id="xlerobot"),
+        skill_id="vla-timeout",
+        name="vla_manipulation",
+        arguments={"task_prompt": "pick cup"},
+        objective="pick",
+        timeout_sec=0.01,
+    )
+    run = SkillRun(
+        intent=intent,
+        skill_name="vla_manipulation",
+        implementation_name="vla_manipulation",
+        implementation_kind="plugin",
+        contract=contract,
+        execution_plan=SkillExecutionPlan(actions=()),
+    )
+    run.started_at = time.time() - 1.0
+    client = service.model_services.clients["arm_vla"]
+    run.active_model_service_id = "arm_vla"
+    run.active_model_client = client
+    state.scheduler.add(run)
+
+    asyncio.run(service._expire_timed_out_runs("embodied_skills", state))
+
+    assert client.cancelled == ["vla-timeout"]
+    assert state.active_runs == {}

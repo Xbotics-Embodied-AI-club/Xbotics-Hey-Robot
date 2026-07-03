@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import io
 import re
 import sys
 import threading
@@ -13,6 +15,7 @@ import torch
 from PIL import Image
 
 from hey_robot.config import ModelServiceSpec
+from hey_robot.foundation.clients.models import PolicyStepResult
 from hey_robot.robot_runtime.media import LocalMediaStore
 
 
@@ -44,10 +47,35 @@ class VLNPlannerResult:
     reason: str | None = None
     raw_output: str | None = None
     image_source: str | None = None
+    output_latent: Any | None = None
+    requires_secondary_observation: bool = False
+    policy_session_id: str | None = None
 
     def to_metrics(
         self, *, backend: str, camera: str, control_mode: str
     ) -> dict[str, Any]:
+        local_goal = {
+            "mode": self.mode,
+            "pixel_goal": self.pixel_goal,
+            "waypoint": self.waypoint,
+            "heading_deg": self.heading_deg,
+            "stop": self.stop,
+            "confidence": self.confidence,
+            "frame_id": None,
+            "requires_secondary_observation": self.requires_secondary_observation,
+        }
+        policy_result = PolicyStepResult(
+            kind="local_goal",
+            local_goal=local_goal,
+            done=self.stop,
+            confidence=self.confidence,
+            valid=True,
+            raw={
+                "raw_output": self.raw_output,
+                "image_source": self.image_source,
+                "output_latent": _json_public_value(self.output_latent),
+            },
+        ).to_metrics()
         return {
             "backend": backend,
             "control_mode": control_mode,
@@ -61,6 +89,11 @@ class VLNPlannerResult:
             "reason": self.reason,
             "raw_output": self.raw_output,
             "image_source": self.image_source,
+            "output_latent": _json_public_value(self.output_latent),
+            "requires_secondary_observation": self.requires_secondary_observation,
+            "policy_session_id": self.policy_session_id,
+            "local_goal": local_goal,
+            "policy_result": policy_result,
         }
 
 
@@ -78,6 +111,7 @@ class InternVLAN1System2Executor:
         self._cancelled = threading.Event()
         self._model: Any | None = None
         self._model_error: str | None = None
+        self._current_policy_session_id: str | None = None
 
     def health(self) -> dict[str, Any]:
         settings = self.spec.settings
@@ -232,15 +266,17 @@ class InternVLAN1System2Executor:
         y = int(self.spec.settings.get("mock_pixel_y", height // 2))
         return VLNPlannerResult(
             mode="pixel_goal",
-            pixel_goal=[x, y],
+            pixel_goal=[y, x],
             confidence=0.5,
             reason="mock planner returned center pixel goal",
             raw_output=f"({y}, {x})",
+            policy_session_id=_policy_session_id_from_payload(payload),
         )
 
     def _internvla_plan(self, payload: dict[str, Any]) -> VLNPlannerResult:
         planner_input = self._build_planner_input(payload)
         model = self._load_model()
+        policy_session_id = self._reset_policy_session_if_needed(model, payload)
         output = model.s2_step(
             planner_input.rgb,
             planner_input.depth,
@@ -254,7 +290,24 @@ class InternVLAN1System2Executor:
             image_width=int(planner_input.rgb.shape[1]),
             image_height=int(planner_input.rgb.shape[0]),
             image_source=planner_input.image_source,
+            policy_session_id=policy_session_id,
         )
+
+    def _reset_policy_session_if_needed(
+        self, model: Any, payload: dict[str, Any]
+    ) -> str | None:
+        session_id = _policy_session_id_from_payload(payload)
+        arguments = dict(payload.get("arguments", {}) or {})
+        reset_requested = bool(arguments.get("reset_policy", False))
+        if session_id and session_id != self._current_policy_session_id:
+            reset_requested = True
+        if reset_requested:
+            reset = getattr(model, "reset", None)
+            if callable(reset):
+                reset()
+        if session_id:
+            self._current_policy_session_id = session_id
+        return session_id
 
     def _load_model(self) -> Any:
         if self._model is not None:
@@ -368,8 +421,10 @@ class InternVLAN1System2Executor:
         image_width: int,
         image_height: int,
         image_source: str | None = None,
+        policy_session_id: str | None = None,
     ) -> VLNPlannerResult:
         raw_output = _public_raw_output(output)
+        output_latent = getattr(output, "output_latent", None)
         pixel = getattr(output, "output_pixel", None)
         if pixel is not None:
             parsed = _parse_pixel_goal(pixel)
@@ -378,20 +433,22 @@ class InternVLAN1System2Executor:
                     "vln_parse_failed",
                     "InternVLA-N1 System 2 returned an invalid pixel goal",
                 )
-            x, y = parsed
-            clamped_x = min(max(x, 0), max(image_width - 1, 0))
-            clamped_y = min(max(y, 0), max(image_height - 1, 0))
+            row, col = parsed
+            clamped_row = min(max(row, 0), max(image_height - 1, 0))
+            clamped_col = min(max(col, 0), max(image_width - 1, 0))
             reason = "InternVLA-N1 System 2 returned output_pixel"
-            if (clamped_x, clamped_y) != (x, y):
+            if (clamped_row, clamped_col) != (row, col):
                 reason = (
                     "InternVLA-N1 System 2 output_pixel was clamped to image bounds"
                 )
             return VLNPlannerResult(
                 mode="pixel_goal",
-                pixel_goal=[clamped_x, clamped_y],
+                pixel_goal=[clamped_row, clamped_col],
                 reason=reason,
                 raw_output=raw_output,
                 image_source=image_source,
+                output_latent=output_latent,
+                policy_session_id=policy_session_id,
             )
 
         action = getattr(output, "output_action", None)
@@ -402,6 +459,18 @@ class InternVLAN1System2Executor:
                 reason="InternVLA-N1 System 2 returned STOP",
                 raw_output=raw_output or str(action),
                 image_source=image_source,
+                output_latent=output_latent,
+                policy_session_id=policy_session_id,
+            )
+        if _is_look_down_action(action):
+            return VLNPlannerResult(
+                mode="look_down_required",
+                requires_secondary_observation=True,
+                reason="InternVLA-N1 System 2 requested a look-down secondary observation",
+                raw_output=raw_output or str(action),
+                image_source=image_source,
+                output_latent=output_latent,
+                policy_session_id=policy_session_id,
             )
         heading = _action_to_heading(action)
         if heading is not None:
@@ -411,6 +480,8 @@ class InternVLAN1System2Executor:
                 reason="InternVLA-N1 System 2 returned direction action",
                 raw_output=raw_output or str(action),
                 image_source=image_source,
+                output_latent=output_latent,
+                policy_session_id=policy_session_id,
             )
         raise VLNPlanningError(
             "vln_no_valid_goal",
@@ -495,6 +566,16 @@ def _load_rgb_source(source: Any, *, media_root: Any) -> np.ndarray:
     if isinstance(source, (list, tuple)):
         return np.asarray(source)
     if isinstance(source, dict):
+        if _dict_contains_base64_image(source):
+            try:
+                decoded = base64.b64decode(str(source["data"]), validate=True)
+                with Image.open(io.BytesIO(decoded)) as image:
+                    return np.asarray(image.convert("RGB"))
+            except Exception as exc:
+                raise VLNPlanningError(
+                    "image_unavailable",
+                    f"invalid base64 VLN image payload: {exc}",
+                ) from exc
         for key in ("rgb", "rgb_array", "data"):
             if source.get(key) is not None:
                 return _load_rgb_source(source[key], media_root=media_root)
@@ -509,6 +590,25 @@ def _load_rgb_source(source: Any, *, media_root: Any) -> np.ndarray:
         "image_unavailable",
         f"unsupported VLN image source: {type(source).__name__}",
     )
+
+
+def _dict_contains_base64_image(source: dict[str, Any]) -> bool:
+    if source.get("data") is None:
+        return False
+    fmt = str(source.get("format") or "").lower()
+    content_type = str(
+        source.get("content_type") or source.get("mime_type") or ""
+    ).lower()
+    encoding = str(source.get("encoding") or "base64").lower()
+    if encoding not in {"", "base64"}:
+        return False
+    return fmt in {
+        "jpeg",
+        "jpg",
+        "png",
+        "image/jpeg",
+        "image/png",
+    } or content_type.startswith("image/")
 
 
 def _path_from_image_reference(value: str, *, media_root: Any) -> Path:
@@ -631,19 +731,14 @@ _ACTION_HEADING: dict[int, float] = {
     1: 0.0,  # ↑ → forward
     2: -90.0,  # ← → left
     3: 90.0,  # → → right
-    5: 180.0,  # ↓ → turn around
 }
 
 
 def _action_to_heading(action: Any) -> float | None:
-    if action is None:
+    current = _current_action_code(action)
+    if current is None:
         return None
-    arr = np.asarray(action).reshape(-1)
-    non_stop = [int(a) for a in arr if int(a) != 0]
-    if not non_stop:
-        return None
-    mode_value = max(set(non_stop), key=non_stop.count)
-    return _ACTION_HEADING.get(mode_value)
+    return _ACTION_HEADING.get(current)
 
 
 def _parse_pixel_goal(value: Any) -> tuple[int, int] | None:
@@ -654,20 +749,59 @@ def _parse_pixel_goal(value: Any) -> tuple[int, int] | None:
 
 
 def _is_stop_action(value: Any) -> bool:
-    if value is None:
-        return False
     if isinstance(value, str):
         return value.strip().upper() == "STOP"
+    return _current_action_code(value) == 0
+
+
+def _is_look_down_action(value: Any) -> bool:
+    return _current_action_code(value) == 5
+
+
+def _current_action_code(value: Any) -> int | None:
+    if value is None:
+        return None
     arr = np.asarray(value).reshape(-1)
-    for item in arr:
-        if str(item).strip().upper() == "STOP":
-            return True
+    if arr.size == 0:
+        return None
+    item = arr[0]
+    if str(item).strip().upper() == "STOP":
+        return 0
+    try:
+        return int(item)
+    except (TypeError, ValueError):
+        return None
+
+
+def _policy_session_id_from_payload(payload: dict[str, Any]) -> str | None:
+    arguments = dict(payload.get("arguments", {}) or {})
+    metadata = dict(payload.get("metadata", {}) or {})
+    value = (
+        arguments.get("policy_session_id")
+        or metadata.get("policy_session_id")
+        or payload.get("policy_session_id")
+        or payload.get("skill_id")
+    )
+    return str(value) if value else None
+
+
+def _json_public_value(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _json_public_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_public_value(item) for item in value]
+    if hasattr(value, "detach") and callable(value.detach):
         try:
-            if int(item) == 0:
-                return True
-        except (TypeError, ValueError):
-            continue
-    return False
+            return value.detach().cpu().numpy().tolist()
+        except Exception:
+            return str(value)
+    return str(value)
 
 
 def _public_raw_output(output: Any) -> str | None:

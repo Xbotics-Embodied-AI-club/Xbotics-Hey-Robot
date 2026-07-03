@@ -39,6 +39,51 @@ class ServiceInvocationResult:
     error_code: str | None = None
 
 
+@dataclass(frozen=True)
+class PolicyStepRequest:
+    policy_session_id: str | None
+    skill_name: str
+    atomic_command: str
+    observation: dict[str, Any] = field(default_factory=dict)
+    proprioception: dict[str, Any] = field(default_factory=dict)
+    frame_id: int | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class PolicyStepResult:
+    kind: str
+    action_space: str | None = None
+    embodiment: str | None = None
+    horizon: int | None = None
+    dt: float | None = None
+    actions: list[dict[str, Any]] = field(default_factory=list)
+    local_goal: dict[str, Any] = field(default_factory=dict)
+    whole_body_reference: dict[str, Any] = field(default_factory=dict)
+    done: bool = False
+    confidence: float | None = None
+    valid: bool = True
+    failure_mode: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    def to_metrics(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "action_space": self.action_space,
+            "embodiment": self.embodiment,
+            "horizon": self.horizon,
+            "dt": self.dt,
+            "actions": self.actions,
+            "local_goal": self.local_goal,
+            "whole_body_reference": self.whole_body_reference,
+            "done": self.done,
+            "confidence": self.confidence,
+            "valid": self.valid,
+            "failure_mode": self.failure_mode,
+            "raw": self.raw,
+        }
+
+
 class ModelServiceClient(Protocol):
     async def health(self) -> ServiceHealth: ...
 

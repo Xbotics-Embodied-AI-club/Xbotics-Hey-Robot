@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import asdict
 from typing import Any
 
 from hey_robot.protocol import RobotObservation
@@ -122,9 +123,14 @@ class _VLNNavigationSkill(BaseSkill):
         steps: list[dict[str, Any]] = []
         planner_data: dict[str, Any] = {}
         result = None
+        look_down_requested = bool(arguments.get("look_down", False))
 
         for step_index in range(max_steps):
             payload = _vln_payload(ctx, arguments)
+            if step_index > 0:
+                payload["reset_policy"] = False
+            if look_down_requested:
+                payload["look_down"] = True
             result = await ctx.model_services.call(self.capability_name, payload)
             planner_data = _extract_vln_planner(result)
             command: PrimitiveCommand | None = None
@@ -148,6 +154,33 @@ class _VLNNavigationSkill(BaseSkill):
                     failure_mode=getattr(result, "failure_mode", None)
                     or "vln_planner_failed",
                     error=getattr(result, "error", None),
+                    data=dict(getattr(result, "metrics", {}) or {}),
+                )
+            if _requires_secondary_observation(planner_data):
+                look_down_requested = True
+                await _emit_vln_progress(
+                    ctx,
+                    step="secondary_observation",
+                    summary="VLN planner requested look-down observation",
+                    progress=min(0.95, 0.3 + step_index * 0.3),
+                    planner=planner_data,
+                    command=None,
+                )
+                if step_index + 1 < max_steps and ctx.invoke is not None:
+                    await ctx.invoke(
+                        "inspect_scene",
+                        {
+                            "camera": arguments.get("camera", "front"),
+                            "look_down": True,
+                        },
+                    )
+                    continue
+                return SkillResult(
+                    success=False,
+                    summary="VLN planner requires a secondary look-down observation",
+                    status="failed",
+                    failure_mode="vln_secondary_observation_required",
+                    error="planner requested look_down but no planning step remains",
                     data=dict(getattr(result, "metrics", {}) or {}),
                 )
             if not execute_primitives:
@@ -424,11 +457,43 @@ class HumanFollowSkill(BaseSkill):
 
 
 def _vln_payload(_ctx: Any, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Build VLN planner payload — camera frame is auto-injected by the framework."""
-    return {
+    """Build a stable VLN policy payload from explicit args and current observation."""
+    payload = {
         key: value
         for key, value in dict(arguments).items()
         if key not in {"execute_primitives", "max_steps"}
+    }
+    if "observation" not in payload and "image_path" not in payload:
+        observation = _ctx.current_observation() if _ctx.current_observation else None
+        observation_payload = _observation_payload(
+            observation,
+            camera=payload.get("camera"),
+        )
+        if observation_payload is not None:
+            payload["observation"] = observation_payload
+    skill_id = getattr(_ctx, "skill_id", None)
+    if skill_id and not payload.get("policy_session_id"):
+        payload["policy_session_id"] = skill_id
+    payload.setdefault("reset_policy", True)
+    return payload
+
+
+def _observation_payload(
+    observation: RobotObservation | None, *, camera: object | None = None
+) -> dict[str, Any] | None:
+    if observation is None:
+        return None
+    images = observation.images
+    if camera:
+        preferred = [image for image in images if image.camera == str(camera)]
+        if preferred:
+            images = preferred
+    return {
+        "frame_id": observation.frame_id,
+        "timestamp": observation.envelope.timestamp,
+        "images": [asdict(image) for image in images],
+        "proprioception": list(observation.proprioception),
+        "raw": dict(observation.raw),
     }
 
 
@@ -441,6 +506,13 @@ def _extract_vln_planner(result) -> dict[str, Any]:
         if key in metrics:
             return metrics
     return {}
+
+
+def _requires_secondary_observation(planner: dict[str, Any]) -> bool:
+    return (
+        bool(planner.get("requires_secondary_observation"))
+        or str(planner.get("mode") or "") == "look_down_required"
+    )
 
 
 async def _execute_vln_primitive(ctx, command: PrimitiveCommand) -> dict[str, Any]:

@@ -215,7 +215,7 @@ def test_runtime_executes_vla_manipulation_skill() -> None:
                 status="completed",
                 failure_mode=None,
                 error=None,
-                metrics={"verified": True},
+                metrics={"vla": {"task_done": True}},
             )
 
     class FakeRobot:
@@ -226,6 +226,9 @@ def test_runtime_executes_vla_manipulation_skill() -> None:
             return {"success": True}
 
         async def stop_arm(self, **_arguments):
+            return {"success": True}
+
+        async def stop_motion(self, **_arguments):
             return {"success": True}
 
     model_services = ModelServiceAPI()
@@ -252,8 +255,241 @@ def test_runtime_executes_vla_manipulation_skill() -> None:
                 "skill_name": "vla_manipulation",
                 "task_prompt": "Pick up the red cup.",
                 "vla_step": 0,
+                "policy_session_id": None,
             },
         )
+    ]
+
+
+def test_pick_object_routes_to_required_vla_model_service() -> None:
+    class ModelServiceAPI:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict]] = []
+
+        async def call(self, name: str, arguments: dict):
+            self.calls.append((name, dict(arguments)))
+            return SimpleNamespace(
+                success=True,
+                summary="object picked",
+                status="completed",
+                failure_mode=None,
+                error=None,
+                metrics={"vla": {"task_done": True}},
+            )
+
+    class FakeRobot:
+        async def stop_motion(self, **_arguments):
+            return {"success": True}
+
+    model_services = ModelServiceAPI()
+    registry = load_skill_registry(enabled=("pick_object",))
+    runtime = SkillRuntime(registry)
+
+    result = __import__("asyncio").run(
+        runtime.execute(
+            "pick_object",
+            {"task_prompt": "Pick up the red cup.", "max_steps": 1},
+            context_factory=lambda invoke: SkillContext(
+                model_services=model_services,
+                invoke=invoke,
+                robot=FakeRobot(),
+                skill_id="pick-1",
+            ),
+        )
+    )
+
+    assert result.success is True
+    assert model_services.calls[0] == (
+        "vla_manipulation",
+        {
+            "skill_name": "pick_object",
+            "task_prompt": "Pick up the red cup.",
+            "vla_step": 0,
+            "policy_session_id": "pick-1",
+        },
+    )
+
+
+def test_vla_max_steps_exhausted_fails() -> None:
+    class ModelServiceAPI:
+        async def call(self, _name: str, _arguments: dict):
+            return SimpleNamespace(
+                success=True,
+                summary="still running",
+                status="completed",
+                failure_mode=None,
+                error=None,
+                metrics={"vla": {"task_done": False}},
+            )
+
+    class FakeRobot:
+        async def stop_motion(self, **_arguments):
+            return {"success": True}
+
+    registry = load_skill_registry(enabled=("vla_manipulation",))
+    runtime = SkillRuntime(registry)
+
+    result = __import__("asyncio").run(
+        runtime.execute(
+            "vla_manipulation",
+            {"task_prompt": "Pick up the red cup.", "max_steps": 1},
+            context_factory=lambda invoke: SkillContext(
+                model_services=ModelServiceAPI(),
+                invoke=invoke,
+                robot=FakeRobot(),
+            ),
+        )
+    )
+
+    assert result.success is False
+    assert result.failure_mode == "vla_max_steps_exhausted"
+
+
+def test_vla_adapter_consumes_typed_action_chunk_policy_result() -> None:
+    from hey_robot.skill_os.builtins.manipulation_adapter import (
+        vla_output_to_primitives,
+    )
+
+    primitives = vla_output_to_primitives(
+        {
+            "policy_result": {
+                "kind": "action_chunk",
+                "actions": [
+                    {
+                        "joints": {"shoulder_pan": 0.25, "elbow_flex": 0.5},
+                        "gripper": 0.3,
+                    }
+                ],
+            }
+        }
+    )
+
+    assert [item.primitive for item in primitives] == [
+        "move_arm_joints",
+        "set_gripper",
+    ]
+    assert primitives[0].arguments == {
+        "joints": {"shoulder_pan": 0.25, "elbow_flex": 0.5},
+        "mode": "absolute",
+    }
+    assert primitives[1].arguments == {"opening_pct": 30.0}
+
+
+def test_vla_adapter_consumes_full_action_chunk_horizon() -> None:
+    from hey_robot.skill_os.builtins.manipulation_adapter import (
+        vla_output_to_primitives,
+    )
+
+    primitives = vla_output_to_primitives(
+        {
+            "policy_result": {
+                "kind": "action_chunk",
+                "actions": [
+                    {"joints": {"shoulder_pan": 0.1}, "gripper": 1.0},
+                    {"joints": {"shoulder_pan": 0.2}, "gripper": 0.2},
+                ],
+            }
+        }
+    )
+
+    assert [item.primitive for item in primitives] == [
+        "move_arm_joints",
+        "set_gripper",
+        "move_arm_joints",
+        "set_gripper",
+    ]
+    assert primitives[2].arguments == {
+        "joints": {"shoulder_pan": 0.2},
+        "mode": "absolute",
+    }
+    assert "chunk action 2" in primitives[2].reason
+
+
+def test_vla_skill_injects_observation_and_consumes_typed_policy_result() -> None:
+    class ModelServiceAPI:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict]] = []
+
+        async def call(self, name: str, arguments: dict):
+            self.calls.append((name, dict(arguments)))
+            return SimpleNamespace(
+                success=True,
+                summary="action chunk produced",
+                status="completed",
+                failure_mode=None,
+                error=None,
+                metrics={
+                    "policy_result": {
+                        "kind": "action_chunk",
+                        "action_space": "xlerobot_single_arm_joint",
+                        "embodiment": "xlerobot",
+                        "horizon": 2,
+                        "dt": 0.033,
+                        "done": True,
+                        "actions": [
+                            {"joints": {"shoulder_pan": 0.1}, "gripper": 1.0},
+                            {"joints": {"shoulder_pan": 0.2}, "gripper": 0.2},
+                        ],
+                    },
+                    "vla": {"backend_mode": "action_chunk_policy"},
+                },
+            )
+
+    class FakeRobot:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict]] = []
+
+        async def move_arm_joints(self, **arguments):
+            self.calls.append(("move_arm_joints", dict(arguments)))
+            return {"success": True}
+
+        async def set_gripper(self, **arguments):
+            self.calls.append(("set_gripper", dict(arguments)))
+            return {"success": True}
+
+    observation = RobotObservation(
+        envelope=Envelope(robot_id="xlerobot"),
+        frame_id=7,
+        images=[
+            ImageRef(
+                uri="media://local/images/xlerobot/wrist/frame.jpg",
+                camera="wrist",
+            )
+        ],
+        proprioception=[0.1, 0.2],
+    )
+    model_services = ModelServiceAPI()
+    robot = FakeRobot()
+    registry = load_skill_registry(enabled=("pick_object",))
+    runtime = SkillRuntime(registry)
+
+    result = __import__("asyncio").run(
+        runtime.execute(
+            "pick_object",
+            {"task_prompt": "Pick up the red cup.", "max_steps": 1},
+            context_factory=lambda invoke: SkillContext(
+                model_services=model_services,
+                invoke=invoke,
+                robot=robot,
+                skill_id="pick-typed",
+                observation=observation,
+                current_observation=lambda: observation,
+            ),
+        )
+    )
+
+    assert result.success is True
+    assert model_services.calls[0][0] == "vla_manipulation"
+    sent = model_services.calls[0][1]
+    assert sent["observation"]["frame_id"] == 7
+    assert sent["observation"]["images"][0]["camera"] == "wrist"
+    assert sent["observation"]["proprioception"] == [0.1, 0.2]
+    assert sent["policy_session_id"] == "pick-typed"
+    assert robot.calls == [
+        ("move_arm_joints", {"joints": {"shoulder_pan": 0.1}, "mode": "absolute"}),
+        ("set_gripper", {"opening_pct": 100.0}),
+        ("move_arm_joints", {"joints": {"shoulder_pan": 0.2}, "mode": "absolute"}),
+        ("set_gripper", {"opening_pct": 20.0}),
     ]
 
 
@@ -270,7 +506,7 @@ def test_runtime_executes_navigate_to_skill_through_capability() -> None:
                 status="completed",
                 failure_mode=None,
                 error=None,
-                metrics={"vln": {"mode": "pixel_goal", "pixel_goal": [320, 240]}},
+                metrics={"vln": {"mode": "pixel_goal", "pixel_goal": [240, 320]}},
             )
 
     model_services = ModelServiceAPI()
@@ -289,8 +525,10 @@ def test_runtime_executes_navigate_to_skill_through_capability() -> None:
     )
 
     assert result.success is True
-    assert result.data == {"vln": {"mode": "pixel_goal", "pixel_goal": [320, 240]}}
-    assert model_services.calls == [("navigate_to", {"target": "desk"})]
+    assert result.data == {"vln": {"mode": "pixel_goal", "pixel_goal": [240, 320]}}
+    assert model_services.calls == [
+        ("navigate_to", {"target": "desk", "reset_policy": True})
+    ]
 
 
 def test_navigate_to_skill_respects_execute_primitives_false() -> None:
@@ -303,7 +541,7 @@ def test_navigate_to_skill_respects_execute_primitives_false() -> None:
                 status="completed",
                 failure_mode=None,
                 error=None,
-                metrics={"vln": {"mode": "pixel_goal", "pixel_goal": [320, 240]}},
+                metrics={"vln": {"mode": "pixel_goal", "pixel_goal": [240, 320]}},
             )
 
     robot = _RobotAPI()
@@ -336,7 +574,7 @@ def test_navigate_to_skill_executes_center_pixel_as_forward_step() -> None:
                 status="completed",
                 failure_mode=None,
                 error=None,
-                metrics={"vln": {"mode": "pixel_goal", "pixel_goal": [320, 240]}},
+                metrics={"vln": {"mode": "pixel_goal", "pixel_goal": [240, 320]}},
             )
 
     robot = _RobotAPI()
@@ -375,7 +613,7 @@ def test_navigate_to_skill_executes_off_center_pixel_as_turn() -> None:
                 status="completed",
                 failure_mode=None,
                 error=None,
-                metrics={"vln": {"mode": "pixel_goal", "pixel_goal": [32, 240]}},
+                metrics={"vln": {"mode": "pixel_goal", "pixel_goal": [240, 32]}},
             )
 
     robot = _RobotAPI()
@@ -478,7 +716,7 @@ def test_navigate_to_skill_requires_robot_for_primitive_execution() -> None:
                 status="completed",
                 failure_mode=None,
                 error=None,
-                metrics={"vln": {"mode": "pixel_goal", "pixel_goal": [320, 240]}},
+                metrics={"vln": {"mode": "pixel_goal", "pixel_goal": [240, 320]}},
             )
 
     registry = load_skill_registry(enabled=("navigate_to",))
@@ -510,7 +748,7 @@ def test_navigate_to_skill_records_multistep_progress_and_refreshes_observation(
             del name, arguments
             self.calls += 1
             metrics = (
-                {"vln": {"mode": "pixel_goal", "pixel_goal": [32, 240]}}
+                {"vln": {"mode": "pixel_goal", "pixel_goal": [240, 32]}}
                 if self.calls == 1
                 else {"vln": {"mode": "stop", "stop": True}}
             )
@@ -565,6 +803,111 @@ def test_navigate_to_skill_records_multistep_progress_and_refreshes_observation(
     assert progress_events[0]["metadata"]["ux"]["primitive"] == "turn_base"
 
 
+def test_navigate_to_skill_handles_look_down_secondary_observation() -> None:
+    class ModelServiceAPI:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict]] = []
+
+        async def call(self, name: str, arguments: dict):
+            self.calls.append((name, dict(arguments)))
+            metrics = (
+                {
+                    "vln": {
+                        "mode": "look_down_required",
+                        "requires_secondary_observation": True,
+                    }
+                }
+                if len(self.calls) == 1
+                else {"vln": {"mode": "pixel_goal", "pixel_goal": [240, 320]}}
+            )
+            return SimpleNamespace(
+                success=True,
+                summary="VLN planner step",
+                status="completed",
+                failure_mode=None,
+                error=None,
+                metrics=metrics,
+            )
+
+    robot = _RobotAPI()
+    model_services = ModelServiceAPI()
+    invocations: list[tuple[str, dict]] = []
+    progress_events: list[dict] = []
+    registry = load_skill_registry(enabled=("navigate_to",))
+    runtime = SkillRuntime(registry)
+
+    async def invoke(name: str, arguments: dict | None = None):
+        invocations.append((name, dict(arguments or {})))
+
+    async def progress(**kwargs):
+        progress_events.append(dict(kwargs))
+
+    result = __import__("asyncio").run(
+        runtime.execute(
+            "navigate_to",
+            {
+                "target": "desk",
+                "camera": "front",
+                "execute_primitives": True,
+                "max_steps": 2,
+            },
+            context_factory=lambda _invoke: SkillContext(
+                robot=robot,
+                model_services=model_services,
+                invoke=invoke,
+                progress=progress,
+            ),
+        )
+    )
+
+    assert result.success is True
+    assert model_services.calls[0][1]["reset_policy"] is True
+    assert model_services.calls[1][1]["reset_policy"] is False
+    assert model_services.calls[1][1]["look_down"] is True
+    assert invocations == [("inspect_scene", {"camera": "front", "look_down": True})]
+    assert robot.calls == [("move_base", {"direction": "forward", "distance_cm": 15.0})]
+    assert "secondary_observation" in [event["step"] for event in progress_events]
+
+
+def test_navigate_to_skill_fails_when_look_down_requested_without_remaining_step() -> (
+    None
+):
+    class ModelServiceAPI:
+        async def call(self, name: str, arguments: dict):
+            del name, arguments
+            return SimpleNamespace(
+                success=True,
+                summary="VLN planner requested look-down",
+                status="completed",
+                failure_mode=None,
+                error=None,
+                metrics={
+                    "vln": {
+                        "mode": "look_down_required",
+                        "requires_secondary_observation": True,
+                    }
+                },
+            )
+
+    registry = load_skill_registry(enabled=("navigate_to",))
+    runtime = SkillRuntime(registry)
+
+    result = __import__("asyncio").run(
+        runtime.execute(
+            "navigate_to",
+            {"target": "desk", "execute_primitives": True, "max_steps": 1},
+            context_factory=lambda invoke: SkillContext(
+                robot=_RobotAPI(),
+                model_services=ModelServiceAPI(),
+                invoke=invoke,
+            ),
+        )
+    )
+
+    assert result.success is False
+    assert result.failure_mode == "vln_secondary_observation_required"
+
+
 def test_navigate_to_skill_returns_structured_failure_when_primitive_fails() -> None:
     class ModelServiceAPI:
         async def call(self, name: str, arguments: dict):
@@ -575,7 +918,7 @@ def test_navigate_to_skill_returns_structured_failure_when_primitive_fails() -> 
                 status="completed",
                 failure_mode=None,
                 error=None,
-                metrics={"vln": {"mode": "pixel_goal", "pixel_goal": [320, 240]}},
+                metrics={"vln": {"mode": "pixel_goal", "pixel_goal": [240, 320]}},
             )
 
     class FailingRobot:
@@ -624,7 +967,7 @@ def test_navigate_to_skill_injects_latest_observation_image() -> None:
                 status="completed",
                 failure_mode=None,
                 error=None,
-                metrics={"vln": {"mode": "pixel_goal", "pixel_goal": [320, 240]}},
+                metrics={"vln": {"mode": "pixel_goal", "pixel_goal": [240, 320]}},
             )
 
     observation = RobotObservation(
@@ -694,6 +1037,71 @@ def test_navigate_to_skill_injects_latest_observation_image() -> None:
     ]
 
 
+def test_navigate_to_skill_auto_injects_current_observation_image() -> None:
+    class ModelServiceAPI:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict]] = []
+
+        async def call(self, name: str, arguments: dict):
+            self.calls.append((name, dict(arguments)))
+            return SimpleNamespace(
+                success=True,
+                summary="VLN planner produced pixel_goal",
+                status="completed",
+                failure_mode=None,
+                error=None,
+                metrics={"vln": {"mode": "pixel_goal", "pixel_goal": [240, 320]}},
+            )
+
+    observation = RobotObservation(
+        envelope=Envelope(robot_id="xlerobot"),
+        frame_id=43,
+        images=[
+            ImageRef(
+                uri="media://local/images/xlerobot/wrist/frame.jpg", camera="wrist"
+            ),
+            ImageRef(
+                uri="media://local/images/xlerobot/front/frame.jpg", camera="front"
+            ),
+        ],
+        proprioception=[0.3, 0.4],
+    )
+    model_services = ModelServiceAPI()
+    registry = load_skill_registry(enabled=("navigate_to",))
+    runtime = SkillRuntime(registry)
+
+    result = __import__("asyncio").run(
+        runtime.execute(
+            "navigate_to",
+            {"target": "desk", "camera": "front", "execute_primitives": False},
+            context_factory=lambda invoke: SkillContext(
+                model_services=model_services,
+                observation=observation,
+                current_observation=lambda: observation,
+                invoke=invoke,
+            ),
+        )
+    )
+
+    assert result.success is True
+    sent = model_services.calls[0][1]
+    assert sent["observation"]["frame_id"] == 43
+    assert sent["observation"]["images"] == [
+        {
+            "uri": "media://local/images/xlerobot/front/frame.jpg",
+            "camera": "front",
+            "width": None,
+            "height": None,
+            "timestamp": None,
+            "content_type": None,
+            "size_bytes": None,
+            "sha256": None,
+            "metadata": {},
+        }
+    ]
+    assert sent["observation"]["proprioception"] == [0.3, 0.4]
+
+
 def test_navigate_to_skill_keeps_explicit_image_path() -> None:
     class ModelServiceAPI:
         def __init__(self) -> None:
@@ -746,6 +1154,7 @@ def test_navigate_to_skill_keeps_explicit_image_path() -> None:
             {
                 "target": "desk",
                 "image_path": "D:/tmp/front.png",
+                "reset_policy": True,
             },
         )
     ]

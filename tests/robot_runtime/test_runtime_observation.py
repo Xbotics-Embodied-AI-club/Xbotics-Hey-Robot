@@ -76,6 +76,27 @@ async def test_robot_runtime_handles_perception_skill_without_driver_action(
     assert status.metrics["last_skill_result"]["source"] == "refresh"
 
 
+async def test_robot_runtime_routes_motion_through_control_plane(tmp_path) -> None:
+    config = DeploymentConfig.from_dict({"robots": {"mock0": {"type": "mock"}}})
+    runtime = RobotRuntime(
+        RobotManager(config).require("mock0"), LocalMediaStore(tmp_path)
+    )
+    await runtime.start()
+    intent = SkillIntent(
+        envelope=Envelope(robot_id="mock0"), skill_id="move1", objective="move forward"
+    )
+    action = RobotSkillAction(
+        "move_base", {"direction": "forward", "distance_cm": 10}
+    ).to_robot_action(intent)
+
+    status = await runtime.apply_action(action)
+
+    assert status.success is True
+    assert status.metrics["control_plane"]["buffer_size"] == 1
+    assert status.metrics["control_plane"]["last_watchdog"]["skill_id"] == "move1"
+    assert runtime.control_plane.action_buffer[-1].action_type == "skill"
+
+
 async def test_robot_runtime_observe_always_refreshes_from_driver(
     tmp_path,
 ) -> None:

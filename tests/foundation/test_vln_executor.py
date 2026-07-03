@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import io
 from types import SimpleNamespace
 
 import numpy as np
@@ -38,6 +40,10 @@ class _FakeS2Model:
     def __init__(self, output) -> None:
         self.output = output
         self.calls: list[dict] = []
+        self.reset_calls = 0
+
+    def reset(self) -> None:
+        self.reset_calls += 1
 
     def s2_step(self, rgb, depth, pose, instruction, intrinsic, look_down=False):
         self.calls.append(
@@ -88,8 +94,10 @@ def test_internvla_n1_system2_mock_returns_center_pixel_goal() -> None:
     assert result["success"] is True
     assert result["status"] == "completed"
     assert result["metrics"]["vln"]["mode"] == "pixel_goal"
-    assert result["metrics"]["vln"]["pixel_goal"] == [320, 240]
+    assert result["metrics"]["vln"]["pixel_goal"] == [240, 320]
     assert result["metrics"]["vln"]["stop"] is False
+    assert result["metrics"]["vln"]["policy_result"]["kind"] == "local_goal"
+    assert result["metrics"]["vln"]["local_goal"]["pixel_goal"] == [240, 320]
 
 
 def test_internvla_n1_system2_mock_can_return_stop() -> None:
@@ -119,7 +127,9 @@ def test_internvla_n1_system2_real_path_adapts_image_path_and_pixel_output(
 ) -> None:
     image_path = tmp_path / "front.png"
     _write_rgb(image_path)
-    model = _FakeS2Model(SimpleNamespace(output_pixel=np.asarray([3, 4])))
+    model = _FakeS2Model(
+        SimpleNamespace(output_pixel=np.asarray([3, 4]), output_latent=np.asarray([9]))
+    )
     executor = InternVLAN1System2Executor("vln_nav", _real_spec({"hfov": 90}))
     executor._model = model
 
@@ -137,6 +147,7 @@ def test_internvla_n1_system2_real_path_adapts_image_path_and_pixel_output(
     assert result["success"] is True
     assert result["metrics"]["vln"]["mode"] == "pixel_goal"
     assert result["metrics"]["vln"]["pixel_goal"] == [3, 4]
+    assert result["metrics"]["vln"]["output_latent"] == [9]
     assert result["metrics"]["vln"]["image_source"] == str(image_path)
     call = model.calls[0]
     assert call["rgb"].shape == (6, 8, 3)
@@ -188,7 +199,7 @@ def test_internvla_n1_system2_real_path_clamps_out_of_bounds_pixel(tmp_path) -> 
     )
 
     assert result["success"] is True
-    assert result["metrics"]["vln"]["pixel_goal"] == [7, 0]
+    assert result["metrics"]["vln"]["pixel_goal"] == [5, 0]
     assert "clamped" in result["metrics"]["vln"]["reason"]
 
 
@@ -236,9 +247,107 @@ def test_internvla_n1_system2_real_path_maps_non_stop_action_to_heading(
     assert result["metrics"]["vln"]["heading_deg"] == 0.0
 
 
+def test_internvla_n1_system2_loads_base64_observation_image() -> None:
+    image = Image.fromarray(np.zeros((6, 8, 3), dtype=np.uint8))
+    buf = io.BytesIO()
+    image.save(buf, format="JPEG")
+    model = _FakeS2Model(SimpleNamespace(output_pixel=np.asarray([3, 4])))
+    executor = InternVLAN1System2Executor("vln_nav", _real_spec({"camera": "front"}))
+    executor._model = model
+
+    result = executor.execute(
+        {
+            "skill_id": "nav1",
+            "arguments": {
+                "target": "desk",
+                "observation": {
+                    "frame_id": 7,
+                    "images": [
+                        {
+                            "camera": "front",
+                            "format": "jpeg",
+                            "data": base64.b64encode(buf.getvalue()).decode("ascii"),
+                        }
+                    ],
+                },
+            },
+        }
+    )
+
+    assert result["success"] is True
+    assert model.calls[0]["rgb"].shape == (6, 8, 3)
+    assert result["metrics"]["vln"]["policy_session_id"] == "nav1"
+
+
+def test_internvla_n1_system2_action_five_requires_look_down(tmp_path) -> None:
+    image_path = tmp_path / "front.png"
+    _write_rgb(image_path)
+    model = _FakeS2Model(SimpleNamespace(output_action=[5], output_pixel=None))
+    executor = InternVLAN1System2Executor("vln_nav", _real_spec())
+    executor._model = model
+
+    result = executor.execute(
+        {"arguments": {"target": "desk", "image_path": str(image_path)}}
+    )
+
+    assert result["success"] is True
+    assert result["metrics"]["vln"]["mode"] == "look_down_required"
+    assert result["metrics"]["vln"]["requires_secondary_observation"] is True
+    assert result["metrics"]["vln"]["heading_deg"] is None
+
+
+def test_internvla_n1_system2_action_sequence_uses_current_step(tmp_path) -> None:
+    image_path = tmp_path / "front.png"
+    _write_rgb(image_path)
+    model = _FakeS2Model(SimpleNamespace(output_action=[1, 0], output_pixel=None))
+    executor = InternVLAN1System2Executor("vln_nav", _real_spec())
+    executor._model = model
+
+    result = executor.execute(
+        {"arguments": {"target": "desk", "image_path": str(image_path)}}
+    )
+
+    assert result["success"] is True
+    assert result["metrics"]["vln"]["mode"] == "heading"
+    assert result["metrics"]["vln"]["heading_deg"] == 0.0
+
+
+def test_internvla_n1_system2_resets_on_new_policy_session(tmp_path) -> None:
+    image_path = tmp_path / "front.png"
+    _write_rgb(image_path)
+    model = _FakeS2Model(SimpleNamespace(output_pixel=np.asarray([3, 4])))
+    executor = InternVLAN1System2Executor("vln_nav", _real_spec())
+    executor._model = model
+
+    payload = {
+        "arguments": {
+            "target": "desk",
+            "image_path": str(image_path),
+            "policy_session_id": "session-a",
+        }
+    }
+    result1 = executor.execute(payload)
+    result2 = executor.execute(payload)
+    result3 = executor.execute(
+        {
+            "arguments": {
+                "target": "door",
+                "image_path": str(image_path),
+                "policy_session_id": "session-b",
+            }
+        }
+    )
+
+    assert result1["success"] is True
+    assert result2["success"] is True
+    assert result3["success"] is True
+    assert model.reset_calls == 2
+    assert result3["metrics"]["vln"]["policy_session_id"] == "session-b"
+
+
 def test_vln_adapter_maps_center_pixel_to_forward_step() -> None:
     command = planner_output_to_primitive(
-        {"mode": "pixel_goal", "pixel_goal": [320, 240]},
+        {"mode": "pixel_goal", "pixel_goal": [240, 320]},
         image_width=640,
     )
 
@@ -248,7 +357,7 @@ def test_vln_adapter_maps_center_pixel_to_forward_step() -> None:
 
 def test_vln_adapter_maps_off_center_pixel_to_turn() -> None:
     command = planner_output_to_primitive(
-        {"mode": "pixel_goal", "pixel_goal": [32, 240]},
+        {"mode": "pixel_goal", "pixel_goal": [240, 32]},
         image_width=640,
     )
 
@@ -280,7 +389,8 @@ def test_action_to_heading_maps_direction_codes() -> None:
     assert _action_to_heading([1]) == 0.0
     assert _action_to_heading([2]) == -90.0
     assert _action_to_heading([3]) == 90.0
-    assert _action_to_heading([5]) == 180.0
+    assert _action_to_heading([5]) is None
+    assert _action_to_heading([1, 0]) == 0.0
     assert _action_to_heading([0]) is None
     assert _action_to_heading(None) is None
 

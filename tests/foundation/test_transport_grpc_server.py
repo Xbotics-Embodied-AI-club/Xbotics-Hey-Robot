@@ -10,6 +10,7 @@ from hey_robot.config import DeploymentConfig
 from hey_robot.foundation.backends.vla.lerobot.executor import (
     DEFAULT_ARM_CALIBRATION_DIR,
     LeRobotVLAExecutor,
+    LeRobotVLAPolicyExecutor,
 )
 from hey_robot.foundation.contract.v1 import model_service_pb2
 from hey_robot.foundation.transport.grpc.server import (
@@ -403,6 +404,160 @@ def test_vla_executor_reports_control_loop_failure(monkeypatch) -> None:
     assert result["success"] is False
     assert result["failure_mode"] == "execution_failed"
     assert "ValueError" in result["summary"]
+
+
+def test_vla_policy_executor_requires_observation_for_action_chunk_policy() -> None:
+    executor = LeRobotVLAPolicyExecutor(
+        "arm_vla",
+        _spec(
+            {
+                "backend_mode": "action_chunk_policy",
+                "server_address": "127.0.0.1:8080",
+                "model_path": "org/policy",
+            }
+        ),
+    )
+
+    result = executor.execute({"arguments": {"task_prompt": "pick cup"}})
+
+    assert result["success"] is False
+    assert result["failure_mode"] == "observation_unavailable"
+
+
+def test_vla_policy_executor_calls_action_chunk_endpoint_without_lerobot(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc: object):
+            return None
+
+        def read(self) -> bytes:
+            return (
+                b'{"actions":[{"joints":{"shoulder_pan":0.1},"gripper":0.4}],'
+                b'"horizon":1,"dt":0.033,"done":false,"confidence":0.8}'
+            )
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["timeout"] = timeout
+        captured["body"] = request.data
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "hey_robot.foundation.backends.vla.lerobot.executor.urllib_request.urlopen",
+        fake_urlopen,
+    )
+    monkeypatch.setattr(
+        LeRobotVLAPolicyExecutor,
+        "_lerobot_classes",
+        staticmethod(lambda: (_raise_import_error(), None, None, None)),
+    )
+    executor = LeRobotVLAPolicyExecutor(
+        "arm_vla",
+        _spec(
+            {
+                "backend_mode": "action_chunk_policy",
+                "action_chunk_endpoint": "http://127.0.0.1:8088/policy_step",
+            }
+        ),
+    )
+
+    result = executor.execute(
+        {
+            "skill_id": "pick-1",
+            "robot_id": "xlerobot",
+            "arguments": {
+                "skill_name": "pick_object",
+                "task_prompt": "pick cup",
+                "policy_session_id": "pick-1",
+                "observation": {
+                    "frame_id": 12,
+                    "images": [{"camera": "front", "format": "jpeg", "data": "abc"}],
+                    "proprioception": {"arm": [0.0]},
+                },
+            },
+            "timeout_sec": 2.0,
+        }
+    )
+
+    assert result["success"] is True
+    assert result["metrics"]["policy_result"]["kind"] == "action_chunk"
+    assert result["metrics"]["vla"]["joint_angles"] == {"shoulder_pan": 0.1}
+    assert result["metrics"]["vla"]["gripper_action"] == 0.4
+    assert result["metrics"]["vla"]["hardware_ownership"] == "none"
+    assert captured["url"] == "http://127.0.0.1:8088/policy_step"
+
+
+def test_vla_policy_executor_rejects_invalid_action_chunk_response(monkeypatch) -> None:
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc: object):
+            return None
+
+        def read(self) -> bytes:
+            return b'{"policy_result":{"kind":"local_goal","actions":[]}}'
+
+    def fake_urlopen(_request, timeout):
+        del timeout
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "hey_robot.foundation.backends.vla.lerobot.executor.urllib_request.urlopen",
+        fake_urlopen,
+    )
+    executor = LeRobotVLAPolicyExecutor(
+        "arm_vla",
+        _spec(
+            {
+                "backend_mode": "action_chunk_policy",
+                "action_chunk_endpoint": "http://127.0.0.1:8088/policy_step",
+            }
+        ),
+    )
+
+    result = executor.execute(
+        {
+            "arguments": {
+                "task_prompt": "pick cup",
+                "observation": {
+                    "frame_id": 12,
+                    "images": [{"camera": "front", "format": "jpeg", "data": "abc"}],
+                },
+            }
+        }
+    )
+
+    assert result["success"] is False
+    assert result["failure_mode"] == "action_chunk_policy_invalid_response"
+
+
+def test_vla_service_selects_legacy_control_loop_backend() -> None:
+    service = VLAPolicyService(
+        DeploymentConfig.from_dict(
+            {
+                "model_services": {
+                    "arm_vla": {
+                        "type": "vla_policy",
+                        "enabled": True,
+                        "robot_id": "xlerobot",
+                        "target": "127.0.0.1:9090",
+                        "provides": ["vla_manipulation"],
+                        "backend_mode": "lerobot_control_loop",
+                    }
+                }
+            }
+        ),
+        service_id="arm_vla",
+    )
+
+    assert isinstance(service.executor, LeRobotVLAExecutor)
 
 
 def test_vla_model_servicer_health_execute_cancel() -> None:

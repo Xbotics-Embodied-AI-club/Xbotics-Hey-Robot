@@ -4,6 +4,11 @@ from hey_robot.robot_runtime.base import (
     RobotDriverContext,
     RobotHealth,
 )
+from hey_robot.robot_runtime.control_plane import (
+    ActionBufferEntry,
+    ControlPlaneDecision,
+    RobotControlPlane,
+)
 from hey_robot.robot_runtime.embodiments import (
     DEFAULT_EMBODIMENT_PROFILES,
     EmbodimentProfile,
@@ -25,10 +30,13 @@ from hey_robot.robot_runtime.xlerobot import XLeRobotDriver
 
 __all__ = [
     "DEFAULT_EMBODIMENT_PROFILES",
+    "ActionBufferEntry",
+    "ControlPlaneDecision",
     "EmbodimentProfile",
     "LeKiwiDriver",
     "MockRobotDriver",
     "RobotCapabilities",
+    "RobotControlPlane",
     "RobotDriver",
     "RobotDriverContext",
     "RobotHealth",

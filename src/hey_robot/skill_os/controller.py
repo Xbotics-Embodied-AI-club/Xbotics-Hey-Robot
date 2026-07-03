@@ -736,16 +736,23 @@ class SkillControllerService:
             strategy="runtime_trace",
             notes=("Recorded from actual model service invocation.",),
         )
-        result = await client.execute(
-            ServiceInvocationRequest(
-                service_id=service_id,
-                intent=run.intent,
-                contract=contract,
-                timeout_sec=float(
-                    run.intent.timeout_sec or spec.timeout_sec or run.timeout_sec
-                ),
+        run.active_model_service_id = service_id
+        run.active_model_client = client
+        try:
+            result = await client.execute(
+                ServiceInvocationRequest(
+                    service_id=service_id,
+                    intent=run.intent,
+                    contract=contract,
+                    timeout_sec=float(
+                        run.intent.timeout_sec or spec.timeout_sec or run.timeout_sec
+                    ),
+                )
             )
-        )
+        finally:
+            if run.active_model_service_id == service_id:
+                run.active_model_service_id = None
+                run.active_model_client = None
         run.steps_executed += 1
         if result.summary:
             run.step_summaries.append(result.summary)
@@ -758,6 +765,7 @@ class SkillControllerService:
             run = state.active_runs.get(skill_id)
             if run is None or run.terminal or not run.timed_out:
                 continue
+            cancel_metadata = await self._cancel_active_model_service(run)
             if run.task is not None:
                 run.task.cancel()
             await self._finish_run(
@@ -770,6 +778,17 @@ class SkillControllerService:
                 failure_mode="timeout",
                 error="skill timed out",
             )
+            if cancel_metadata is not None:
+                await self._publish_event(
+                    run.intent,
+                    "cancel_requested",
+                    summary="model service cancel requested after timeout",
+                    policy_id=policy_id,
+                    steps_executed=run.steps_executed,
+                    contract=run.contract,
+                    execution_plan=run.execution_plan,
+                    metadata={"model_service_cancel": cancel_metadata},
+                )
 
     async def _publish_event(
         self,
@@ -924,6 +943,9 @@ class SkillControllerService:
                             **arguments,
                             "observation": {
                                 "frame_id": metadata.get("frame_id"),
+                                "timestamp": metadata.get("timestamp")
+                                or metadata.get("created_at")
+                                or time.time(),
                                 "images": [
                                     {
                                         "camera": metadata.get("camera", "unknown"),
@@ -931,6 +953,14 @@ class SkillControllerService:
                                         "data": b64_data,
                                     }
                                 ],
+                                "proprioception": list(
+                                    getattr(
+                                        _state_ref.latest_observation,
+                                        "proprioception",
+                                        [],
+                                    )
+                                    or []
+                                ),
                             },
                         }
                 return self._invoke_model_service(run, name, arguments)
@@ -1104,6 +1134,7 @@ class SkillControllerService:
         active_runs = [run for run in state.active_runs.values() if not run.terminal]
         for run in active_runs:
             run.terminal = True
+            cancel_metadata = await self._cancel_active_model_service(run)
             if run.task is not None:
                 run.task.cancel()
             await self._publish_event(
@@ -1115,6 +1146,9 @@ class SkillControllerService:
                 steps_executed=run.steps_executed,
                 contract=run.contract,
                 execution_plan=run.execution_plan,
+                metadata={"model_service_cancel": cancel_metadata}
+                if cancel_metadata is not None
+                else None,
             )
             await self._publish_result(
                 run.intent,
@@ -1139,6 +1173,28 @@ class SkillControllerService:
                 },
                 severity="warn",
             )
+
+    async def _cancel_active_model_service(
+        self, run: SkillRun
+    ) -> dict[str, Any] | None:
+        client = run.active_model_client
+        service_id = run.active_model_service_id
+        if client is None or service_id is None:
+            return None
+        try:
+            await client.cancel(run.intent.skill_id)
+        except Exception as exc:
+            return {
+                "service_id": service_id,
+                "skill_id": run.intent.skill_id,
+                "accepted": False,
+                "error": str(exc),
+            }
+        return {
+            "service_id": service_id,
+            "skill_id": run.intent.skill_id,
+            "accepted": True,
+        }
 
     async def _interrupt_active(
         self, policy_id: str, state: _SkillControllerState, interrupt: SkillIntent

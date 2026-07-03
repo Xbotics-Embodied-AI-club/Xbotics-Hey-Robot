@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import math
 import os
+import platform
 import time
 from pathlib import Path
 from typing import Any
@@ -72,6 +73,24 @@ _ARM_JOINT_NAMES = (
 
 _EGL_CONTEXT: Any = None
 """Singleton EGL GL context for headless rendering."""
+
+
+def _configure_mujoco_gl_backend() -> str | None:
+    configured = os.environ.get("MUJOCO_GL")
+    if configured:
+        return configured
+    system = platform.system()
+    if system == "Windows":
+        os.environ["MUJOCO_GL"] = "wgl"
+        return "wgl"
+    if system == "Linux" and not os.environ.get("DISPLAY"):
+        os.environ["MUJOCO_GL"] = "egl"
+        return "egl"
+    return None
+
+
+def _needs_egl_context() -> bool:
+    return platform.system() == "Linux" and os.environ.get("MUJOCO_GL") == "egl"
 
 
 def _ensure_egl_context(width: int = 640, height: int = 480) -> None:
@@ -152,6 +171,7 @@ class XLeRobotSimDriver:
     # RobotDriver protocol
 
     async def start(self) -> None:
+        _configure_mujoco_gl_backend()
         import mujoco
         import mujoco.viewer
 
@@ -168,9 +188,10 @@ class XLeRobotSimDriver:
 
         await asyncio.to_thread(mujoco.mj_forward, self.model, self.data)
 
-        # On headless machines (no DISPLAY), initialise EGL before the renderer.
-        if not os.environ.get("DISPLAY"):
-            _ensure_egl_context(480, 640)
+        # Linux headless rendering needs an EGL context before Renderer creation.
+        # Windows uses WGL; importing mujoco.egl there fails if EGL.dll is absent.
+        if _needs_egl_context():
+            _ensure_egl_context(self._render_width, self._render_height)
 
         # Renderer must be created on the calling thread (owns the GL context).
         self.renderer = mujoco.Renderer(

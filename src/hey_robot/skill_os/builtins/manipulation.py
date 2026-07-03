@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any
 
+from hey_robot.protocol import RobotObservation
 from hey_robot.skill_os.base import BaseSkill, SkillResult
 from hey_robot.skill_os.builtins.common import spec
 from hey_robot.skill_os.builtins.manipulation_adapter import vla_output_to_primitives
@@ -126,15 +128,22 @@ class _VLAManipulationSkill(BaseSkill):
             arguments.get("task_prompt") or arguments.get("objective") or self.spec.name
         )
         steps: list[dict[str, Any]] = []
+        service_capability = self.spec.required_model_service or self.capability_name
 
         for step_index in range(max_steps):
-            result = await ctx.model_services.call(
-                self.capability_name,
+            payload = _vla_payload(ctx, arguments)
+            payload.update(
                 {
                     "skill_name": self.capability_name,
                     "task_prompt": task_prompt,
                     "vla_step": step_index,
-                },
+                    "policy_session_id": payload.get("policy_session_id")
+                    or getattr(ctx, "skill_id", None),
+                }
+            )
+            result = await ctx.model_services.call(
+                service_capability,
+                payload,
             )
             if not bool(getattr(result, "success", False)):
                 return SkillResult(
@@ -149,9 +158,7 @@ class _VLAManipulationSkill(BaseSkill):
                     data={"steps": steps},
                 )
 
-            vla_data = dict(getattr(result, "metrics", {}) or {}).get("vla", {})
-            if not isinstance(vla_data, dict):
-                vla_data = {}
+            vla_data = _extract_vla_policy_data(result)
 
             primitives = vla_output_to_primitives(vla_data)
 
@@ -177,7 +184,7 @@ class _VLAManipulationSkill(BaseSkill):
                         data={"vla": vla_data, "steps": steps},
                     )
 
-            if vla_data.get("task_done"):
+            if _vla_task_done(vla_data):
                 return SkillResult(
                     success=True,
                     summary=f"{self.spec.name} completed in {step_index + 1} steps",
@@ -185,8 +192,10 @@ class _VLAManipulationSkill(BaseSkill):
                 )
 
         return SkillResult(
-            success=True,
-            summary=f"{self.spec.name} reached max steps ({max_steps})",
+            success=False,
+            status="failed",
+            failure_mode="vla_max_steps_exhausted",
+            summary=f"{self.spec.name} reached max steps without task_done",
             data={"steps": steps},
         )
 
@@ -234,6 +243,68 @@ class _VLAManipulationSkill(BaseSkill):
                 }
             },
         )
+
+
+def _vla_payload(ctx: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+    payload = {
+        key: value
+        for key, value in dict(arguments).items()
+        if key not in {"max_steps", "execute_primitives"}
+    }
+    if "observation" not in payload and "image_path" not in payload:
+        observation = ctx.current_observation() if ctx.current_observation else None
+        observation_payload = _observation_payload(
+            observation,
+            camera=payload.get("camera"),
+        )
+        if observation_payload is not None:
+            payload["observation"] = observation_payload
+    return payload
+
+
+def _observation_payload(
+    observation: RobotObservation | None, *, camera: object | None = None
+) -> dict[str, Any] | None:
+    if observation is None:
+        return None
+    images = observation.images
+    if camera:
+        preferred = [image for image in images if image.camera == str(camera)]
+        if preferred:
+            images = preferred
+    return {
+        "frame_id": observation.frame_id,
+        "timestamp": observation.envelope.timestamp,
+        "images": [asdict(image) for image in images],
+        "proprioception": list(observation.proprioception),
+        "raw": dict(observation.raw),
+    }
+
+
+def _extract_vla_policy_data(result: Any) -> dict[str, Any]:
+    metrics = dict(getattr(result, "metrics", {}) or {})
+    vla = metrics.get("vla")
+    data = dict(vla) if isinstance(vla, dict) else {}
+    for key in ("policy_result", "action_chunk"):
+        value = metrics.get(key)
+        if isinstance(value, dict):
+            data[key] = dict(value)
+    policy_result = data.get("policy_result")
+    if isinstance(policy_result, dict) and policy_result.get("kind") == "action_chunk":
+        data.setdefault("task_done", bool(policy_result.get("done", False)))
+    return data
+
+
+def _vla_task_done(vla_data: dict[str, Any]) -> bool:
+    if bool(vla_data.get("task_done")):
+        return True
+    policy_result = vla_data.get("policy_result")
+    if isinstance(policy_result, dict):
+        return bool(policy_result.get("done", False))
+    action_chunk = vla_data.get("action_chunk")
+    if isinstance(action_chunk, dict):
+        return bool(action_chunk.get("done", False))
+    return False
 
 
 class PickObjectSkill(_VLAManipulationSkill):

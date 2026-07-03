@@ -138,7 +138,10 @@ class VLAPolicyService:
         host: str | None = None,
         port: int | None = None,
     ) -> None:
-        from hey_robot.foundation.backends.vla.lerobot import LeRobotVLAPolicyExecutor
+        from hey_robot.foundation.backends.vla.lerobot import (
+            LeRobotVLAExecutor,
+            LeRobotVLAPolicyExecutor,
+        )
 
         self.config = config
         self.service_id = service_id
@@ -146,7 +149,18 @@ class VLAPolicyService:
         self.host = host or str(self.spec.settings.get("host", "127.0.0.1"))
         self.port = port or int(self.spec.settings.get("port", 9090))
         self.state = ModelServiceState(service_id, self.spec)
-        self.executor = LeRobotVLAPolicyExecutor(service_id, self.spec)
+        backend_mode = str(
+            self.spec.settings.get("backend_mode")
+            or self.spec.settings.get("mode")
+            or self.spec.settings.get("backend")
+            or "action_chunk_policy"
+        )
+        executor: ModelServiceExecutor
+        if backend_mode in {"lerobot_control_loop", "legacy_lerobot_control_loop"}:
+            executor = LeRobotVLAExecutor(service_id, self.spec)
+        else:
+            executor = LeRobotVLAPolicyExecutor(service_id, self.spec)
+        self.executor = executor
         self._server: grpc.aio.Server | None = None
 
     async def start(self) -> None:

@@ -11,6 +11,7 @@ from hey_robot.protocol import (
     SkillIntent,
 )
 from hey_robot.robot_runtime.base import RobotCapabilities, RobotDriver, RobotHealth
+from hey_robot.robot_runtime.control_plane import RobotControlPlane
 from hey_robot.robot_runtime.media import LocalMediaStore
 from hey_robot.robot_runtime.observations import (
     DriverObservation,
@@ -52,6 +53,7 @@ class RobotRuntime:
         )
         self.robot_id = driver.robot_id
         self.safety = safety or RobotSafetySupervisor()
+        self.control_plane = RobotControlPlane()
         self._capabilities: RobotCapabilities | None = None
 
     async def start(self) -> RobotRuntimeSnapshot:
@@ -108,7 +110,13 @@ class RobotRuntime:
             raise RobotSafetyError(
                 decision.reason or "robot action blocked by safety supervisor"
             )
-        return await self.driver.apply_action(action)
+        return await self.control_plane.apply_action(
+            action,
+            apply_fn=self.driver.apply_action,
+            stop_fn=lambda current: self.control_plane.stop_motion(
+                current, apply_fn=self.driver.apply_action
+            ),
+        )
 
     async def reset(self) -> RobotStatus:
         return await self.driver.reset()

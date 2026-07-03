@@ -18,6 +18,18 @@ def vla_output_to_primitives(vla_result: dict[str, Any]) -> list[ArmPrimitive]:
     We produce 1-2 primitives: optionally a move_arm_joints, and optionally
     a set_gripper.
     """
+    policy_result = vla_result.get("policy_result")
+    if isinstance(policy_result, dict) and policy_result.get("kind") == "action_chunk":
+        actions = policy_result.get("actions")
+        if isinstance(actions, list) and actions:
+            return _action_chunk_to_primitives(actions)
+
+    action_chunk = vla_result.get("action_chunk")
+    if isinstance(action_chunk, dict):
+        actions = action_chunk.get("actions")
+        if isinstance(actions, list) and actions:
+            return _action_chunk_to_primitives(actions)
+
     vla = vla_result.get("vla", vla_result)
     joint_angles: dict[str, float] = dict(vla.get("joint_angles", {}) or {})
     gripper_action: float | None = vla.get("gripper_action")
@@ -53,4 +65,45 @@ def vla_output_to_primitives(vla_result: dict[str, Any]) -> list[ArmPrimitive]:
             )
         )
 
+    return primitives
+
+
+def _action_chunk_to_primitives(actions: list[Any]) -> list[ArmPrimitive]:
+    primitives: list[ArmPrimitive] = []
+    for index, item in enumerate(actions):
+        if not isinstance(item, dict):
+            continue
+        primitives.extend(_single_action_to_primitives(item, action_index=index))
+    return primitives
+
+
+def _single_action_to_primitives(
+    action: dict[str, Any], *, action_index: int
+) -> list[ArmPrimitive]:
+    joint_angles = dict(
+        action.get("joints")
+        or action.get("joint_angles")
+        or action.get("single_arm")
+        or {}
+    )
+    gripper_action = action.get("gripper")
+    if gripper_action is None:
+        gripper_action = action.get("gripper_action")
+    done = bool(action.get("done", False))
+    primitives = vla_output_to_primitives(
+        {
+            "joint_angles": joint_angles,
+            "gripper_action": gripper_action,
+            "task_done": done,
+        }
+    )
+    if action_index:
+        return [
+            ArmPrimitive(
+                primitive=primitive.primitive,
+                arguments=dict(primitive.arguments),
+                reason=f"{primitive.reason} (chunk action {action_index + 1})",
+            )
+            for primitive in primitives
+        ]
     return primitives

@@ -6,13 +6,17 @@ Target form (VLA Step 2): stateless inference only, control loop moves to Skill 
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
+from urllib import request as urllib_request
+from urllib.parse import urlparse
 
 from hey_robot.config import ModelServiceSpec
+from hey_robot.foundation.clients.models import PolicyStepResult
 
 DEFAULT_ARM_CALIBRATION_DIR = "~/.cache/hey_robot/calibrations/robots/so_follower/"
 
@@ -300,6 +304,7 @@ class LeRobotVLAPolicyExecutor:
 
     def health(self) -> dict[str, Any]:
         mock_mode = self._mock_mode()
+        backend_mode = self._backend_mode()
         loaded = mock_mode or bool(
             self.spec.settings.get("server_address")
             and self.spec.settings.get("model_path")
@@ -317,12 +322,32 @@ class LeRobotVLAPolicyExecutor:
                 "mock_mode": mock_mode,
                 "policy_type": self.spec.settings.get("policy_type"),
                 "runtime": "lerobot_policy_inference",
+                "backend_mode": backend_mode,
+                "hardware_ownership": "none"
+                if backend_mode == "action_chunk_policy"
+                else "legacy_lerobot_client",
             },
         }
 
     def execute(self, payload: dict[str, Any]) -> dict[str, Any]:
         if self._mock_mode():
             return self._mock_inference(payload)
+        if self._backend_mode() != "action_chunk_policy":
+            return {
+                "success": False,
+                "status": "failed",
+                "failure_mode": "unsupported_vla_backend_mode",
+                "summary": (
+                    "LeRobot RobotClient is a legacy hardware-owning control loop; "
+                    "use backend_mode=action_chunk_policy for Foundation inference"
+                ),
+                "metrics": {
+                    "vla": {
+                        "backend_mode": self._backend_mode(),
+                        "hardware_ownership": "legacy_lerobot_client",
+                    }
+                },
+            }
         return self._real_inference(payload)
 
     def cancel(self) -> None:
@@ -332,11 +357,25 @@ class LeRobotVLAPolicyExecutor:
 
     def _mock_mode(self) -> bool:
         settings = self.spec.settings
+        if settings.get("action_chunk_endpoint"):
+            return False
         if "mock_mode" in settings:
             return bool(settings.get("mock_mode"))
         if not settings.get("server_address"):
             return True
         return bool(not settings.get("model_path"))
+
+    def _backend_mode(self) -> str:
+        settings = self.spec.settings
+        value = str(
+            settings.get("backend_mode")
+            or settings.get("mode")
+            or settings.get("backend")
+            or "action_chunk_policy"
+        )
+        if value in {"lerobot", "lerobot_single_arm"}:
+            return "lerobot_control_loop"
+        return value
 
     @staticmethod
     def _mock_inference(payload: dict[str, Any]) -> dict[str, Any]:
@@ -432,73 +471,123 @@ class LeRobotVLAPolicyExecutor:
         )
 
     def _real_inference(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Run a single VLA inference step via LeRobot policy server.
+        """Run an observation -> action-chunk policy step.
 
-        This is a single frame → action call, NOT a control loop.
-        The control loop lives in Skill OS.
+        The Foundation executor must not construct a LeRobot RobotClient here:
+        that client owns cameras, arm ports, and a control loop. Until a real
+        external action-chunk policy client is configured, fail explicitly.
         """
-        try:
-            (
-                robot_client_cls,
-                robot_client_config_cls,
-                so_follower_config_cls,
-                camera_config_cls,
-            ) = self._lerobot_classes()
-        except ImportError as exc:
+        arguments = dict(payload.get("arguments", {}) or {})
+        observation = arguments.get("observation") or payload.get("observation")
+        if not isinstance(observation, dict) or not observation.get("images"):
             return {
                 "success": False,
                 "status": "failed",
-                "failure_mode": "missing_dependency",
-                "summary": f"LeRobot VLA dependencies unavailable: {exc}",
-                "error": str(exc),
+                "failure_mode": "observation_unavailable",
+                "summary": "VLA action_chunk_policy requires observation.images",
             }
-
-        try:
-            config = self._base_config(payload)
-            robot_config = self._build_robot_config(
-                so_follower_config_cls, camera_config_cls, config
+        endpoint = self.spec.settings.get("action_chunk_endpoint")
+        if endpoint:
+            return self._call_action_chunk_endpoint(
+                str(endpoint),
+                payload=payload,
+                arguments=arguments,
+                observation=observation,
             )
-            runtime_config = robot_client_config_cls(
-                robot=robot_config,
-                task=str(config["task"]),
-                server_address=str(config["server_address"]),
-                policy_type=str(config["policy_type"]),
-                pretrained_name_or_path=str(config["model_path"]),
-                policy_device=str(config["policy_device"]),
-                actions_per_chunk=int(config["actions_per_chunk"]),
-                chunk_size_threshold=float(config.get("chunk_size_threshold", 0.5)),
-                fps=int(config["fps"]),
-            )
-            policy_client = robot_client_cls(runtime_config)
-            if not policy_client.start():
-                return {
-                    "success": False,
-                    "status": "failed",
-                    "failure_mode": "policy_server_unavailable",
-                    "summary": "failed to connect to LeRobot VLA policy server",
+        return {
+            "success": False,
+            "status": "failed",
+            "failure_mode": "action_chunk_policy_client_unavailable",
+            "summary": "external VLA action-chunk policy client is not configured",
+            "metrics": {
+                "vla": {
+                    "backend_mode": "action_chunk_policy",
+                    "frame_id": observation.get("frame_id"),
+                    "hardware_ownership": "none",
                 }
-            # Single inference — not control_loop
-            action = policy_client.get_action(str(config["task"]))
+            },
+        }
+
+    def _call_action_chunk_endpoint(
+        self,
+        endpoint: str,
+        *,
+        payload: dict[str, Any],
+        arguments: dict[str, Any],
+        observation: dict[str, Any],
+    ) -> dict[str, Any]:
+        task = (
+            arguments.get("task_prompt")
+            or arguments.get("objective")
+            or payload.get("objective")
+            or "manipulate"
+        )
+        request_payload = {
+            "policy_session_id": arguments.get("policy_session_id")
+            or payload.get("skill_id"),
+            "skill_name": arguments.get("skill_name") or payload.get("skill_name"),
+            "atomic_command": str(task),
+            "observation": observation,
+            "proprioception": observation.get("proprioception") or {},
+            "frame_id": observation.get("frame_id"),
+            "metadata": {
+                "service_id": self.service_id,
+                "robot_id": payload.get("robot_id") or self.spec.robot_id,
+                "embodiment": self.spec.settings.get("embodiment", "xlerobot"),
+            },
+        }
+        parsed_endpoint = urlparse(endpoint)
+        if parsed_endpoint.scheme not in {"http", "https"}:
             return {
-                "success": True,
-                "status": "completed",
-                "summary": "VLA inference completed",
-                "metrics": {
-                    "vla": {
-                        "joint_angles": getattr(action, "joint_angles", None),
-                        "gripper_action": getattr(action, "gripper_action", None),
-                        "task_done": getattr(action, "task_done", False),
-                    }
-                },
+                "success": False,
+                "status": "failed",
+                "failure_mode": "action_chunk_policy_invalid_endpoint",
+                "summary": "VLA action chunk endpoint must use http or https",
             }
+        body = json.dumps(request_payload).encode("utf-8")
+        timeout_sec = float(
+            arguments.get("timeout_sec")
+            or payload.get("timeout_sec")
+            or self.spec.timeout_sec
+            or 30.0
+        )
+        http_request = urllib_request.Request(  # noqa: S310 - scheme is validated above.
+            endpoint,
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib_request.urlopen(  # noqa: S310 - scheme is validated above.
+                http_request, timeout=timeout_sec
+            ) as response:
+                raw = response.read().decode("utf-8")
         except Exception as exc:
             return {
                 "success": False,
                 "status": "failed",
-                "failure_mode": "execution_failed",
-                "summary": f"VLA inference failed: {type(exc).__name__}: {exc}",
+                "failure_mode": "action_chunk_policy_unavailable",
+                "summary": f"VLA action chunk endpoint failed: {type(exc).__name__}: {exc}",
+                "error": str(exc),
+                "metrics": {
+                    "vla": {
+                        "backend_mode": "action_chunk_policy",
+                        "frame_id": observation.get("frame_id"),
+                        "hardware_ownership": "none",
+                    }
+                },
+            }
+        try:
+            decoded = json.loads(raw) if raw else {}
+        except json.JSONDecodeError as exc:
+            return {
+                "success": False,
+                "status": "failed",
+                "failure_mode": "action_chunk_policy_invalid_response",
+                "summary": "VLA action chunk endpoint returned invalid JSON",
                 "error": str(exc),
             }
+        return _action_chunk_policy_result(decoded, observation=observation)
 
     def _base_config(self, payload: dict[str, Any]) -> dict[str, Any]:
         arguments = dict(payload.get("arguments", {}) or {})
@@ -551,16 +640,106 @@ def _vla_result(
     gripper_action: float,
     task_done: bool,
 ) -> dict[str, Any]:
+    action = {
+        "joints": joint_angles,
+        "gripper": gripper_action,
+        "done": task_done,
+    }
+    policy_result = PolicyStepResult(
+        kind="action_chunk",
+        action_space="xlerobot_single_arm_joint",
+        embodiment="xlerobot",
+        horizon=1,
+        dt=1.0 / 30.0,
+        actions=[action],
+        done=task_done,
+        confidence=0.5,
+        raw={"mode": "mock"},
+    ).to_metrics()
     return {
         "success": True,
         "status": "completed",
         "summary": "VLA inference completed",
         "metrics": {
+            "policy_result": policy_result,
+            "action_chunk": policy_result,
             "vla": {
                 "joint_angles": joint_angles,
                 "gripper_action": gripper_action,
                 "task_done": task_done,
                 "mode": "mock",
+                "backend_mode": "action_chunk_policy",
+            },
+        },
+    }
+
+
+def _action_chunk_policy_result(
+    payload: dict[str, Any], *, observation: dict[str, Any]
+) -> dict[str, Any]:
+    policy_result = payload.get("policy_result")
+    if not isinstance(policy_result, dict):
+        action_chunk = payload.get("action_chunk")
+        if isinstance(action_chunk, dict):
+            policy_result = dict(action_chunk)
+        else:
+            actions = payload.get("actions")
+            policy_result = {
+                "kind": "action_chunk",
+                "action_space": payload.get("action_space")
+                or "xlerobot_single_arm_joint",
+                "embodiment": payload.get("embodiment") or "xlerobot",
+                "horizon": payload.get("horizon")
+                or (len(actions) if isinstance(actions, list) else None),
+                "dt": payload.get("dt"),
+                "actions": actions if isinstance(actions, list) else [],
+                "done": bool(payload.get("done", False)),
+                "confidence": payload.get("confidence"),
+                "valid": bool(payload.get("valid", True)),
+                "raw": dict(payload.get("raw", {}) or {}),
             }
+    if policy_result.get("kind") != "action_chunk":
+        return {
+            "success": False,
+            "status": "failed",
+            "failure_mode": "action_chunk_policy_invalid_response",
+            "summary": "VLA policy_result.kind must be action_chunk",
+            "metrics": {"policy_result": policy_result},
+        }
+    actions = policy_result.get("actions")
+    if not isinstance(actions, list) or not actions:
+        return {
+            "success": False,
+            "status": "failed",
+            "failure_mode": "action_chunk_policy_invalid_response",
+            "summary": "VLA action_chunk policy_result requires at least one action",
+            "metrics": {"policy_result": policy_result},
+        }
+    first = dict(actions[0])
+    joint_angles = dict(
+        first.get("joints")
+        or first.get("joint_angles")
+        or first.get("single_arm")
+        or {}
+    )
+    gripper_action = first.get("gripper")
+    if gripper_action is None:
+        gripper_action = first.get("gripper_action")
+    done = bool(policy_result.get("done", first.get("done", False)))
+    return {
+        "success": True,
+        "status": "completed",
+        "summary": "VLA action chunk produced",
+        "metrics": {
+            "policy_result": policy_result,
+            "action_chunk": policy_result,
+            "vla": {
+                "joint_angles": joint_angles,
+                "gripper_action": gripper_action,
+                "task_done": done,
+                "backend_mode": "action_chunk_policy",
+                "frame_id": observation.get("frame_id"),
+                "hardware_ownership": "none",
+            },
         },
     }

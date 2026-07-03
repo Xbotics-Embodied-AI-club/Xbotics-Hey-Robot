@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from hey_robot.foundation.clients.models import ModelServiceClient
 from hey_robot.protocol import RobotStatus, SkillIntent
 from hey_robot.skill_os.catalog import RobotSkillSpec
 from hey_robot.skill_os.composition import SkillExecutionPlan
@@ -30,6 +31,8 @@ class SkillRun:
     task: asyncio.Task[Any] | None = None
     pending_status: asyncio.Future[RobotStatus] | None = None
     current_step: str | None = None
+    active_model_service_id: str | None = None
+    active_model_client: ModelServiceClient | None = None
 
     @property
     def timeout_sec(self) -> float:
