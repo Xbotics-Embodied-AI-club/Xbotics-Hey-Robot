@@ -16,7 +16,7 @@ def test_discover_finds_all_tools():
     expected = {
         "get_robot_status",
         "get_task_context",
-        "propose_capability",
+        "propose_skill",
         "request_skill",
         "request_perception",
         "search_memory",

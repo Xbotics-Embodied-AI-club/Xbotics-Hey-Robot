@@ -12,7 +12,7 @@ from hey_robot.cognition.runtime.hooks import ToolHook, ToolHookContext
 from hey_robot.cognition.runtime.permissions import PermissionManager
 from hey_robot.cognition.runtime.registry import ToolSpec
 from hey_robot.cognition.tools.registry import ToolRegistry
-from hey_robot.foundation.catalog.resolver import CapabilityResolver
+from hey_robot.foundation.catalog.resolver import ToolPolicyResolver
 
 
 @dataclass(frozen=True)
@@ -24,11 +24,11 @@ class ToolExecutionResult:
     success: bool
     permission_behavior: str
     permission_reason: str
-    capability_behavior: str = "allow"
-    capability_reason: str = "not evaluated"
-    capability_rule: str = "none"
-    capability_source: str = ""
-    capability_safety_level: str = ""
+    tool_policy_behavior: str = "allow"
+    tool_policy_reason: str = "not evaluated"
+    tool_policy_rule: str = "none"
+    tool_policy_source: str = ""
+    tool_policy_safety_level: str = ""
     error: str | None = None
 
 
@@ -42,14 +42,14 @@ class ToolExecutor:
         permission_manager: PermissionManager | None = None,
         hooks: list[ToolHook] | None = None,
         audit_logger: ToolAuditLogger | None = None,
-        capability_resolver: CapabilityResolver | None = None,
+        tool_policy_resolver: ToolPolicyResolver | None = None,
         default_timeout_sec: float = 60.0,
     ) -> None:
         self.registry = registry
         self.permission_manager = permission_manager or PermissionManager()
         self.hooks = list(hooks or [])
         self.audit_logger = audit_logger
-        self.capability_resolver = capability_resolver or CapabilityResolver(registry)
+        self.tool_policy_resolver = tool_policy_resolver or ToolPolicyResolver(registry)
         self.default_timeout_sec = float(default_timeout_sec)
 
     async def execute(
@@ -64,21 +64,21 @@ class ToolExecutor:
         started = time.time()
         tool_call_id = str(uuid.uuid4())
         args = dict(arguments or {})
-        resolution = self.capability_resolver.resolve(name, context=context)
+        resolution = self.tool_policy_resolver.resolve(name, context=context)
         if not resolution.allowed:
             result = ToolExecutionResult(
                 tool_call_id=tool_call_id,
                 tool=name,
                 arguments=args,
-                result=f"Capability {resolution.behavior}: {resolution.reason}",
+                result=f"ToolPolicy {resolution.behavior}: {resolution.reason}",
                 success=False,
                 permission_behavior=resolution.behavior,
                 permission_reason=resolution.reason,
-                capability_behavior=resolution.behavior,
-                capability_reason=resolution.reason,
-                capability_rule=resolution.rule,
-                capability_source=resolution.source,
-                capability_safety_level=resolution.safety_level,
+                tool_policy_behavior=resolution.behavior,
+                tool_policy_reason=resolution.reason,
+                tool_policy_rule=resolution.rule,
+                tool_policy_source=resolution.source,
+                tool_policy_safety_level=resolution.safety_level,
                 error=resolution.reason,
             )
             self._audit(result, started, task=task, task_step=task_step)
@@ -96,11 +96,11 @@ class ToolExecutor:
                 success=False,
                 permission_behavior="deny",
                 permission_reason="input validation failed",
-                capability_behavior=resolution.behavior,
-                capability_reason=resolution.reason,
-                capability_rule=resolution.rule,
-                capability_source=resolution.source,
-                capability_safety_level=resolution.safety_level,
+                tool_policy_behavior=resolution.behavior,
+                tool_policy_reason=resolution.reason,
+                tool_policy_rule=resolution.rule,
+                tool_policy_source=resolution.source,
+                tool_policy_safety_level=resolution.safety_level,
                 error=validation_error,
             )
             self._audit(result, started, task=task, task_step=task_step)
@@ -118,11 +118,11 @@ class ToolExecutor:
                 success=False,
                 permission_behavior=decision.behavior,
                 permission_reason=decision.reason,
-                capability_behavior=resolution.behavior,
-                capability_reason=resolution.reason,
-                capability_rule=resolution.rule,
-                capability_source=resolution.source,
-                capability_safety_level=resolution.safety_level,
+                tool_policy_behavior=resolution.behavior,
+                tool_policy_reason=resolution.reason,
+                tool_policy_rule=resolution.rule,
+                tool_policy_source=resolution.source,
+                tool_policy_safety_level=resolution.safety_level,
                 error=decision.reason,
             )
             self._audit(result, started, task=task, task_step=task_step)
@@ -154,11 +154,11 @@ class ToolExecutor:
                 success=True,
                 permission_behavior=decision.behavior,
                 permission_reason=decision.reason,
-                capability_behavior=resolution.behavior,
-                capability_reason=resolution.reason,
-                capability_rule=resolution.rule,
-                capability_source=resolution.source,
-                capability_safety_level=resolution.safety_level,
+                tool_policy_behavior=resolution.behavior,
+                tool_policy_reason=resolution.reason,
+                tool_policy_rule=resolution.rule,
+                tool_policy_source=resolution.source,
+                tool_policy_safety_level=resolution.safety_level,
             )
         except Exception as exc:
             for hook in self.hooks:
@@ -172,11 +172,11 @@ class ToolExecutor:
                 success=False,
                 permission_behavior=decision.behavior,
                 permission_reason=decision.reason,
-                capability_behavior=resolution.behavior,
-                capability_reason=resolution.reason,
-                capability_rule=resolution.rule,
-                capability_source=resolution.source,
-                capability_safety_level=resolution.safety_level,
+                tool_policy_behavior=resolution.behavior,
+                tool_policy_reason=resolution.reason,
+                tool_policy_rule=resolution.rule,
+                tool_policy_source=resolution.source,
+                tool_policy_safety_level=resolution.safety_level,
                 error=f"{type(exc).__name__}: {exc}",
             )
 
@@ -205,11 +205,11 @@ class ToolExecutor:
                 duration_sec=ended - started,
                 permission_behavior=result.permission_behavior,
                 permission_reason=result.permission_reason,
-                capability_behavior=result.capability_behavior,
-                capability_reason=result.capability_reason,
-                capability_rule=result.capability_rule,
-                capability_source=result.capability_source,
-                capability_safety_level=result.capability_safety_level,
+                tool_policy_behavior=result.tool_policy_behavior,
+                tool_policy_reason=result.tool_policy_reason,
+                tool_policy_rule=result.tool_policy_rule,
+                tool_policy_source=result.tool_policy_source,
+                tool_policy_safety_level=result.tool_policy_safety_level,
                 result_preview=result.result[:1000],
                 error=result.error,
                 task=task,

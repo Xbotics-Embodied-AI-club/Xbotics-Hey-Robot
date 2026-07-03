@@ -4,12 +4,163 @@ from pathlib import Path
 
 from hey_robot.config import DeploymentConfig, validation
 from hey_robot.config.validation import validate_deployment
+from hey_robot.contracts import SkillContract
 from hey_robot.episode import JsonlEpisodeStore, allocate_episode
 from hey_robot.episode.scope import DEFAULT_EPISODE_DIMENSIONS
 from hey_robot.protocol import AgentReply, Envelope, UserTurn
 from hey_robot.protocol.messages import from_payload, to_payload
 from hey_robot.skill_os.base import SkillCatalog, SkillSpec
 from hey_robot.skill_os.registry import SkillRegistry
+
+XLEROBOT_DEV_CONFIGS = (
+    "configs/xlerobot.real.s600.yaml",
+    "configs/xlerobot.real.ubuntu.yaml",
+    "configs/xlerobot.real.windows.yaml",
+    "configs/xlerobot.sim.ubuntu.yaml",
+    "configs/xlerobot.sim.vla_vln.yaml",
+    "configs/xlerobot.sim.windows.yaml",
+)
+
+DEV_LOW_LEVEL_SKILLS = {
+    "move_base",
+    "turn_base",
+    "base_velocity_step",
+    "set_arm_pose",
+    "move_arm_joints",
+    "set_gripper",
+    "detect_marker",
+}
+
+
+def test_configs_do_not_use_direct_agent_mode() -> None:
+    offenders = [
+        str(path)
+        for path in Path("configs").rglob("*.yaml")
+        if "mode: direct" in path.read_text(encoding="utf-8")
+    ]
+
+    assert offenders == []
+
+
+def test_agent_tool_surface_does_not_use_legacy_capability_proposal_tool() -> None:
+    offenders = [
+        str(path)
+        for root in ("src", "configs")
+        for path in Path(root).rglob("*")
+        if path.is_file()
+        and path.suffix in {".py", ".md", ".yaml"}
+        and "propose_capability" in path.read_text(encoding="utf-8")
+    ]
+
+    assert offenders == []
+
+
+def test_source_does_not_export_legacy_capability_catalog_names() -> None:
+    banned = (
+        "CapabilityLoader",
+        "CapabilityManifest",
+        "CapabilityPolicy",
+        "CapabilityPolicyDecision",
+        "CapabilityPolicySet",
+        "CapabilityResolution",
+        "CapabilityResolver",
+        "RobotSkillCapability",
+        "ToolCapability",
+        "capability_policy",
+        "capability_resolver",
+    )
+    offenders: dict[str, list[str]] = {}
+    for path in Path("src").rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        found = [item for item in banned if item in text]
+        if found:
+            offenders[str(path)] = found
+
+    assert offenders == {}
+
+
+def test_inspect_cli_uses_skill_surface_command_name() -> None:
+    text = Path("src/hey_robot/cli/inspect.py").read_text(encoding="utf-8")
+
+    assert '"skill-surface"' in text
+    assert '"capabilities"' not in text
+
+
+def test_xlerobot_runtime_configs_use_bringup_skill_surface_for_development() -> None:
+    offenders: dict[str, list[str]] = {}
+    for path in XLEROBOT_DEV_CONFIGS:
+        config = DeploymentConfig.from_yaml(path)
+        missing_low_level = sorted(DEV_LOW_LEVEL_SKILLS - set(config.skills.enabled))
+        if config.skills.mode != "bringup" or missing_low_level:
+            offenders[path] = [
+                f"mode={config.skills.mode}",
+                f"missing_low_level={','.join(missing_low_level)}",
+            ]
+
+    assert offenders == {}
+
+
+def test_protocol_does_not_export_skill_contract_runtime() -> None:
+    import hey_robot.protocol as protocol
+    import hey_robot.protocol.skills as protocol_skills
+
+    assert not hasattr(protocol, "FeedbackMode")
+    assert not hasattr(protocol, "RobotSkillCatalog")
+    assert not hasattr(protocol, "RobotSkillSpec")
+    assert not hasattr(protocol, "SkillContractDecision")
+    assert not hasattr(protocol, "SkillContractRuntime")
+    assert not hasattr(protocol_skills, "FeedbackMode")
+    assert not hasattr(protocol_skills, "RobotSkillCatalog")
+    assert not hasattr(protocol_skills, "RobotSkillSpec")
+    assert not hasattr(protocol_skills, "SkillContractDecision")
+    assert not hasattr(protocol_skills, "SkillContractRuntime")
+
+
+def test_skill_os_does_not_keep_contract_forwarding_modules() -> None:
+    assert not Path("src/hey_robot/skill_os/catalog.py").exists()
+    assert not Path("src/hey_robot/skill_os/contracts.py").exists()
+
+    offenders = [
+        str(path)
+        for path in Path("src").rglob("*.py")
+        if (
+            "hey_robot.skill_os.catalog" in path.read_text(encoding="utf-8")
+            or "hey_robot.skill_os.contracts" in path.read_text(encoding="utf-8")
+        )
+    ]
+
+    assert offenders == []
+
+
+def test_robot_agent_core_dependency_building_lives_in_builder() -> None:
+    from hey_robot.cognition.core import RobotAgentCore
+    from hey_robot.cognition.core_builder import RobotAgentCoreBuilder
+
+    assert hasattr(RobotAgentCoreBuilder, "build_runtime")
+    assert hasattr(RobotAgentCoreBuilder, "build_provider")
+    assert hasattr(RobotAgentCoreBuilder, "build_feedback_evaluator")
+    assert not hasattr(RobotAgentCore, "_build_runtime")
+    assert not hasattr(RobotAgentCore, "_build_provider")
+    assert not hasattr(RobotAgentCore, "_build_feedback_evaluator")
+    assert not hasattr(RobotAgentCore, "_configured_skill_catalog")
+
+
+def test_agent_runtime_provider_request_lives_in_model_loop() -> None:
+    from hey_robot.cognition.runtime.model_loop import ModelLoop
+    from hey_robot.cognition.runtime.runner import AgentRuntime
+
+    assert hasattr(ModelLoop, "request")
+    assert not hasattr(AgentRuntime, "_request_provider")
+
+
+def test_robot_runtime_does_not_depend_on_skill_os() -> None:
+    offenders = [
+        str(path)
+        for path in Path("src/hey_robot/robot_runtime").rglob("*.py")
+        if "hey_robot.skill_os" in path.read_text(encoding="utf-8")
+    ]
+
+    assert offenders == []
 
 
 def test_deployment_config_loads_new_topology() -> None:
@@ -100,6 +251,67 @@ def test_deployment_validation_checks_transitive_skill_dependencies(
         "skill public_nav references unknown dependency missing_leaf" in item.message
         for item in issues
     )
+
+
+def test_skill_spec_is_the_runtime_skill_contract() -> None:
+    spec = SkillSpec(
+        name="contract_skill",
+        description="Canonical skill contract.",
+        category="navigation",
+        input_schema={"type": "object", "required": ["target"]},
+        required_resources=("camera", "base"),
+        preconditions=("robot_online",),
+        success_criteria=("target_reached",),
+        failure_modes=("blocked",),
+        recovery_hints=("inspect_scene",),
+        driver_primitives=("move_base",),
+        required_model_service="navigate_to",
+        supported_robots=("xlerobot",),
+        safety_level="motion",
+        timeout_sec=12.5,
+        interruptible=False,
+        agent_visible=False,
+        feedback_mode="vision",
+        refresh_observation=False,
+        capability_type="semantic_navigation",
+        goal_effects=("moves_robot",),
+        evidence_outputs=("vln_result",),
+        cannot_satisfy=("weak_scene_observation",),
+    )
+    registry = SkillRegistry()
+    registry.register_spec(spec)
+
+    contract = registry.robot_skill_catalog().get("contract_skill")
+
+    assert isinstance(spec, SkillContract)
+    assert contract is spec
+    assert contract.to_dict() == {
+        "name": "contract_skill",
+        "description": "Canonical skill contract.",
+        "level": "primitive",
+        "agent_visible": False,
+        "category": "navigation",
+        "input_schema": {"type": "object", "required": ["target"]},
+        "safety_level": "motion",
+        "supported_robots": ["xlerobot"],
+        "required_model_service": "navigate_to",
+        "driver_primitives": ["move_base"],
+        "required_resources": ["camera", "base"],
+        "preconditions": ["robot_online"],
+        "success_criteria": ["target_reached"],
+        "failure_modes": ["blocked"],
+        "recovery_hints": ["inspect_scene"],
+        "timeout_sec": 12.5,
+        "interruptible": False,
+        "feedback_mode": "vision",
+        "refresh_observation": False,
+        "capability_type": "semantic_navigation",
+        "goal_effects": ["moves_robot"],
+        "evidence_outputs": ["vln_result"],
+        "cannot_satisfy": ["weak_scene_observation"],
+        "output_schema": {},
+        "dependencies": [],
+    }
 
 
 def test_identity_settings_load_from_mock_test_config() -> None:

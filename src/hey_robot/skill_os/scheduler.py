@@ -5,11 +5,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from hey_robot.contracts import SkillContract, SkillContractRuntime
 from hey_robot.foundation.clients.models import ModelServiceClient
 from hey_robot.protocol import RobotStatus, SkillIntent
-from hey_robot.skill_os.catalog import RobotSkillSpec
 from hey_robot.skill_os.composition import SkillExecutionPlan
-from hey_robot.skill_os.contracts import SkillContractRuntime
 
 
 @dataclass
@@ -18,7 +17,7 @@ class SkillRun:
     skill_name: str
     implementation_name: str
     implementation_kind: str
-    contract: RobotSkillSpec
+    contract: SkillContract
     execution_plan: SkillExecutionPlan
     timeout_override_sec: float | None = None
     accepted_at: float = field(default_factory=time.time)
@@ -68,7 +67,7 @@ class SkillScheduler:
 
     def conflicting_run(
         self,
-        contract: RobotSkillSpec,
+        contract: SkillContract,
         arguments: dict[str, Any],
     ) -> SkillRun | None:
         for run in self.runs.values():

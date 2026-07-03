@@ -30,7 +30,15 @@ def _config(tmp_path) -> DeploymentConfig:
                     "type": "robot_agent",
                     "robot_id": "mock0",
                     "settings": {
-                        "mode": "direct",
+                        "mode": "agent",
+                        "providers": {
+                            "planner": {
+                                "type": "openai_compat",
+                                "model": "mock-planner",
+                                "api_key": "test-key",
+                                "api_base": "http://127.0.0.1:9/v1",
+                            }
+                        },
                         "execution_feedback": {"backend": "status"},
                     },
                 }

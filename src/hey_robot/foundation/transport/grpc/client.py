@@ -60,6 +60,11 @@ class GrpcModelServiceClient:
     async def execute(
         self, request: ServiceInvocationRequest
     ) -> ServiceInvocationResult:
+        arguments = (
+            request.arguments
+            if request.arguments is not None
+            else request.intent.arguments
+        )
         payload = model_service_pb2.ExecuteSkillRequest(
             service_id=request.service_id,
             trace_id=request.intent.envelope.trace_id,
@@ -68,7 +73,7 @@ class GrpcModelServiceClient:
             skill_name=request.intent.name or request.contract.name,
             robot_id=request.intent.envelope.robot_id or self.spec.robot_id,
             objective=request.intent.objective,
-            arguments=_dict_to_struct(dict(request.intent.arguments)),
+            arguments=_dict_to_struct(dict(arguments)),
             timeout_sec=float(request.timeout_sec),
             metadata=_dict_to_struct(dict(request.intent.metadata)),
         )

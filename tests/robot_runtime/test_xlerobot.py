@@ -4,11 +4,10 @@ import time
 from types import SimpleNamespace
 
 from hey_robot.config import DeploymentConfig
+from hey_robot.contracts import SkillContract, SkillContractCatalog
 from hey_robot.protocol import (
     Envelope,
     RobotSkillAction,
-    RobotSkillCatalog,
-    RobotSkillSpec,
     SkillIntent,
 )
 from hey_robot.robot_runtime import RobotManager, get_embodiment_profile
@@ -312,9 +311,9 @@ async def test_xlerobot_driver_rejects_action_when_contract_readiness_fails() ->
             "xlerobot",
             config.robots["xlerobot"],
             "test",
-            skill_catalog=RobotSkillCatalog(
+            skill_catalog=SkillContractCatalog(
                 (
-                    RobotSkillSpec(
+                    SkillContract(
                         name="set_gripper",
                         description="Set gripper state.",
                         required_resources=("gripper",),

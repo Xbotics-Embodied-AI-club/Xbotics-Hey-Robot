@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from hey_robot.cognition.tools.registry import ToolRegistry
-from hey_robot.foundation.catalog import CapabilityPolicy, CapabilityResolver
+from hey_robot.foundation.catalog import ToolPolicy, ToolPolicyResolver
 
 
-def test_capability_resolver_blocks_denied_safety_level() -> None:
+def test_tool_policy_resolver_blocks_denied_safety_level() -> None:
     registry = ToolRegistry()
     registry.register_simple("move", lambda: "ok", safety_level="actuate")
-    resolver = CapabilityResolver(
-        registry, policy=CapabilityPolicy(deny_safety_levels=("actuate",))
+    resolver = ToolPolicyResolver(
+        registry, policy=ToolPolicy(deny_safety_levels=("actuate",))
     )
 
     decision = resolver.resolve("move")
@@ -18,11 +18,11 @@ def test_capability_resolver_blocks_denied_safety_level() -> None:
     assert "actuate" in decision.reason
 
 
-def test_capability_resolver_blocks_non_read_only_when_robot_state_failed() -> None:
+def test_tool_policy_resolver_blocks_non_read_only_when_robot_state_failed() -> None:
     registry = ToolRegistry()
     registry.register_simple("move", lambda: "ok", safety_level="actuate")
 
-    decision = CapabilityResolver(registry).resolve(
+    decision = ToolPolicyResolver(registry).resolve(
         "move", context={"robot_status": {"state": "failed"}}
     )
 
@@ -30,7 +30,7 @@ def test_capability_resolver_blocks_non_read_only_when_robot_state_failed() -> N
     assert decision.rule == "robot_state"
 
 
-def test_capability_resolver_allows_request_skill_when_robot_state_failed() -> None:
+def test_tool_policy_resolver_allows_request_skill_when_robot_state_failed() -> None:
     registry = ToolRegistry()
 
     def submit_capability(_capability: str, _objective: str) -> str:
@@ -42,17 +42,17 @@ def test_capability_resolver_allows_request_skill_when_robot_state_failed() -> N
         safety_level="actuate",
     )
 
-    decision = CapabilityResolver(registry).resolve(
+    decision = ToolPolicyResolver(registry).resolve(
         "request_skill", context={"robot_status": {"state": "failed"}}
     )
 
     assert decision.behavior == "allow"
 
 
-def test_capability_resolver_denies_unknown_tool() -> None:
+def test_tool_policy_resolver_denies_unknown_tool() -> None:
     registry = ToolRegistry()
 
-    decision = CapabilityResolver(registry).resolve("missing")
+    decision = ToolPolicyResolver(registry).resolve("missing")
 
     assert decision.behavior == "deny"
     assert decision.allowed is False
@@ -60,11 +60,11 @@ def test_capability_resolver_denies_unknown_tool() -> None:
     assert "Unknown tool: missing" in decision.reason
 
 
-def test_capability_resolver_extracts_robot_state_from_status_payload() -> None:
+def test_tool_policy_resolver_extracts_robot_state_from_status_payload() -> None:
     registry = ToolRegistry()
     registry.register_simple("move", lambda: "ok", safety_level="actuate")
 
-    decision = CapabilityResolver(registry).resolve(
+    decision = ToolPolicyResolver(registry).resolve(
         "move", context={"robot_status": {"status": "failed"}}
     )
 
@@ -72,23 +72,23 @@ def test_capability_resolver_extracts_robot_state_from_status_payload() -> None:
     assert decision.rule == "robot_state"
 
 
-def test_capability_resolver_allows_when_context_has_no_robot_state() -> None:
+def test_tool_policy_resolver_allows_when_context_has_no_robot_state() -> None:
     registry = ToolRegistry()
     registry.register_simple("move", lambda: "ok", safety_level="actuate")
 
-    decision = CapabilityResolver(registry).resolve("move", context={})
+    decision = ToolPolicyResolver(registry).resolve("move", context={})
 
     assert decision.behavior == "allow"
     assert decision.allowed is True
 
 
-def test_capability_resolver_ignores_textual_robot_summary_with_default_fields() -> (
+def test_tool_policy_resolver_ignores_textual_robot_summary_with_default_fields() -> (
     None
 ):
     registry = ToolRegistry()
     registry.register_simple("move", lambda: "ok", safety_level="actuate")
 
-    decision = CapabilityResolver(registry).resolve(
+    decision = ToolPolicyResolver(registry).resolve(
         "move",
         context={
             "robot_state": (
@@ -102,11 +102,11 @@ def test_capability_resolver_ignores_textual_robot_summary_with_default_fields()
     assert decision.allowed is True
 
 
-def test_capability_resolver_uses_structured_status_over_text_summary() -> None:
+def test_tool_policy_resolver_uses_structured_status_over_text_summary() -> None:
     registry = ToolRegistry()
     registry.register_simple("move", lambda: "ok", safety_level="actuate")
 
-    decision = CapabilityResolver(registry).resolve(
+    decision = ToolPolicyResolver(registry).resolve(
         "move",
         context={
             "robot_state": "robot_id=xlerobot state=idle default_arm=arm",

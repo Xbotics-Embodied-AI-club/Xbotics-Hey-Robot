@@ -7,13 +7,13 @@ from typing import Any, ClassVar
 
 import numpy as np
 
+from hey_robot.contracts import SkillContractRuntime
 from hey_robot.protocol import (
     Envelope,
     RobotAction,
     RobotSkillAction,
     RobotSkillResult,
     RobotStatus,
-    SkillContractRuntime,
 )
 from hey_robot.robot_runtime.base import (
     RobotCapabilities,

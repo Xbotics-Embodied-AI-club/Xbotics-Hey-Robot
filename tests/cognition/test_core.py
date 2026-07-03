@@ -141,29 +141,6 @@ async def _run_core_turn_with_policy(
     )
 
 
-def test_robot_agent_core_direct_mode_issues_skill() -> None:
-    io = FakeAgentIO()
-    core = RobotAgentCore(
-        agent_id="main",
-        spec=AgentSpec(type="robot_agent", settings={"mode": "direct"}),
-        io=io,
-    )
-    turn = UserTurn(
-        envelope=Envelope(agent_id="main", robot_id="mock0", episode_id="s1"),
-        text="pick up the block",
-    )
-
-    result = asyncio.run(
-        _run_core_turn_with_policy(
-            core, turn=turn, snapshot=RobotSnapshot(robot_id="mock0")
-        )
-    )
-
-    assert result.skill_submitted is True
-    assert io.skills[0].objective == "pick up the block"
-    assert core.skill_state.snapshot.phase == SkillPhase.ISSUED
-
-
 def test_robot_agent_core_agent_mode_uses_runtime_tool() -> None:
     from tests.conftest import FakeProvider
 
@@ -932,15 +909,18 @@ def test_robot_agent_core_finishes_visual_answer_after_successful_perception() -
 
 
 def test_robot_agent_core_reuses_successful_perception_within_same_turn() -> None:
+    from tests.conftest import FakeProvider
+
     io = FakeAgentIO()
     core = RobotAgentCore(
         agent_id="main",
         spec=AgentSpec(
             type="robot_agent",
             robot_id="mock0",
-            settings={"mode": "direct"},
+            settings={"mode": "agent"},
         ),
         io=io,
+        provider=FakeProvider("unused"),
     )
     turn = UserTurn(
         envelope=Envelope(robot_id="mock0", agent_id="main"),
@@ -975,15 +955,18 @@ def test_robot_agent_core_reuses_successful_perception_within_same_turn() -> Non
 
 
 def test_robot_agent_core_reuses_look_around_for_inspect_scene_same_turn() -> None:
+    from tests.conftest import FakeProvider
+
     io = FakeAgentIO()
     core = RobotAgentCore(
         agent_id="main",
         spec=AgentSpec(
             type="robot_agent",
             robot_id="mock0",
-            settings={"mode": "direct"},
+            settings={"mode": "agent"},
         ),
         io=io,
+        provider=FakeProvider("unused"),
     )
     turn = UserTurn(
         envelope=Envelope(robot_id="mock0", agent_id="main"),
@@ -1018,15 +1001,18 @@ def test_robot_agent_core_reuses_look_around_for_inspect_scene_same_turn() -> No
 
 
 def test_robot_agent_core_allows_perception_again_in_new_turn() -> None:
+    from tests.conftest import FakeProvider
+
     io = FakeAgentIO()
     core = RobotAgentCore(
         agent_id="main",
         spec=AgentSpec(
             type="robot_agent",
             robot_id="mock0",
-            settings={"mode": "direct", "skill_timeout_sec": 1.0},
+            settings={"mode": "agent", "skill_timeout_sec": 1.0},
         ),
         io=io,
+        provider=FakeProvider("unused"),
     )
     first_turn = UserTurn(
         envelope=Envelope(robot_id="mock0", agent_id="main"),
@@ -1075,15 +1061,18 @@ def test_robot_agent_core_allows_perception_again_in_new_turn() -> None:
 
 
 def test_robot_agent_core_does_not_reuse_failed_perception_within_same_turn() -> None:
+    from tests.conftest import FakeProvider
+
     io = FakeAgentIO()
     core = RobotAgentCore(
         agent_id="main",
         spec=AgentSpec(
             type="robot_agent",
             robot_id="mock0",
-            settings={"mode": "direct", "skill_timeout_sec": 1.0},
+            settings={"mode": "agent", "skill_timeout_sec": 1.0},
         ),
         io=io,
+        provider=FakeProvider("unused"),
     )
     turn = UserTurn(
         envelope=Envelope(robot_id="mock0", agent_id="main"),
@@ -1191,10 +1180,10 @@ def test_robot_agent_core_sanitizes_non_final_text_response() -> None:
 
     reply = core._reply_text_from_runtime_result(
         AgentRuntimeResult(
-            tool="propose_capability",
+            tool="propose_skill",
             args={"skill": "move_arm_joints"},
             result=(
-                "ToolUnavailable: propose_capability is not available in this "
+                "ToolUnavailable: propose_skill is not available in this "
                 "execution context"
             ),
             stop_reason="text_response",
@@ -1351,7 +1340,7 @@ def test_recovery_allowed_tools_excludes_perception_and_action() -> None:
 
     assert "request_perception" not in tools
     assert "request_skill" not in tools
-    assert "propose_capability" not in tools
+    assert "propose_skill" not in tools
 
 
 def test_recovery_tools_are_stable_subset_of_all_tools() -> None:
@@ -1359,7 +1348,7 @@ def test_recovery_tools_are_stable_subset_of_all_tools() -> None:
     all_tools = {
         "get_task_context",
         "get_robot_status",
-        "propose_capability",
+        "propose_skill",
         "request_skill",
         "request_perception",
         "search_memory",
@@ -1615,9 +1604,7 @@ def test_robot_agent_core_mock_xlerobot_uses_single_atomic_deterministic_skill_a
     assert io.skills[-1].arguments == {"direction": "forward", "distance_cm": 30}
 
 
-def test_robot_agent_core_requires_explicit_runtime_provider_without_direct_mode() -> (
-    None
-):
+def test_robot_agent_core_requires_explicit_runtime_provider_configuration() -> None:
     with pytest.raises(
         ValueError, match="requires an explicit agent provider configuration"
     ):

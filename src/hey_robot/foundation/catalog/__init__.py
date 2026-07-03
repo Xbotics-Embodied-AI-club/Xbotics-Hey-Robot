@@ -1,27 +1,27 @@
-from hey_robot.foundation.catalog.loader import CapabilityLoader
+from hey_robot.foundation.catalog.loader import SkillSurfaceLoader
 from hey_robot.foundation.catalog.models import (
-    CapabilityManifest,
-    RobotSkillCapability,
-    ToolCapability,
+    RobotSkillSurface,
+    SkillSurfaceManifest,
+    ToolSurface,
 )
 from hey_robot.foundation.catalog.policy import (
-    CapabilityPolicy,
-    CapabilityPolicyDecision,
-    CapabilityPolicySet,
+    ToolPolicy,
+    ToolPolicyDecision,
+    ToolPolicySet,
 )
 from hey_robot.foundation.catalog.resolver import (
-    CapabilityResolution,
-    CapabilityResolver,
+    ToolPolicyResolution,
+    ToolPolicyResolver,
 )
 
 __all__ = [
-    "CapabilityLoader",
-    "CapabilityManifest",
-    "CapabilityPolicy",
-    "CapabilityPolicyDecision",
-    "CapabilityPolicySet",
-    "CapabilityResolution",
-    "CapabilityResolver",
-    "RobotSkillCapability",
-    "ToolCapability",
+    "RobotSkillSurface",
+    "SkillSurfaceLoader",
+    "SkillSurfaceManifest",
+    "ToolPolicy",
+    "ToolPolicyDecision",
+    "ToolPolicyResolution",
+    "ToolPolicyResolver",
+    "ToolPolicySet",
+    "ToolSurface",
 ]

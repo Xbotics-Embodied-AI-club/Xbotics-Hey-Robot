@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from hey_robot.contracts import SkillContractRuntime
 from hey_robot.protocol import Envelope, RobotStatus
 from hey_robot.skill_os import (
     RobotSkillAction,
-    SkillContractRuntime,
     load_skill_registry,
 )
 
@@ -93,7 +93,7 @@ def test_skill_contract_runtime_keeps_existing_status_precondition_policy() -> N
 
 
 def test_skill_contract_runtime_validates_robot_action_against_catalog() -> None:
-    runtime = SkillContractRuntime()
+    runtime = SkillContractRuntime(SKILL_CONTRACTS)
 
     contract, decision = runtime.validate_action(
         RobotSkillAction("move_base", {"direction": "forward", "distance_cm": 10}),

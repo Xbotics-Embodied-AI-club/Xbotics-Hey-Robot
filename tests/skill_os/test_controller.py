@@ -1533,7 +1533,7 @@ def test_camera_auto_injection_in_plugin_context(tmp_path, monkeypatch) -> None:
     import numpy as np
     from PIL import Image
 
-    from hey_robot.protocol import RobotSkillSpec
+    from hey_robot.contracts import SkillContract
     from hey_robot.skill_os.composition import SkillExecutionPlan
     from hey_robot.skill_os.scheduler import SkillRun
 
@@ -1547,7 +1547,7 @@ def test_camera_auto_injection_in_plugin_context(tmp_path, monkeypatch) -> None:
         image,
     )
 
-    contract = RobotSkillSpec(
+    contract = SkillContract(
         name="test_skill",
         description="skill requiring camera",
         required_resources=("camera",),
@@ -1601,7 +1601,7 @@ def test_camera_auto_injection_skips_when_observation_already_present(
     """Camera injection does not override an explicit observation in arguments."""
     import numpy as np
 
-    from hey_robot.protocol import RobotSkillSpec
+    from hey_robot.contracts import SkillContract
     from hey_robot.skill_os.composition import SkillExecutionPlan
     from hey_robot.skill_os.scheduler import SkillRun
 
@@ -1614,7 +1614,7 @@ def test_camera_auto_injection_skips_when_observation_already_present(
         image,
     )
 
-    contract = RobotSkillSpec(
+    contract = SkillContract(
         name="test_skill",
         description="skill requiring camera",
         required_resources=("camera",),
@@ -1661,7 +1661,7 @@ def test_camera_auto_injection_skips_when_no_frame_available(
 ) -> None:
     """When latest_camera_frame is None, observation is not injected."""
 
-    from hey_robot.protocol import RobotSkillSpec
+    from hey_robot.contracts import SkillContract
     from hey_robot.skill_os.composition import SkillExecutionPlan
     from hey_robot.skill_os.scheduler import SkillRun
 
@@ -1669,7 +1669,7 @@ def test_camera_auto_injection_skips_when_no_frame_available(
     state = service.states["embodied_skills"]
     state.latest_camera_frame = None
 
-    contract = RobotSkillSpec(
+    contract = SkillContract(
         name="test_skill",
         description="skill requiring camera",
         required_resources=("camera",),

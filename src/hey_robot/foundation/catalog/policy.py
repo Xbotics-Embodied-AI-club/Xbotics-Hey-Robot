@@ -3,22 +3,22 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-CapabilityBehavior = Literal["allow", "deny", "ask"]
+ToolPolicyBehavior = Literal["allow", "deny", "ask"]
 
 
 @dataclass(frozen=True)
-class CapabilityPolicyDecision:
-    behavior: CapabilityBehavior
+class ToolPolicyDecision:
+    behavior: ToolPolicyBehavior
     reason: str
     rule: str = "default"
 
 
 @dataclass(frozen=True)
-class CapabilityPolicy:
-    """Declarative guardrails for runtime capabilities.
+class ToolPolicy:
+    """Declarative guardrails for runtime tools.
 
-    The policy is intentionally small and explicit. It governs capability use
-    before lower-level permission checks and safety hooks run.
+    The policy is intentionally small and explicit. It governs tool use before
+    lower-level permission checks and safety hooks run.
     """
 
     mode: str = "agent"
@@ -36,7 +36,7 @@ class CapabilityPolicy:
     )
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any] | None) -> CapabilityPolicy:
+    def from_dict(cls, payload: dict[str, Any] | None) -> ToolPolicy:
         if not isinstance(payload, dict):
             return cls()
         return cls(
@@ -81,21 +81,21 @@ class CapabilityPolicy:
         safety_level: str,
         read_only: bool,
         robot_state: str | None = None,
-    ) -> CapabilityPolicyDecision:
+    ) -> ToolPolicyDecision:
         if self.allow_tools and tool_name not in self.allow_tools:
-            return CapabilityPolicyDecision(
+            return ToolPolicyDecision(
                 "deny", f"tool is not in allow_tools: {tool_name}", "allow_tools"
             )
         if tool_name in self.deny_tools:
-            return CapabilityPolicyDecision(
+            return ToolPolicyDecision(
                 "deny", f"tool is denied: {tool_name}", "deny_tools"
             )
         if source in self.deny_sources:
-            return CapabilityPolicyDecision(
+            return ToolPolicyDecision(
                 "deny", f"source is denied: {source}", "deny_sources"
             )
         if safety_level in self.deny_safety_levels:
-            return CapabilityPolicyDecision(
+            return ToolPolicyDecision(
                 "deny", f"safety level is denied: {safety_level}", "deny_safety_levels"
             )
         robot_state_blocked = (
@@ -104,25 +104,25 @@ class CapabilityPolicy:
             and tool_name not in self.safe_on_blocked_robot
         )
         if robot_state_blocked:
-            return CapabilityPolicyDecision(
+            return ToolPolicyDecision(
                 "deny",
-                f"robot state blocks non-read-only capability: {robot_state}",
+                f"robot state blocks non-read-only tool: {robot_state}",
                 "robot_state",
             )
         if safety_level in self.require_approval_for:
-            return CapabilityPolicyDecision(
+            return ToolPolicyDecision(
                 "ask", f"safety level requires approval: {safety_level}", "approval"
             )
-        return CapabilityPolicyDecision("allow", "capability policy allowed", "default")
+        return ToolPolicyDecision("allow", "tool policy allowed", "default")
 
 
 @dataclass(frozen=True)
-class CapabilityPolicySet:
-    default: CapabilityPolicy = field(default_factory=CapabilityPolicy)
-    modes: dict[str, CapabilityPolicy] = field(default_factory=dict)
+class ToolPolicySet:
+    default: ToolPolicy = field(default_factory=ToolPolicy)
+    modes: dict[str, ToolPolicy] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any] | None) -> CapabilityPolicySet:
+    def from_dict(cls, payload: dict[str, Any] | None) -> ToolPolicySet:
         if not isinstance(payload, dict):
             return cls()
         mode_payloads = _mapping(payload.get("modes"))
@@ -130,14 +130,14 @@ class CapabilityPolicySet:
             key: value for key, value in payload.items() if key != "modes"
         }
         return cls(
-            default=CapabilityPolicy.from_dict(default_payload),
+            default=ToolPolicy.from_dict(default_payload),
             modes={
-                str(name): CapabilityPolicy.from_dict(value)
+                str(name): ToolPolicy.from_dict(value)
                 for name, value in mode_payloads.items()
             },
         )
 
-    def for_mode(self, mode: str | None) -> CapabilityPolicy:
+    def for_mode(self, mode: str | None) -> ToolPolicy:
         if mode and mode in self.modes:
             return self.modes[mode]
         return self.default

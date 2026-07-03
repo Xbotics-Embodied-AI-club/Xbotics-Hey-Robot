@@ -9,7 +9,7 @@ Runtime adapter
 
 :meth:`Tool.to_spec` produces a
 :class:`~hey_robot.cognition.runtime.registry.ToolSpec` for the current
-``CapabilityResolver`` / ``PermissionManager`` / ``ToolExecutor`` pipeline.
+``ToolPolicyResolver`` / ``PermissionManager`` / ``ToolExecutor`` pipeline.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ _JSON_TYPE_MAP: dict[str, type | tuple[type, ...]] = {
 
 
 class Tool(ABC):
-    """One agent capability: submit a skill, read state, write memory, etc.
+    """One agent tool: submit a skill, read state, write memory, etc.
 
     Subclasses must provide:
 

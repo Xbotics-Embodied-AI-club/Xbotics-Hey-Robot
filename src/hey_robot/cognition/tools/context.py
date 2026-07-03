@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from hey_robot.cognition.memory.runtime import MemoryRuntime
     from hey_robot.cognition.runtime.runner import AgentRuntime
     from hey_robot.cognition.runtime.state import AgentState
-    from hey_robot.skill_os import RobotSkillCatalog
+    from hey_robot.contracts import SkillContractCatalog
     from hey_robot.skill_os.base import SkillCatalog
     from hey_robot.spec import AgentSpec
     from hey_robot.types import AgentIO
@@ -35,7 +35,7 @@ class ToolContext:
     spec: AgentSpec
     memory: MemoryRuntime
     autonomy: AutonomyManager
-    skill_catalog: RobotSkillCatalog | None
+    skill_catalog: SkillContractCatalog | None
 
     # Mutable runtime state.
     runtime_state: AgentState

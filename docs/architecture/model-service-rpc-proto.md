@@ -1,8 +1,8 @@
 # ModelService Proto 与 Codegen 规范
 
-本文描述当前 ModelService gRPC contract。文件名保留为
-`capability-rpc-proto.md` 是为了兼容已有链接；旧的 `CapabilityService`、
-`ExecuteCapability` 和 `CancelCapability` 已从代码中移除。
+本文描述当前 ModelService gRPC contract。旧的 `CapabilityService`、
+`ExecuteCapability` 和 `CancelCapability` 已从代码中移除；不要再把
+capability-rpc 作为系统的一等架构概念。
 
 ## 1. 边界目标
 

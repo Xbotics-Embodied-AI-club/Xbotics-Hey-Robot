@@ -651,7 +651,7 @@ class TaskRunStore:
         self,
         episode_id: str,
         *,
-        capability: str,
+        skill: str,
         objective: str,
         prompt: str,
         slots: dict[str, Any] | None = None,
@@ -671,7 +671,7 @@ class TaskRunStore:
         state.status = "awaiting_confirmation"
         state.pending_confirmation = {
             "proposal_id": proposal_id or f"proposal_{uuid.uuid4().hex[:16]}",
-            "capability": capability,
+            "skill": skill,
             "objective": objective,
             "prompt": prompt,
             "slots": dict(slots or {}),
@@ -684,7 +684,7 @@ class TaskRunStore:
             kind="awaiting_confirmation",
             summary=prompt,
             metadata={
-                "capability": capability,
+                "skill": skill,
                 "objective": objective,
                 "interrupt": bool(interrupt),
             },

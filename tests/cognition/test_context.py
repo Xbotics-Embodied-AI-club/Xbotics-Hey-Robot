@@ -11,9 +11,9 @@ from hey_robot.cognition.memory import LongTermMemoryStore, MemoryRuntime
 from hey_robot.cognition.types import RobotSnapshot
 from hey_robot.episode import EpisodeRecord
 from hey_robot.foundation.catalog.models import (
-    CapabilityManifest,
-    RobotSkillCapability,
-    ToolCapability,
+    RobotSkillSurface,
+    SkillSurfaceManifest,
+    ToolSurface,
 )
 from hey_robot.protocol import (
     ArtifactRef,
@@ -31,12 +31,12 @@ def test_robot_agent_context_memory_context_orders_available_sections() -> None:
         episode_context="history",
         pending_context="pending",
         metadata={
-            "capability_context": "capabilities",
+            "skill_surface_context": "skill-surface",
             "scene_context": "scene",
         },
     )
 
-    assert context.memory_context() == "capabilities\n\nhistory\n\nscene\n\npending"
+    assert context.memory_context() == "skill-surface\n\nhistory\n\nscene\n\npending"
 
 
 def test_robot_agent_context_memory_context_ignores_empty_and_non_string_metadata() -> (
@@ -48,7 +48,7 @@ def test_robot_agent_context_memory_context_ignores_empty_and_non_string_metadat
         episode_context="",
         pending_context=None,
         metadata={
-            "capability_context": "",
+            "skill_surface_context": "",
             "scene_context": "scene",
         },
     )
@@ -146,18 +146,18 @@ def test_context_builder_returns_none_for_empty_history_pending_and_observation(
     assert context.metadata["latest_observation"] is None
 
 
-def test_context_builder_includes_capability_summary_without_prompt_skill_context() -> (
+def test_context_builder_includes_skill_surface_summary_without_prompt_skill_context() -> (
     None
 ):
-    manifest = CapabilityManifest(
+    manifest = SkillSurfaceManifest(
         tools=(
-            ToolCapability(
+            ToolSurface(
                 name="get_robot_status", source="local", safety_level="observe"
             ),
         ),
-        robot_skill_actions=(RobotSkillCapability(name="inspect_scene"),),
+        robot_skills=(RobotSkillSurface(name="inspect_scene"),),
     )
-    builder = RobotContextBuilder(capability_manifest_provider=lambda: manifest)
+    builder = RobotContextBuilder(skill_surface_manifest_provider=lambda: manifest)
     envelope = Envelope(episode_id="ep1", robot_id="mock0", agent_id="main")
     turn = UserTurn(envelope=envelope, text="look")
 
@@ -167,11 +167,11 @@ def test_context_builder_includes_capability_summary_without_prompt_skill_contex
         history=[],
     )
 
-    assert context.metadata["capability_context"] == (
-        "Current capability summary:\n- Tools: get_robot_status(local,observe)\n- Robot skill actions: inspect_scene"
+    assert context.metadata["skill_surface_context"] == (
+        "Current skill surface:\n- Tools: get_robot_status(local,observe)\n- Robot skills: inspect_scene"
     )
     assert "prompt_skill_context" not in context.metadata
-    assert context.memory_context() == context.metadata["capability_context"]
+    assert context.memory_context() == context.metadata["skill_surface_context"]
 
 
 def test_robot_memory_context_builder_orders_catalog_current_and_long_term_memory(

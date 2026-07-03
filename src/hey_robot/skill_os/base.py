@@ -4,33 +4,20 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from hey_robot.contracts import SkillContract
+
 
 @dataclass(frozen=True)
-class SkillSpec:
-    name: str
-    description: str
-    category: str = "general"
-    input_schema: dict[str, Any] = field(default_factory=dict)
+class SkillSpec(SkillContract):
     output_schema: dict[str, Any] = field(default_factory=dict)
-    required_resources: tuple[str, ...] = ()
-    preconditions: tuple[str, ...] = ()
-    success_criteria: tuple[str, ...] = ()
-    failure_modes: tuple[str, ...] = ()
-    recovery_hints: tuple[str, ...] = ()
     dependencies: tuple[str, ...] = ()
-    driver_primitives: tuple[str, ...] = ()
-    required_model_service: str | None = None
-    supported_robots: tuple[str, ...] = ()
-    safety_level: str = "normal"
-    timeout_sec: float = 10.0
-    interruptible: bool = True
-    agent_visible: bool = True
-    feedback_mode: str = "status"
-    refresh_observation: bool = True
-    capability_type: str | None = None
-    goal_effects: tuple[str, ...] = ()
-    evidence_outputs: tuple[str, ...] = ()
-    cannot_satisfy: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "level",
+            "semantic" if self.agent_visible else "primitive",
+        )
 
 
 class SkillCatalog:

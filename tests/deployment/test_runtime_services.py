@@ -72,7 +72,16 @@ def test_runner_builds_services_when_configured(tmp_path) -> None:
                 "main": {
                     "type": "robot_agent",
                     "robot_id": "mock0",
-                    "settings": {"mode": "direct"},
+                    "settings": {
+                        "providers": {
+                            "planner": {
+                                "type": "openai_compat",
+                                "model": "mock-planner",
+                                "api_key": "test-key",
+                                "api_base": "http://127.0.0.1:9/v1",
+                            }
+                        }
+                    },
                 }
             },
             "channels": {"web": {"type": "web", "enabled": True}},

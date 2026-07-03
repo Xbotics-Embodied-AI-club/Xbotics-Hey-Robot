@@ -42,6 +42,7 @@ skills:
     - detect_marker
     - move_base
     - turn_base
+    - base_velocity_step
     - navigate_to
     - approach_object
     - vla_manipulation

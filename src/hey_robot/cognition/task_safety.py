@@ -18,7 +18,7 @@ class TaskSafetyDecision:
 
 
 UNSUPPORTED_PHYSICAL_TASK_REPLY = "我现在不能安全地执行这个任务。当前系统没有完整的开门能力，只能观察门的位置和门把手，不会移动或操作门。"
-VOICE_MOTION_CONFIRMATION_REPLY = "语音指令不能直接触发移动或接触环境的动作。请使用 propose_capability 工具向用户请求确认，确认通过后才能执行；不要跳过确认直接拒绝。"
+VOICE_MOTION_CONFIRMATION_REPLY = "语音指令不能直接触发移动或接触环境的动作。请使用 propose_skill 工具向用户请求确认，确认通过后才能执行；不要跳过确认直接拒绝。"
 
 
 def evaluate_user_task(
@@ -56,7 +56,7 @@ def evaluate_user_task(
 
 def evaluate_skill_request(
     *,
-    capability: str,
+    skill: str,
     objective: str,
     contract: SkillSafetyContract,
     task: str,
@@ -67,7 +67,7 @@ def evaluate_skill_request(
     if not _enabled(settings):
         return TaskSafetyDecision(True)
 
-    combined = _normalize(f"{task} {objective} {capability}")
+    combined = _normalize(f"{task} {objective} {skill}")
     if _is_unsupported_door_task(combined):
         return TaskSafetyDecision(
             False,
@@ -85,7 +85,7 @@ def evaluate_skill_request(
     ):
         return TaskSafetyDecision(
             False,
-            reason=f"voice channel cannot directly request {contract.safety_level} skill {capability}",
+            reason=f"voice channel cannot directly request {contract.safety_level} skill {skill}",
             reply=VOICE_MOTION_CONFIRMATION_REPLY,
             rule="voice_motion_confirmation",
         )

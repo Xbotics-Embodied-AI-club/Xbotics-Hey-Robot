@@ -29,7 +29,7 @@ def test_agent_templates_define_embodied_persona_and_message_channels() -> None:
     assert "`search_memory(query, kind, mode, limit)`" in system_prompt
     assert "`write_memory(kind, summary, name, location, ...)`" in system_prompt
     assert (
-        "`propose_capability(capability, objective, slots, interrupt, confirmation_prompt)`"
+        "`propose_skill(skill, objective, slots, interrupt, confirmation_prompt)`"
         in system_prompt
     )
     assert "`wait(reason)`" in system_prompt

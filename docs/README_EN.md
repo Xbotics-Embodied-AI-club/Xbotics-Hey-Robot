@@ -248,7 +248,7 @@ The primary documentation language is Chinese. Start from the root [README](../R
 - [Deployment and execution shape](./overview/runtime-shape.md)
 - [System architecture](./architecture/system-architecture.md)
 - [Agent and skill boundaries](./architecture/agent-skill-boundaries.md)
-- [ModelService RPC protocol](./architecture/capability-rpc-proto.md)
+- [ModelService RPC protocol](./architecture/model-service-rpc-proto.md)
 - [Deployment matrix](./operations/deployment-matrix.md)
 - [XLeRobot real deployment](./operations/xlerobot-real.md)
 - [XLeRobot simulation deployment](./operations/xlerobot-sim.md)

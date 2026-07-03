@@ -6,7 +6,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 
@@ -32,6 +32,7 @@ from hey_robot.cognition.runtime.message_window import (
     MessageWindowPolicy,
     apply_message_window,
 )
+from hey_robot.cognition.runtime.model_loop import ModelLoop
 from hey_robot.cognition.runtime.permissions import PermissionManager, PermissionMode
 from hey_robot.cognition.runtime.prompts import (
     AgentPromptTemplates,
@@ -56,7 +57,7 @@ from hey_robot.cognition.task_contract import (
     capability_type_for_name,
 )
 from hey_robot.cognition.tools.registry import ToolRegistry
-from hey_robot.foundation.catalog.resolver import CapabilityResolver
+from hey_robot.foundation.catalog.resolver import ToolPolicyResolver
 from hey_robot.providers import (
     ReasoningImage,
     ReasoningMessage,
@@ -171,16 +172,17 @@ class AgentRuntime:
         agent_run_recorder: AgentRunRecorder | None = None,
         hooks: list[ToolHook] | None = None,
         tool_executor: ToolExecutor | None = None,
-        capability_resolver: CapabilityResolver | None = None,
+        tool_policy_resolver: ToolPolicyResolver | None = None,
         prompt_templates: AgentPromptTemplates | None = None,
         provider_timeout_sec: float = 300.0,
         turn_timeout_sec: float | None = None,
         runtime_hooks: list[AgentRuntimeHook] | None = None,
         message_window_policy: MessageWindowPolicy | None = None,
     ) -> None:
-        self.provider = provider
+        self._provider = provider
         self.max_iterations = max(1, int(max_iterations))
         self.tools = tool_registry or ToolRegistry()
+        self.model_loop = ModelLoop(provider=provider, tools=self.tools)
         self.state = AgentState()
         self.prompt_templates = prompt_templates or load_agent_prompt_templates()
         self.tool_executor = tool_executor or ToolExecutor(
@@ -188,7 +190,7 @@ class AgentRuntime:
             permission_manager=PermissionManager(permission_mode),
             hooks=hooks,
             audit_logger=audit_logger,
-            capability_resolver=capability_resolver,
+            tool_policy_resolver=tool_policy_resolver,
         )
         self.agent_run_recorder = agent_run_recorder
         self.memory: Any | None = None
@@ -200,6 +202,16 @@ class AgentRuntime:
         )
         self.runtime_hooks = list(runtime_hooks or [])
         self.message_window_policy = message_window_policy or MessageWindowPolicy()
+
+    @property
+    def provider(self) -> ReasoningProvider:
+        return self._provider
+
+    @provider.setter
+    def provider(self, provider: ReasoningProvider) -> None:
+        self._provider = provider
+        if hasattr(self, "model_loop"):
+            self.model_loop.provider = provider
 
     def register_tool(
         self,
@@ -316,7 +328,7 @@ class AgentRuntime:
                         )
                     request_timeout_sec = budget_timeout
                 response = await asyncio.wait_for(
-                    self._request_provider(
+                    self.model_loop.request(
                         messages_for_model, allowed_tools=spec.allowed_tools
                     ),
                     timeout=request_timeout_sec,
@@ -1271,29 +1283,6 @@ class AgentRuntime:
                 result=record.result,
                 success=record.success,
             )
-
-    async def _request_provider(
-        self,
-        messages: list[ReasoningMessage],
-        *,
-        allowed_tools: set[str] | None = None,
-    ) -> ReasoningResponse:
-        chat_with_retry = getattr(self.provider, "chat_with_retry", None)
-        tools = self.tools.list_tools()
-        if allowed_tools is not None:
-            tools = [tool for tool in tools if tool["name"] in allowed_tools]
-        kwargs = {
-            "messages": messages,
-            "tools": tools,
-            "tool_choice": "auto",
-        }
-        if callable(chat_with_retry):
-            return cast(ReasoningResponse, await chat_with_retry(**kwargs))
-        return await self.provider.chat(
-            messages=messages,
-            tools=tools,
-            tool_choice="auto",
-        )
 
     async def _execute_tool_calls(
         self,

@@ -572,7 +572,7 @@ class TaskRunManager:
             return
         self.task_runs.set_pending_confirmation(
             episode_id,
-            capability=str(proposal.get("capability") or ""),
+            skill=str(proposal.get("skill") or ""),
             objective=str(proposal.get("objective") or ""),
             prompt=str(proposal.get("prompt") or ""),
             slots=proposal.get("slots")

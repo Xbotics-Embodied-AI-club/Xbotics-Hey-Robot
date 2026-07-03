@@ -12,6 +12,7 @@ from PIL import Image
 
 from hey_robot.bus.factory import create_bus_client
 from hey_robot.config import DeploymentConfig, PolicySpec
+from hey_robot.contracts import SkillContract, SkillContractRuntime
 from hey_robot.events import EventKind, RuntimeEvent
 from hey_robot.events.bus import BusEventPublisher
 from hey_robot.foundation.clients import (
@@ -32,10 +33,8 @@ from hey_robot.robot_runtime.identity import resolve_robot_family
 from hey_robot.robot_runtime.media import LocalMediaStore, MediaResolver
 from hey_robot.robot_runtime.observations.frame_stream import decode_frame_packet
 from hey_robot.skill_os.actions import RobotSkillAction
-from hey_robot.skill_os.catalog import RobotSkillSpec
 from hey_robot.skill_os.composition import SkillExecutionPlan
 from hey_robot.skill_os.context import SkillContext
-from hey_robot.skill_os.contracts import SkillContractRuntime
 from hey_robot.skill_os.event_sink import SkillEventSink
 from hey_robot.skill_os.ports import ModelServicePort, PerceptionPort, RobotActionPort
 from hey_robot.skill_os.registry import registry_from_config
@@ -722,11 +721,8 @@ class SkillControllerService:
                 else f"model service {service_id} is not deployed or model is not loaded"
             )
             raise RuntimeError(reason)
-        # 将 skill 层 enriched 的参数（如 observation/images）合并到 intent，
-        # 否则 gRPC client 只用原始 intent.arguments，丢失 skill 添加的数据。
-        # SkillIntent 是 frozen dataclass，必须用 object.__setattr__ 绕过。
+        # 将 skill 层 enriched 的参数（如 observation/images）显式传给 ModelService。
         enriched_arguments = {**run.intent.arguments, **_arguments}
-        object.__setattr__(run.intent, "arguments", enriched_arguments)
         contract = self.plugin_skill_catalog.resolve(name)
         run.execution_plan = SkillExecutionPlan(
             actions=(
@@ -747,6 +743,7 @@ class SkillControllerService:
                     timeout_sec=float(
                         run.intent.timeout_sec or spec.timeout_sec or run.timeout_sec
                     ),
+                    arguments=enriched_arguments,
                 )
             )
         finally:
@@ -801,7 +798,7 @@ class SkillControllerService:
         policy_id: str | None = None,
         frame_id: int | None = None,
         steps_executed: int | None = None,
-        contract: RobotSkillSpec | None = None,
+        contract: SkillContract | None = None,
         step: str | None = None,
         execution_plan: SkillExecutionPlan | None = None,
         metadata: dict[str, Any] | None = None,
@@ -834,7 +831,7 @@ class SkillControllerService:
         error: str | None = None,
         failure_mode: str | None = None,
         steps_executed: int = 0,
-        contract: RobotSkillSpec | None = None,
+        contract: SkillContract | None = None,
         run: SkillRun | None = None,
     ) -> None:
         self._sync_event_sink()
@@ -864,7 +861,7 @@ class SkillControllerService:
     def _execution_plan(
         self,
         intent: SkillIntent,
-        contract: RobotSkillSpec,
+        contract: SkillContract,
     ) -> SkillExecutionPlan:
         del intent, contract
         return SkillExecutionPlan(
@@ -1025,7 +1022,7 @@ class SkillControllerService:
         *,
         phase: str,
         intent: SkillIntent,
-        contract: RobotSkillSpec | None = None,
+        contract: SkillContract | None = None,
         decision: dict[str, Any] | None = None,
         severity: str = "info",
     ) -> None:
@@ -1048,7 +1045,7 @@ class SkillControllerService:
     def _estimated_timeout_sec(
         self,
         intent: SkillIntent,
-        contract: RobotSkillSpec,
+        contract: SkillContract,
         execution_plan: SkillExecutionPlan,
     ) -> float | None:
         if intent.timeout_sec is not None:
@@ -1203,7 +1200,7 @@ class SkillControllerService:
 
     @staticmethod
     def _precondition_block(
-        contract: RobotSkillSpec, status: RobotStatus | None
+        contract: SkillContract, status: RobotStatus | None
     ) -> str | None:
         decision = SkillContractRuntime.precondition_block(contract, status)
         return None if decision is None else decision.reason

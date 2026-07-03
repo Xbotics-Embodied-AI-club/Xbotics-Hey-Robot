@@ -9,8 +9,8 @@ from hey_robot.cognition.session import AgentTurnSessions
 from hey_robot.cognition.skill_state import SkillPhase, SkillStateMachine
 from hey_robot.cognition.task_safety import evaluate_skill_request, evaluate_user_task
 from hey_robot.cognition.types import AgentCoreResult
+from hey_robot.contracts import SkillContract
 from hey_robot.protocol import Envelope, SkillIntent, SkillResult, UserTurn
-from hey_robot.skill_os.catalog import RobotSkillSpec
 
 
 def test_agent_turn_sessions_dedupe_trim_lease_and_status() -> None:
@@ -153,14 +153,14 @@ def test_task_safety_respects_disabled_settings_and_voice_motion_rules() -> None
     text_move = evaluate_user_task("move forward", channel="web", settings={})
     assert text_move.allowed is True
 
-    contract = RobotSkillSpec(
+    contract = SkillContract(
         name="move_base",
         description="move the mobile base",
         category="mobile_base",
         safety_level="motion",
     )
     skill_decision = evaluate_skill_request(
-        capability="move_base",
+        skill="move_base",
         objective="approach the desk",
         contract=contract,
         task="bring bottle",
@@ -170,7 +170,7 @@ def test_task_safety_respects_disabled_settings_and_voice_motion_rules() -> None
     assert skill_decision.allowed is False
     assert skill_decision.rule == "voice_motion_confirmation"
     confirmed_skill_decision = evaluate_skill_request(
-        capability="move_base",
+        skill="move_base",
         objective="approach the desk",
         contract=contract,
         task="bring bottle",
@@ -180,7 +180,7 @@ def test_task_safety_respects_disabled_settings_and_voice_motion_rules() -> None
     )
     assert confirmed_skill_decision.allowed is True
 
-    observe_contract = RobotSkillSpec(
+    observe_contract = SkillContract(
         name="inspect_scene",
         description="inspect with camera",
         category="camera",
@@ -188,7 +188,7 @@ def test_task_safety_respects_disabled_settings_and_voice_motion_rules() -> None
     )
     assert (
         evaluate_skill_request(
-            capability="inspect_scene",
+            skill="inspect_scene",
             objective="look at the desk",
             contract=observe_contract,
             task="what is on the desk",

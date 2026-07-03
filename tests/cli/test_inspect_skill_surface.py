@@ -5,7 +5,7 @@ import sys
 from hey_robot.cli.inspect import main
 
 
-def test_inspect_capabilities_prints_manifest(tmp_path, monkeypatch, capsys) -> None:
+def test_inspect_skill_surface_prints_manifest(tmp_path, monkeypatch, capsys) -> None:
     config_path = tmp_path / "deployment.yaml"
     config_path.write_text(
         """
@@ -21,11 +21,13 @@ agents:
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        sys, "argv", ["hey-robot inspect", "capabilities", "--config", str(config_path)]
+        sys,
+        "argv",
+        ["hey-robot inspect", "skill-surface", "--config", str(config_path)],
     )
 
     main()
 
     output = capsys.readouterr().out
     assert '"prompt_skills"' not in output
-    assert '"robot_skill_actions"' in output
+    assert '"robot_skills"' in output

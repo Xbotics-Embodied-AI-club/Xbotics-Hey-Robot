@@ -975,9 +975,9 @@ class TestTaskContextTool:
         assert "Loop warning:" in parsed["loop_warning"]
 
 
-class TestProposeCapabilityTool:
+class TestProposeSkillTool:
     async def test_stores_pending_confirmation_and_returns_prompt(self):
-        from hey_robot.cognition.tools.propose_capability import ProposeCapabilityTool
+        from hey_robot.cognition.tools.propose_skill import ProposeSkillTool
 
         io = _FakeIO()
         ctx = _build_ctx(
@@ -990,10 +990,10 @@ class TestProposeCapabilityTool:
                 sender_id="u1",
             ),
         )
-        tool = ProposeCapabilityTool(ctx)
+        tool = ProposeSkillTool(ctx)
 
         result = await tool.execute(
-            capability="turn_base",
+            skill="turn_base",
             objective="先转向 __TASK__",
             confirmation_prompt="要不要我先转一下？",
             slots={"angle_deg": 30},
@@ -1004,31 +1004,29 @@ class TestProposeCapabilityTool:
         io.task_runtime.store_pending_confirmation.assert_called_once()
         episode_id, proposal = io.task_runtime.store_pending_confirmation.call_args.args
         assert episode_id == "ep1"
-        assert proposal["capability"] == "turn_base"
+        assert proposal["skill"] == "turn_base"
         assert proposal["objective"] == "先转向 pick the cup"
         assert proposal["slots"] == {"angle_deg": 30}
         assert proposal["interrupt"] is True
         assert proposal["prompt"] == "要不要我先转一下？"
 
     async def test_rejects_missing_fields(self):
-        from hey_robot.cognition.tools.propose_capability import ProposeCapabilityTool
+        from hey_robot.cognition.tools.propose_skill import ProposeSkillTool
 
         ctx = _build_ctx()
-        tool = ProposeCapabilityTool(ctx)
+        tool = ProposeSkillTool(ctx)
 
-        with pytest.raises(ValueError, match="capability"):
-            await tool.execute(
-                capability="", objective="look", confirmation_prompt="ok?"
-            )
+        with pytest.raises(ValueError, match="skill"):
+            await tool.execute(skill="", objective="look", confirmation_prompt="ok?")
         with pytest.raises(ValueError, match="objective"):
             await tool.execute(
-                capability="turn_base",
+                skill="turn_base",
                 objective=" ",
                 confirmation_prompt="ok?",
             )
         with pytest.raises(ValueError, match="confirmation_prompt"):
             await tool.execute(
-                capability="turn_base",
+                skill="turn_base",
                 objective="look",
                 confirmation_prompt=" ",
             )
@@ -1146,7 +1144,7 @@ class TestToolBaseBehavior:
 class TestToSpecRuntimeAdapter:
     def test_all_tools_produce_valid_spec(self):
         """Every tool's to_spec() must return a ToolSpec consumable by the
-        runtime CapabilityResolver / PermissionManager / ToolExecutor pipeline."""
+        runtime ToolPolicyResolver / PermissionManager / ToolExecutor pipeline."""
         from hey_robot.cognition.tools import ToolLoader
 
         loader = ToolLoader()

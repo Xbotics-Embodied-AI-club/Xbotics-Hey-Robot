@@ -17,7 +17,7 @@ from hey_robot.cognition.session import AgentTurnSessions
 from hey_robot.cognition.task_runtime import RobotStateCache, TaskRunManager
 from hey_robot.config import DeploymentConfig
 from hey_robot.episode import JsonlEpisodeStore, RobotEpisodeStateStore
-from hey_robot.foundation.catalog.loader import CapabilityLoader
+from hey_robot.foundation.catalog.loader import SkillSurfaceLoader
 from hey_robot.gateway.identity import IdentityResolver
 from hey_robot.notifications import NotificationPolicy, NotificationService
 from hey_robot.protocol import AgentReply, SkillEvent, SkillIntent
@@ -43,7 +43,7 @@ class RobotAgentRuntimeContainer:
     busy_turns: BusyTurnHandler
     core: RobotAgentCore
     loop: RobotAgentLoop
-    capabilities: CapabilityLoader
+    skill_surface: SkillSurfaceLoader
     turn_timeout_sec: float
     skill_lease_timeout_sec: float
 
@@ -132,12 +132,12 @@ class RobotAgentRuntimeContainer:
             core,
             task_runtime=task_runtime,
             context_builder=RobotContextBuilder(
-                capability_manifest_provider=core.capability_manifest,
+                skill_surface_manifest_provider=core.skill_surface_manifest,
             ),
         )
-        capabilities = CapabilityLoader(
+        skill_surface = SkillSurfaceLoader(
             tools=core.runtime.tools,
-            robot_skills=core.capabilities.robot_skills,
+            robot_skills=core.skill_surface.robot_skills,
         )
         return cls(
             episodes=episodes,
@@ -152,7 +152,7 @@ class RobotAgentRuntimeContainer:
             busy_turns=busy_turns,
             core=core,
             loop=loop,
-            capabilities=capabilities,
+            skill_surface=skill_surface,
             turn_timeout_sec=float(spec.settings.get("turn_timeout_sec", 120.0)),
             skill_lease_timeout_sec=float(
                 spec.settings.get("skill_lease_timeout_sec", 300.0)

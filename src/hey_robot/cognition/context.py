@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from hey_robot.cognition.task_run import TaskRun
 from hey_robot.cognition.types import RobotSnapshot
 from hey_robot.episode import EpisodeRecord
-from hey_robot.foundation.catalog.models import CapabilityManifest
+from hey_robot.foundation.catalog.models import SkillSurfaceManifest
 from hey_robot.protocol import UserTurn
 
 if TYPE_CHECKING:
@@ -27,11 +27,11 @@ class RobotAgentContext:
 
     def memory_context(self) -> str | None:
         scene_context = self.metadata.get("scene_context")
-        capability_context = self.metadata.get("capability_context")
+        skill_surface_context = self.metadata.get("skill_surface_context")
         parts = [
             part
             for part in (
-                capability_context,
+                skill_surface_context,
                 self.episode_context,
                 scene_context,
                 self.pending_context,
@@ -54,11 +54,12 @@ class RobotContextBuilder:
         *,
         max_history: int = 12,
         max_pending: int = 5,
-        capability_manifest_provider: Callable[[], CapabilityManifest] | None = None,
+        skill_surface_manifest_provider: Callable[[], SkillSurfaceManifest]
+        | None = None,
     ) -> None:
         self.max_history = max(1, int(max_history))
         self.max_pending = max(1, int(max_pending))
-        self.capability_manifest_provider = capability_manifest_provider
+        self.skill_surface_manifest_provider = skill_surface_manifest_provider
 
     def build(
         self,
@@ -70,7 +71,7 @@ class RobotContextBuilder:
         pending_turns: list[UserTurn] | None = None,
         task: TaskRun | None = None,
     ) -> RobotAgentContext:
-        capability_manifest = self._capability_manifest()
+        skill_surface_manifest = self._skill_surface_manifest()
         return RobotAgentContext(
             task=turn.text,
             robot_state=snapshot.summary(),
@@ -88,7 +89,9 @@ class RobotContextBuilder:
                 "task": task.to_dict() if task is not None else None,
                 "latest_observation": self._observation_metadata(snapshot),
                 "scene_context": None,
-                "capability_context": self._capability_context(capability_manifest),
+                "skill_surface_context": self._skill_surface_context(
+                    skill_surface_manifest
+                ),
             },
         )
 
@@ -135,13 +138,13 @@ class RobotContextBuilder:
             "task": observation.task,
         }
 
-    def _capability_manifest(self) -> CapabilityManifest | None:
-        if self.capability_manifest_provider is None:
+    def _skill_surface_manifest(self) -> SkillSurfaceManifest | None:
+        if self.skill_surface_manifest_provider is None:
             return None
-        return self.capability_manifest_provider()
+        return self.skill_surface_manifest_provider()
 
     @staticmethod
-    def _capability_context(manifest: CapabilityManifest | None) -> str | None:
+    def _skill_surface_context(manifest: SkillSurfaceManifest | None) -> str | None:
         if manifest is None:
             return None
         tools = (
@@ -152,14 +155,13 @@ class RobotContextBuilder:
             or "none"
         )
         robot_skills = (
-            ", ".join(skill.name for skill in manifest.robot_skill_actions[:16])
-            or "none"
+            ", ".join(skill.name for skill in manifest.robot_skills[:16]) or "none"
         )
         return "\n".join(
             [
-                "Current capability summary:",
+                "Current skill surface:",
                 f"- Tools: {tools}",
-                f"- Robot skill actions: {robot_skills}",
+                f"- Robot skills: {robot_skills}",
             ]
         )
 
@@ -168,7 +170,7 @@ class RobotMemoryContextBuilder:
     """Build the memory/context block passed into the agent runtime.
 
     This keeps memory prompt composition outside ``RobotAgentCore``. The core
-    supplies current turn inputs; this builder decides how robot capability
+    supplies current turn inputs; this builder decides how robot skill-surface
     context, task context, perception context, and long-term memory are ordered.
     """
 

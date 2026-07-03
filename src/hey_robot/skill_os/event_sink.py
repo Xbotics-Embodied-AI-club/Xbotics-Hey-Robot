@@ -8,13 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from hey_robot.bus.client import BusClient
+from hey_robot.contracts import SkillContract, SkillContractRuntime
 from hey_robot.events import RuntimeEvent
 from hey_robot.events.bus import EventPublisher
 from hey_robot.protocol import SkillEvent, SkillIntent, SkillResult, Topics
 from hey_robot.protocol.messages import to_payload
-from hey_robot.skill_os.catalog import RobotSkillSpec
 from hey_robot.skill_os.composition import SkillExecutionPlan
-from hey_robot.skill_os.contracts import SkillContractRuntime
 from hey_robot.skill_os.scheduler import SkillRun
 
 
@@ -49,7 +48,7 @@ class SkillEventSink:
         policy_id: str | None = None,
         frame_id: int | None = None,
         steps_executed: int | None = None,
-        contract: RobotSkillSpec | None = None,
+        contract: SkillContract | None = None,
         step: str | None = None,
         execution_plan: SkillExecutionPlan | None = None,
         metadata: dict[str, Any] | None = None,
@@ -94,7 +93,7 @@ class SkillEventSink:
         error: str | None = None,
         failure_mode: str | None = None,
         steps_executed: int = 0,
-        contract: RobotSkillSpec | None = None,
+        contract: SkillContract | None = None,
     ) -> None:
         await self.bus.publish(
             self.topics.skill_result,
@@ -124,7 +123,7 @@ class SkillEventSink:
         active_runs: dict[str, SkillRun],
         phase: str,
         intent: SkillIntent,
-        contract: RobotSkillSpec | None = None,
+        contract: SkillContract | None = None,
         decision: dict[str, Any] | None = None,
         severity: str = "info",
     ) -> dict[str, Any]:
@@ -215,7 +214,7 @@ class SkillEventSink:
     def _metadata(
         intent: SkillIntent,
         *,
-        contract: RobotSkillSpec | None,
+        contract: SkillContract | None,
         run: SkillRun | None,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {"skill": intent.name or ""}

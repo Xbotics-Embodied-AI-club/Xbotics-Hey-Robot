@@ -32,6 +32,46 @@ from hey_robot.protocol import (
     SkillResult,
     UserTurn,
 )
+from tests.conftest import FakeProvider
+
+
+def _agent_settings(extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {
+        "mode": "agent",
+        "providers": {
+            "planner": {
+                "type": "openai_compat",
+                "model": "mock-planner",
+                "api_key": "test-key",
+                "api_base": "http://127.0.0.1:9/v1",
+            }
+        },
+        **dict(extra or {}),
+    }
+
+
+def _skill_request_provider(
+    objective: str, skill: str = "inspect_scene"
+) -> FakeProvider:
+    return FakeProvider(
+        [
+            {
+                "tool": "request_skill",
+                "args": {
+                    "skill": skill,
+                    "objective": objective,
+                    "slots": {"question": objective},
+                    "wait_policy": "wait_acceptance",
+                },
+            },
+            {"tool": "wait", "args": {"reason": "waiting for skill execution"}},
+        ]
+    )
+
+
+def _set_service_provider(service: RobotAgentService, provider: FakeProvider) -> None:
+    service.core.provider = provider
+    service.core.runtime.provider = provider
 
 
 @dataclass
@@ -79,12 +119,31 @@ class FakeAgentIO:
         )
 
 
-def test_robot_agent_loop_runs_core_and_writes_checkpoint(tmp_path) -> None:
+def test_robot_agent_loop_runs_core_and_records_tool_skill(tmp_path) -> None:
     io = FakeAgentIO()
     core = RobotAgentCore(
         agent_id="main",
-        spec=AgentSpec(type="robot_agent", settings={"mode": "direct"}),
+        spec=AgentSpec(
+            type="robot_agent", settings={"mode": "agent", "max_iterations": 2}
+        ),
         io=io,
+        provider=FakeProvider(
+            [
+                {
+                    "tool": "request_skill",
+                    "args": {
+                        "skill": "inspect_scene",
+                        "objective": "pick up the bowl",
+                        "slots": {"question": "pick up the bowl"},
+                        "wait_policy": "wait_acceptance",
+                    },
+                },
+                {
+                    "tool": "wait",
+                    "args": {"reason": "waiting for skill execution"},
+                },
+            ]
+        ),
     )
     task_runtime = TaskRunManager(
         episode_root=tmp_path,
@@ -120,13 +179,14 @@ def test_robot_agent_loop_runs_core_and_writes_checkpoint(tmp_path) -> None:
 
     assert io.skills[0].objective == "pick up the bowl"
     assert [entry.state for entry in trace] == ["restore", "build", "run", "save"]
-    assert checkpoint is not None
-    assert checkpoint.phase == "responded"
-    assert checkpoint.skill_id == io.skills[0].skill_id
+    assert checkpoint is None
     task = task_runtime.task_runs.load_active("s1")
-    assert task is not None
+    assert task is None
+    tasks = task_runtime.task_runs.list_for_episode("s1")
+    assert len(tasks) == 1
+    task = tasks[0]
     assert task.skill_ids == [io.skills[0].skill_id]
-    assert task.attempts[0].status == "executing"
+    assert task.attempts[0].status == "completed"
     assert task.root_task == "pick up the bowl"
 
 
@@ -210,10 +270,9 @@ def test_robot_agent_service_status_feedback_updates_task_run(tmp_path) -> None:
                 "main": {
                     "type": "robot_agent",
                     "robot_id": "mock0",
-                    "settings": {
-                        "mode": "direct",
-                        "execution_feedback": {"backend": "status"},
-                    },
+                    "settings": _agent_settings(
+                        {"execution_feedback": {"backend": "status"}}
+                    ),
                 }
             },
             "robots": {"mock0": {"type": "mock"}},
@@ -276,7 +335,7 @@ def test_robot_agent_service_queues_busy_correction(tmp_path) -> None:
                 "main": {
                     "type": "robot_agent",
                     "robot_id": "mock0",
-                    "settings": {"mode": "direct"},
+                    "settings": _agent_settings(),
                 }
             },
             "robots": {"mock0": {"type": "mock"}},
@@ -317,7 +376,7 @@ def test_robot_agent_service_busy_executing_task_keeps_correction_intent(
                 "main": {
                     "type": "robot_agent",
                     "robot_id": "mock0",
-                    "settings": {"mode": "direct"},
+                    "settings": _agent_settings(),
                 }
             },
             "robots": {"mock0": {"type": "mock"}},
@@ -363,7 +422,7 @@ def test_robot_agent_service_busy_recovering_task_downgrades_correction_to_follo
                 "main": {
                     "type": "robot_agent",
                     "robot_id": "mock0",
-                    "settings": {"mode": "direct"},
+                    "settings": _agent_settings(),
                 }
             },
             "robots": {"mock0": {"type": "mock"}},
@@ -409,7 +468,7 @@ def test_robot_agent_service_answers_busy_readonly_status(tmp_path) -> None:
                 "main": {
                     "type": "robot_agent",
                     "robot_id": "mock0",
-                    "settings": {"mode": "direct"},
+                    "settings": _agent_settings(),
                 }
             },
             "robots": {"mock0": {"type": "mock"}},
@@ -938,13 +997,14 @@ def test_robot_agent_service_new_turn_clears_stale_recovery_state(tmp_path) -> N
                 "main": {
                     "type": "robot_agent",
                     "robot_id": "mock0",
-                    "settings": {"mode": "direct"},
+                    "settings": _agent_settings(),
                 }
             },
             "robots": {"mock0": {"type": "mock"}},
         }
     )
     service = RobotAgentService(config, agent_id="main", episode_dir=tmp_path)
+    _set_service_provider(service, _skill_request_provider("new clean task"))
     fake_bus = FakeBus()
     service.bus = fake_bus  # type: ignore[assignment]
     service.events = BusEventPublisher(fake_bus, service.topics)  # type: ignore[arg-type]
@@ -999,10 +1059,11 @@ def test_robot_agent_service_new_turn_clears_stale_recovery_state(tmp_path) -> N
     assert state is not None
     assert state.recovery_required is False
     assert state.active_skill_id is None
-    assert service.task_runtime.checkpoints.load("s1") is not None
-    assert service.task_runtime.checkpoints.load("s1").pending_turns == []  # type: ignore[union-attr]
-    assert active_task is not None
-    assert active_task.root_task == "new clean task"
+    assert service.task_runtime.checkpoints.load("s1") is None
+    assert active_task is None
+    tasks = service.task_runtime.task_runs.list_for_episode("s1")
+    new_task = next(task for task in tasks if task.root_task == "new clean task")
+    assert new_task.status == "completed"
 
 
 def test_robot_agent_service_replayed_pending_turn_keeps_remaining_queue(
@@ -1021,13 +1082,14 @@ def test_robot_agent_service_replayed_pending_turn_keeps_remaining_queue(
                 "main": {
                     "type": "robot_agent",
                     "robot_id": "mock0",
-                    "settings": {"mode": "direct"},
+                    "settings": _agent_settings(),
                 }
             },
             "robots": {"mock0": {"type": "mock"}},
         }
     )
     service = RobotAgentService(config, agent_id="main", episode_dir=tmp_path)
+    _set_service_provider(service, _skill_request_provider("first queued update"))
     fake_bus = FakeBus()
     service.bus = fake_bus  # type: ignore[assignment]
     service.events = BusEventPublisher(fake_bus, service.topics)  # type: ignore[arg-type]
@@ -1078,7 +1140,7 @@ def test_robot_agent_service_interrupt_publishes_interrupt_skill(tmp_path) -> No
                 "main": {
                     "type": "robot_agent",
                     "robot_id": "mock0",
-                    "settings": {"mode": "direct"},
+                    "settings": _agent_settings(),
                 }
             },
             "robots": {"mock0": {"type": "mock"}},
@@ -1124,7 +1186,7 @@ def test_robot_agent_service_emergency_stop_publishes_interrupt_skill(
                 "main": {
                     "type": "robot_agent",
                     "robot_id": "mock0",
-                    "settings": {"mode": "direct"},
+                    "settings": _agent_settings(),
                 }
             },
             "robots": {"mock0": {"type": "mock"}},
@@ -1172,7 +1234,7 @@ def test_robot_agent_service_confirmed_pending_confirmation_restores_objective(
                 "main": {
                     "type": "robot_agent",
                     "robot_id": "mock0",
-                    "settings": {"mode": "direct"},
+                    "settings": _agent_settings(),
                 }
             },
             "robots": {"mock0": {"type": "mock"}},
@@ -1186,7 +1248,7 @@ def test_robot_agent_service_confirmed_pending_confirmation_restores_objective(
         "s1",
         {
             "proposal_id": "proposal_1",
-            "capability": "turn_base",
+            "skill": "turn_base",
             "objective": "向左转一点，然后看看左侧是什么",
             "prompt": "要向左转一点，然后看看左侧是什么吗？",
         },
@@ -1233,7 +1295,7 @@ def test_robot_agent_service_confirmed_pending_confirmation_reports_motion_guard
                 "main": {
                     "type": "robot_agent",
                     "robot_id": "mock0",
-                    "settings": {"mode": "direct"},
+                    "settings": _agent_settings(),
                 }
             },
             "robots": {"mock0": {"type": "mock"}},
@@ -1255,7 +1317,7 @@ def test_robot_agent_service_confirmed_pending_confirmation_reports_motion_guard
         "s1",
         {
             "proposal_id": "proposal_blocked",
-            "capability": "move_base",
+            "skill": "move_base",
             "objective": "向左移动10cm",
             "slots": {"direction": "left", "distance_cm": 10},
             "prompt": "确认向左移动10cm吗？",
@@ -1307,7 +1369,7 @@ def test_robot_agent_service_declined_pending_confirmation_does_not_create_task(
                 "main": {
                     "type": "robot_agent",
                     "robot_id": "mock0",
-                    "settings": {"mode": "direct"},
+                    "settings": _agent_settings(),
                 }
             },
             "robots": {"mock0": {"type": "mock"}},
@@ -1321,7 +1383,7 @@ def test_robot_agent_service_declined_pending_confirmation_does_not_create_task(
         "s1",
         {
             "proposal_id": "proposal_2",
-            "capability": "turn_base",
+            "skill": "turn_base",
             "objective": "\u5411\u5de6\u8f6c\u4e00\u70b9\uff0c\u7136\u540e\u770b\u770b\u5de6\u4fa7\u662f\u4ec0\u4e48",
             "prompt": "要向左转一点，然后看看左侧是什么吗？",
         },
@@ -1367,13 +1429,14 @@ def test_robot_agent_service_new_task_reply_clears_pending_confirmation_and_runs
                 "main": {
                     "type": "robot_agent",
                     "robot_id": "mock0",
-                    "settings": {"mode": "direct"},
+                    "settings": _agent_settings(),
                 }
             },
             "robots": {"mock0": {"type": "mock"}},
         }
     )
     service = RobotAgentService(config, agent_id="main", episode_dir=tmp_path)
+    _set_service_provider(service, _skill_request_provider("去前面看看桌子上有什么"))
     fake_bus = FakeBus()
     service.bus = fake_bus  # type: ignore[assignment]
     service.events = BusEventPublisher(fake_bus, service.topics)  # type: ignore[arg-type]
@@ -1381,7 +1444,7 @@ def test_robot_agent_service_new_task_reply_clears_pending_confirmation_and_runs
         "s1",
         {
             "proposal_id": "proposal_3",
-            "capability": "turn_base",
+            "skill": "turn_base",
             "objective": "向左转一点，然后看看左侧是什么",
             "prompt": "要向左转一点，然后看看左侧是什么吗？",
         },

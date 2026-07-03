@@ -287,6 +287,7 @@ def test_grpc_capability_client_maps_health_execute_and_cancel(
                 intent=intent,
                 contract=load_skill_registry().robot_skill_catalog().get("set_gripper"),
                 timeout_sec=2.0,
+                arguments={"action": "open", "camera": "front"},
             )
         )
     )
@@ -298,7 +299,7 @@ def test_grpc_capability_client_maps_health_execute_and_cancel(
     execute_request = recorded["execute_requests"][0][0]
     assert execute_request.skill_id == "skill1"
     assert execute_request.skill_name == "set_gripper"
-    assert dict(execute_request.arguments) == {"action": "close"}
+    assert dict(execute_request.arguments) == {"action": "open", "camera": "front"}
     cancel_request = recorded["cancel_requests"][0][0]
     assert cancel_request.skill_id == "skill1"
 

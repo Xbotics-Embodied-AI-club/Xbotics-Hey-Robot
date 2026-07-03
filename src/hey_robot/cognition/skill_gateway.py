@@ -76,7 +76,7 @@ class SkillGateway:
         contract = self.skill_catalog.get(skill)
         envelope = self.current_envelope()
         safety_decision = evaluate_skill_request(
-            capability=skill,
+            skill=skill,
             objective=objective,
             contract=contract,
             task=task_text,
@@ -148,31 +148,6 @@ class SkillGateway:
             return await asyncio.wait_for(future, timeout=skill_timeout)
         finally:
             self.pending_skills.pop(intent.skill_id, None)
-
-    async def submit_direct(
-        self,
-        *,
-        objective: str,
-        slots: dict[str, Any] | None = None,
-        metadata: dict[str, Any] | None = None,
-        interrupt: bool = False,
-    ) -> SkillIntent:
-        """Submit a legacy/direct-mode intent through the Agent gateway boundary."""
-        normalized_objective = (objective or "").strip()
-        if not normalized_objective:
-            raise ValueError("objective must not be empty")
-        intent = SkillIntent(
-            envelope=self.current_envelope(),
-            name="",
-            objective=normalized_objective,
-            arguments=dict(slots or {}),
-            interrupt=bool(interrupt),
-            metadata=dict(metadata or {}),
-        )
-        if self.on_submit is not None:
-            self.on_submit(intent)
-        await self.io.submit_skill(intent)
-        return intent
 
     @staticmethod
     def build_interrupt_intent(

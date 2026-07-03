@@ -8,7 +8,7 @@ from hey_robot.cognition.skill_gateway import WaitPolicy
 
 @dataclass(frozen=True)
 class RoutedCommand:
-    capability: str
+    skill: str
     objective: str
     slots: dict[str, Any] = field(default_factory=dict)
     interrupt: bool = False
@@ -27,7 +27,7 @@ class CommandRouter:
             "停下" in normalized and "动作" in normalized
         ):
             return RoutedCommand(
-                capability="stop_motion",
+                skill="stop_motion",
                 objective="停止当前所有机器人动作",
                 slots={"emergency": True},
                 interrupt=True,
@@ -36,7 +36,7 @@ class CommandRouter:
             )
         if normalized in {"复位", "重置", "reset", "resetposture"}:
             return RoutedCommand(
-                capability="reset_posture",
+                skill="reset_posture",
                 objective="复位机器人姿态",
                 slots={},
                 interrupt=True,
@@ -45,7 +45,7 @@ class CommandRouter:
             )
         if _is_home_pose_command(normalized):
             return RoutedCommand(
-                capability="set_arm_pose",
+                skill="set_arm_pose",
                 objective="机械臂回到 home 位姿",
                 slots={"pose_name": "home"},
                 wait_policy="wait_acceptance",
@@ -53,7 +53,7 @@ class CommandRouter:
             )
         if _is_gripper_open_command(normalized):
             return RoutedCommand(
-                capability="set_gripper",
+                skill="set_gripper",
                 objective="打开夹爪",
                 slots={"action": "open"},
                 wait_policy="wait_acceptance",
@@ -61,7 +61,7 @@ class CommandRouter:
             )
         if _is_gripper_close_command(normalized):
             return RoutedCommand(
-                capability="set_gripper",
+                skill="set_gripper",
                 objective="关闭夹爪",
                 slots={"action": "close"},
                 wait_policy="wait_acceptance",

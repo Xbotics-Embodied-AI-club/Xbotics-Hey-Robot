@@ -4,9 +4,9 @@ import importlib
 from dataclasses import dataclass
 from typing import Any
 
+from hey_robot.contracts import SkillContractCatalog
 from hey_robot.skill_os.actions import RobotSkillAction
 from hey_robot.skill_os.base import BaseSkill, SkillCatalog, SkillSpec
-from hey_robot.skill_os.catalog import RobotSkillCatalog, RobotSkillSpec
 
 
 @dataclass(frozen=True)
@@ -102,12 +102,9 @@ class SkillRegistry:
             specs.append(spec)
         return SkillCatalog(tuple(specs))
 
-    def robot_skill_catalog(self) -> RobotSkillCatalog:
-        return RobotSkillCatalog(
-            tuple(
-                _contract_to_robot_spec(self._skills[name].spec)
-                for name in self.names(enabled_only=False)
-            )
+    def robot_skill_catalog(self) -> SkillContractCatalog:
+        return SkillContractCatalog(
+            tuple(self._skills[name].spec for name in self.names(enabled_only=False))
         )
 
     def action_for(
@@ -138,33 +135,4 @@ def registry_from_config(config: Any | None) -> SkillRegistry:
             getattr(skills_config, "modules", ()) or ("hey_robot.skill_os.builtins",)
         ),
         enabled=tuple(getattr(skills_config, "enabled", ()) or ()),
-    )
-
-
-def _contract_to_robot_spec(spec: SkillSpec) -> RobotSkillSpec:
-    level = "semantic" if spec.agent_visible else "primitive"
-    return RobotSkillSpec(
-        name=spec.name,
-        description=spec.description,
-        level=level,
-        agent_visible=spec.agent_visible,
-        category=spec.category,
-        input_schema=dict(spec.input_schema),
-        supported_robots=tuple(spec.supported_robots),
-        required_model_service=spec.required_model_service,
-        driver_primitives=tuple(spec.driver_primitives),
-        safety_level=spec.safety_level,
-        required_resources=tuple(spec.required_resources),
-        preconditions=tuple(spec.preconditions),
-        success_criteria=tuple(spec.success_criteria),
-        failure_modes=tuple(spec.failure_modes),
-        recovery_hints=tuple(spec.recovery_hints),
-        timeout_sec=float(spec.timeout_sec),
-        interruptible=bool(spec.interruptible),
-        feedback_mode=spec.feedback_mode,
-        refresh_observation=bool(spec.refresh_observation),
-        capability_type=spec.capability_type,
-        goal_effects=tuple(spec.goal_effects),
-        evidence_outputs=tuple(spec.evidence_outputs),
-        cannot_satisfy=tuple(spec.cannot_satisfy),
     )

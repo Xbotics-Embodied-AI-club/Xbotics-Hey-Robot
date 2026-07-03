@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import Any, Protocol, cast
 
+from hey_robot.contracts import SkillContractCatalog
 from hey_robot.foundation.catalog.models import (
-    CapabilityManifest,
-    RobotSkillCapability,
-    ToolCapability,
+    RobotSkillSurface,
+    SkillSurfaceManifest,
+    ToolSurface,
 )
-from hey_robot.protocol import RobotSkillCatalog
 
 
 class ToolRegistryLike(Protocol):
@@ -19,18 +19,21 @@ class RuntimeSkillCatalogLike(Protocol):
 
 
 class RobotSkillRegistryLike(Protocol):
-    def robot_skill_catalog(self) -> RobotSkillCatalog: ...
+    def robot_skill_catalog(self) -> SkillContractCatalog: ...
 
 
-class CapabilityLoader:
-    """Build the current agent capability inventory from runtime components."""
+class SkillSurfaceLoader:
+    """Build the current agent tool and skill surface from runtime components."""
 
     def __init__(
         self,
         *,
         tools: ToolRegistryLike | None = None,
         robot_skills: (
-            RobotSkillRegistryLike | RuntimeSkillCatalogLike | RobotSkillCatalog | None
+            RobotSkillRegistryLike
+            | RuntimeSkillCatalogLike
+            | SkillContractCatalog
+            | None
         ) = None,
     ) -> None:
         self.tools = tools
@@ -40,21 +43,21 @@ class CapabilityLoader:
         self,
         *,
         robot_type: str | None = None,
-    ) -> CapabilityManifest:
-        return CapabilityManifest(
+    ) -> SkillSurfaceManifest:
+        return SkillSurfaceManifest(
             tools=self._tools(),
-            robot_skill_actions=self._robot_skills(robot_type),
+            robot_skills=self._robot_skills(robot_type),
             robot_type=robot_type,
         )
 
-    def _tools(self) -> tuple[ToolCapability, ...]:
+    def _tools(self) -> tuple[ToolSurface, ...]:
         if self.tools is None:
             return ()
-        capabilities = []
+        surfaces = []
         for item in self.tools.list_tools():
             annotations = _mapping(item.get("annotations"))
-            capabilities.append(
-                ToolCapability(
+            surfaces.append(
+                ToolSurface(
                     name=str(item.get("name") or ""),
                     source=str(annotations.get("source") or "local"),
                     description=str(item.get("description") or ""),
@@ -64,14 +67,14 @@ class CapabilityLoader:
                     destructive=bool(annotations.get("destructiveHint", False)),
                 )
             )
-        return tuple(capabilities)
+        return tuple(surfaces)
 
-    def _robot_skills(self, robot_type: str | None) -> tuple[RobotSkillCapability, ...]:
+    def _robot_skills(self, robot_type: str | None) -> tuple[RobotSkillSurface, ...]:
         if self.robot_skills is None:
             return ()
-        if isinstance(self.robot_skills, RobotSkillCatalog):
+        if isinstance(self.robot_skills, SkillContractCatalog):
             return tuple(
-                RobotSkillCapability(
+                RobotSkillSurface(
                     name=item.name,
                     description=item.description,
                     input_schema=item.input_schema,
@@ -88,11 +91,18 @@ class CapabilityLoader:
                 )
                 for item in self.robot_skills.list(robot_type=robot_type)
             )
+        runtime_catalog = getattr(self.robot_skills, "catalog", None)
+        if callable(runtime_catalog):
+            try:
+                catalog = runtime_catalog(enabled_only=True)
+            except TypeError:
+                catalog = runtime_catalog()
+            return self._runtime_catalog_skills(catalog)
         robot_skill_catalog = getattr(self.robot_skills, "robot_skill_catalog", None)
         if callable(robot_skill_catalog):
             catalog = robot_skill_catalog()
             return tuple(
-                RobotSkillCapability(
+                RobotSkillSurface(
                     name=item.name,
                     description=item.description,
                     input_schema=item.input_schema,
@@ -116,9 +126,9 @@ class CapabilityLoader:
     def _runtime_catalog_skills(
         self,
         catalog: RuntimeSkillCatalogLike,
-    ) -> tuple[RobotSkillCapability, ...]:
+    ) -> tuple[RobotSkillSurface, ...]:
         return tuple(
-            RobotSkillCapability(
+            RobotSkillSurface(
                 name=item.name,
                 description=item.description,
                 input_schema=item.input_schema,

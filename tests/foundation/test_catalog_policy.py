@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from hey_robot.foundation.catalog import CapabilityPolicy, CapabilityPolicySet
+from hey_robot.foundation.catalog import ToolPolicy, ToolPolicySet
 
 
-def test_capability_policy_from_dict_roundtrip_and_mode_override() -> None:
-    policy_set = CapabilityPolicySet.from_dict(
+def test_tool_policy_from_dict_roundtrip_and_mode_override() -> None:
+    policy_set = ToolPolicySet.from_dict(
         {
             "allow_tools": ["get_robot_status"],
             "require_approval_for": ["actuate"],
@@ -25,8 +25,8 @@ def test_capability_policy_from_dict_roundtrip_and_mode_override() -> None:
     assert manual_policy.allow_tools == ("move_base",)
 
 
-def test_capability_policy_decision_paths_cover_ask_deny_and_allow() -> None:
-    policy = CapabilityPolicy.from_dict(
+def test_tool_policy_decision_paths_cover_ask_deny_and_allow() -> None:
+    policy = ToolPolicy.from_dict(
         {
             "allow_tools": [
                 "move_base",

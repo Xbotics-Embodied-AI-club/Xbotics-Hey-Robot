@@ -4,11 +4,11 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 from hey_robot.foundation.catalog.policy import (
-    CapabilityPolicy,
-    CapabilityPolicyDecision,
+    ToolPolicy,
+    ToolPolicyDecision,
 )
 
-CapabilityDecisionBehavior = Literal["allow", "deny", "ask"]
+ToolPolicyDecisionBehavior = Literal["allow", "deny", "ask"]
 
 
 class ToolSpecLike(Protocol):
@@ -36,8 +36,8 @@ class ToolRegistryLike(Protocol):
 
 
 @dataclass(frozen=True)
-class CapabilityResolution:
-    behavior: CapabilityDecisionBehavior
+class ToolPolicyResolution:
+    behavior: ToolPolicyDecisionBehavior
     reason: str
     rule: str
     tool: ToolSpecLike | None = None
@@ -50,22 +50,22 @@ class CapabilityResolution:
         return self.behavior == "allow"
 
 
-class CapabilityResolver:
-    """Resolve whether a runtime capability may be used in the current context."""
+class ToolPolicyResolver:
+    """Resolve whether a runtime tool may be used in the current context."""
 
     def __init__(
-        self, registry: ToolRegistryLike, *, policy: CapabilityPolicy | None = None
+        self, registry: ToolRegistryLike, *, policy: ToolPolicy | None = None
     ) -> None:
         self.registry = registry
-        self.policy = policy or CapabilityPolicy()
+        self.policy = policy or ToolPolicy()
 
     def resolve(
         self, name: str, *, context: dict[str, Any] | None = None
-    ) -> CapabilityResolution:
+    ) -> ToolPolicyResolution:
         try:
             tool = self.registry.get_tool(name)
         except ValueError as exc:
-            return CapabilityResolution(
+            return ToolPolicyResolution(
                 behavior="deny",
                 reason=str(exc),
                 rule="tool_exists",
@@ -81,9 +81,9 @@ class CapabilityResolver:
 
 
 def _resolution_from_decision(
-    decision: CapabilityPolicyDecision, tool: ToolSpecLike
-) -> CapabilityResolution:
-    return CapabilityResolution(
+    decision: ToolPolicyDecision, tool: ToolSpecLike
+) -> ToolPolicyResolution:
+    return ToolPolicyResolution(
         behavior=decision.behavior,
         reason=decision.reason,
         rule=decision.rule,

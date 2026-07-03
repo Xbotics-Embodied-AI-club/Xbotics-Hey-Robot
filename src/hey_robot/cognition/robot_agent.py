@@ -18,7 +18,7 @@ from hey_robot.cognition.types import AgentCoreResult, AgentTurnInput, RobotSnap
 from hey_robot.config import DeploymentConfig
 from hey_robot.events import EventKind, RuntimeEvent
 from hey_robot.events.bus import BusEventPublisher
-from hey_robot.foundation.catalog.models import CapabilityManifest
+from hey_robot.foundation.catalog.models import SkillSurfaceManifest
 from hey_robot.logging import HeyRobotLogger
 from hey_robot.protocol import (
     AgentReply,
@@ -99,12 +99,12 @@ class RobotAgentService:
         self.skill_lease_timeout_sec = runtime.skill_lease_timeout_sec
         self.core = runtime.core
         self.loop = runtime.loop
-        self.capabilities = runtime.capabilities
+        self.skill_surface = runtime.skill_surface
         self.skill_result_handler = SkillResultHandler(self)
 
-    def capability_manifest(self) -> CapabilityManifest:
+    def skill_surface_manifest(self) -> SkillSurfaceManifest:
         robot_type = self.core._configured_robot_type()
-        return self.capabilities.build(robot_type=robot_type)
+        return self.skill_surface.build(robot_type=robot_type)
 
     async def start(self) -> None:
         logger.info(
@@ -457,9 +457,9 @@ class RobotAgentService:
         proposal: dict[str, Any],
         snapshot: RobotSnapshot,
     ) -> None:
-        capability = str(proposal.get("capability") or "").strip()
+        skill = str(proposal.get("skill") or "").strip()
         objective = str(proposal.get("objective") or "").strip()
-        if not capability or not objective:
+        if not skill or not objective:
             return
         raw_slots = proposal.get("slots")
         slots: dict[str, Any] = dict(raw_slots) if isinstance(raw_slots, dict) else {}
@@ -482,7 +482,7 @@ class RobotAgentService:
         )
         self.core._refresh_tool_context()
         args: dict[str, Any] = {
-            "capability": capability,
+            "skill": skill,
             "objective": objective,
             "slots": slots,
             "interrupt": interrupt,
@@ -493,7 +493,7 @@ class RobotAgentService:
         self.core._turn_submitted_skill_id = None
         try:
             result_text = await self.core.request_skill(
-                capability,
+                skill,
                 objective,
                 slots=slots,
                 interrupt=interrupt,
@@ -501,7 +501,7 @@ class RobotAgentService:
                 confirmed=True,
             )
             skill_id = getattr(self.core, "_turn_submitted_skill_id", None)
-            reply_text = _confirmed_capability_reply(capability)
+            reply_text = _confirmed_skill_reply(skill)
             result = AgentCoreResult(
                 reply_text=reply_text,
                 skill_submitted=True,
@@ -512,7 +512,7 @@ class RobotAgentService:
                     "args": args,
                     "result": result_text,
                     "skill_id": skill_id,
-                    "stop_reason": "confirmed_capability",
+                    "stop_reason": "confirmed_skill",
                     "confirmed_proposal": True,
                     "proposal_id": proposal.get("proposal_id"),
                 },
@@ -524,7 +524,7 @@ class RobotAgentService:
                 args=args,
                 result=result_text,
                 success=False,
-            ) or _confirmed_capability_failure_reply(capability)
+            ) or _confirmed_skill_failure_reply(skill)
             result = AgentCoreResult(
                 reply_text=reply_text,
                 skill_submitted=False,
@@ -535,7 +535,7 @@ class RobotAgentService:
                     "args": args,
                     "result": result_text,
                     "skill_id": None,
-                    "stop_reason": "confirmed_capability_failed",
+                    "stop_reason": "confirmed_skill_failed",
                     "confirmed_proposal": True,
                     "proposal_id": proposal.get("proposal_id"),
                 },
@@ -862,14 +862,14 @@ class RobotAgentService:
             await self._handle_user_turn_locked(pending, replayed=True)
 
 
-def _confirmed_capability_reply(capability: str) -> str:
-    if capability == "human_follow":
+def _confirmed_skill_reply(skill: str) -> str:
+    if skill == "human_follow":
         return "好的，已启动跟随模式。"
     return "好的，已开始执行。"
 
 
-def _confirmed_capability_failure_reply(capability: str) -> str:
-    if capability == "human_follow":
+def _confirmed_skill_failure_reply(skill: str) -> str:
+    if skill == "human_follow":
         return "跟随模式没有成功启动，我会保持原地。"
     return "这个动作没有成功启动。"
 

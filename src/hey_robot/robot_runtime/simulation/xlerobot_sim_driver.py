@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 
+from hey_robot.contracts import SkillContractRuntime
 from hey_robot.logging import HeyRobotLogger
 from hey_robot.protocol import (
     Envelope,
@@ -18,7 +19,6 @@ from hey_robot.protocol import (
     RobotSkillAction,
     RobotSkillResult,
     RobotStatus,
-    SkillContractRuntime,
 )
 from hey_robot.robot_runtime.base import (
     RobotCapabilities,

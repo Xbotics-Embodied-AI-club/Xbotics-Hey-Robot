@@ -5,7 +5,7 @@ from typing import Any
 
 
 @dataclass(frozen=True)
-class ToolCapability:
+class ToolSurface:
     name: str
     source: str
     description: str = ""
@@ -27,7 +27,7 @@ class ToolCapability:
 
 
 @dataclass(frozen=True)
-class RobotSkillCapability:
+class RobotSkillSurface:
     name: str
     description: str = ""
     input_schema: dict[str, Any] = field(default_factory=dict)
@@ -61,15 +61,13 @@ class RobotSkillCapability:
 
 
 @dataclass(frozen=True)
-class CapabilityManifest:
-    tools: tuple[ToolCapability, ...] = ()
-    robot_skill_actions: tuple[RobotSkillCapability, ...] = ()
+class SkillSurfaceManifest:
+    tools: tuple[ToolSurface, ...] = ()
+    robot_skills: tuple[RobotSkillSurface, ...] = ()
     robot_type: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "tools": [item.to_dict() for item in self.tools],
-            "robot_skill_actions": [
-                item.to_dict() for item in self.robot_skill_actions
-            ],
+            "robot_skills": [item.to_dict() for item in self.robot_skills],
         }

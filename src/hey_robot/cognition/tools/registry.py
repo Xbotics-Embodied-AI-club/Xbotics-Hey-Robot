@@ -3,7 +3,7 @@
 The single :class:`ToolRegistry` for robot agent tools.  Stores
 :class:`~hey_robot.cognition.tools.base.Tool` instances and exposes
 :class:`~hey_robot.cognition.runtime.registry.ToolSpec` objects to the
-capability / permission / execution pipeline.
+tool policy / permission / execution pipeline.
 """
 
 from __future__ import annotations

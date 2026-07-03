@@ -15,7 +15,7 @@ class ToolSpec:
     """Immutable description of one agent tool.
 
     Produced by :class:`~hey_robot.cognition.tools.base.Tool.to_spec` and
-    consumed by the capability / permission / execution pipeline.
+    consumed by the tool policy / permission / execution pipeline.
     """
 
     name: str

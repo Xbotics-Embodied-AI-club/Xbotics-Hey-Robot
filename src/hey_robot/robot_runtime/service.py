@@ -6,13 +6,13 @@ from typing import Any
 
 from hey_robot.bus.factory import create_bus_client
 from hey_robot.config import DeploymentConfig
+from hey_robot.contracts import SkillContractCatalog
 from hey_robot.events import EventKind, RuntimeEvent, Severity
 from hey_robot.events.bus import BusEventPublisher
 from hey_robot.logging import HeyRobotLogger
 from hey_robot.protocol import (
     RobotAction,
     RobotObservation,
-    RobotSkillCatalog,
     RobotStatus,
     Topics,
 )
@@ -33,7 +33,7 @@ class RobotService:
         self,
         config: DeploymentConfig,
         *,
-        skill_catalog: RobotSkillCatalog | None = None,
+        skill_catalog: SkillContractCatalog | None = None,
     ) -> None:
         self.config = config
         self.topics = Topics()
@@ -88,7 +88,7 @@ class RobotService:
                     source="robot",
                     robot_id=runtime.robot_id,
                     payload={
-                        "capabilities": capabilities.__dict__,
+                        "skill-surface": capabilities.__dict__,
                         "health": health.__dict__,
                     },
                 )

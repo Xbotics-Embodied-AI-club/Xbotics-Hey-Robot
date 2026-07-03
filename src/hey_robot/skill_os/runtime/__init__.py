@@ -3,11 +3,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from hey_robot.contracts import (
+    SkillContract,
+    SkillContractDecision,
+    SkillContractRuntime,
+)
 from hey_robot.protocol import RobotStatus
 from hey_robot.skill_os.base import SkillResult
-from hey_robot.skill_os.catalog import RobotSkillSpec
 from hey_robot.skill_os.context import SkillContext
-from hey_robot.skill_os.contracts import SkillContractDecision, SkillContractRuntime
 from hey_robot.skill_os.registry import SkillRegistry
 from hey_robot.skill_os.runtime.ports import (
     ModelServiceRuntimePort,
@@ -34,7 +37,7 @@ class SkillRuntime:
         enabled_only: bool = True,
         status: RobotStatus | None = None,
         robot_type: str | None = None,
-    ) -> tuple[RobotSkillSpec, SkillContractDecision]:
+    ) -> tuple[SkillContract, SkillContractDecision]:
         registered = self.registry.get(name, enabled_only=enabled_only)
         if registered.skill is None:
             raise KeyError(f"skill {name!r} is not backed by a plugin implementation")

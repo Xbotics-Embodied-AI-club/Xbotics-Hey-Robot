@@ -6,7 +6,7 @@ import sys
 
 from hey_robot.config import DeploymentConfig
 from hey_robot.config.validation import validate_deployment
-from hey_robot.foundation.catalog import CapabilityLoader
+from hey_robot.foundation.catalog import SkillSurfaceLoader
 from hey_robot.skill_os.registry import registry_from_config
 
 
@@ -38,15 +38,15 @@ def main() -> None:
     parser.add_argument(
         "section",
         nargs="?",
-        choices=["deployment", "capabilities"],
+        choices=["deployment", "skill-surface"],
         default="deployment",
     )
     parser.add_argument("--config", required=True, help="部署配置 YAML 路径")
     args = parser.parse_args()
 
     config = DeploymentConfig.from_yaml(args.config)
-    if args.section == "capabilities":
-        manifest = CapabilityLoader(robot_skills=registry_from_config(config)).build()
+    if args.section == "skill-surface":
+        manifest = SkillSurfaceLoader(robot_skills=registry_from_config(config)).build()
         sys.stdout.write(
             json.dumps(manifest.to_dict(), ensure_ascii=False, indent=2) + "\n"
         )

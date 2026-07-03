@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from hey_robot.config import DeploymentConfig
-from hey_robot.protocol import RobotSkillCatalog
+from hey_robot.contracts import SkillContractCatalog
 from hey_robot.robot_runtime.base import RobotDriver, RobotDriverContext
 from hey_robot.robot_runtime.embodiments import get_embodiment_profile
 from hey_robot.robot_runtime.lekiwi import LeKiwiDriver
@@ -16,7 +16,7 @@ class RobotManager:
         self,
         config: DeploymentConfig,
         *,
-        skill_catalog: RobotSkillCatalog | None = None,
+        skill_catalog: SkillContractCatalog | None = None,
     ) -> None:
         self.config = config
         self.skill_catalog = skill_catalog

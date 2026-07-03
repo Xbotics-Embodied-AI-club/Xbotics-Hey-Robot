@@ -3,31 +3,22 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import asdict
-from pathlib import Path
 from typing import Any, cast
 
-from hey_robot.cognition.autonomy import AutonomyManager
 from hey_robot.cognition.command_router import CommandRouter, RoutedCommand
+from hey_robot.cognition.core_builder import RobotAgentCoreBuilder
 from hey_robot.cognition.execution_feedback import (
-    DefaultExecutionFeedbackEvaluator,
     ExecutionFeedbackEvaluator,
     ImageResolver,
-    VisionExecutionFeedbackEvaluator,
-    image_resolver_from_root,
 )
 from hey_robot.cognition.io import AgentIO
 from hey_robot.cognition.memory import MemoryRuntime
 from hey_robot.cognition.memory_context import RobotMemoryContextBuilder
-from hey_robot.cognition.runtime import AgentRuntime, AgentRuntimeInput, ToolRegistry
+from hey_robot.cognition.runtime import AgentRuntimeInput
 from hey_robot.cognition.runtime.grounding import is_perception_skill_name
-from hey_robot.cognition.runtime.prompts import (
-    AgentPromptTemplates,
-    load_agent_prompt_templates,
-)
 from hey_robot.cognition.runtime.response_policy import (
     looks_like_internal_agent_protocol,
 )
-from hey_robot.cognition.runtime.safety import RobotSafetyHook
 from hey_robot.cognition.scene_evidence import reusable_scene_evidence_result
 from hey_robot.cognition.skill_gateway import (
     SkillGateway,
@@ -37,21 +28,14 @@ from hey_robot.cognition.skill_gateway import (
 from hey_robot.cognition.skill_state import SkillStateMachine
 from hey_robot.cognition.task_safety import evaluate_user_task
 from hey_robot.cognition.tool_binding import bind_agent_tools
-from hey_robot.cognition.turn_modes import decide_turn_mode
 from hey_robot.cognition.types import AgentCoreResult, AgentTurnInput, RobotSnapshot
 from hey_robot.config import AgentSpec
-from hey_robot.foundation.catalog.loader import CapabilityLoader
-from hey_robot.foundation.catalog.models import CapabilityManifest
-from hey_robot.foundation.catalog.policy import CapabilityPolicySet
-from hey_robot.foundation.catalog.resolver import CapabilityResolver
+from hey_robot.foundation.catalog.loader import SkillSurfaceLoader
+from hey_robot.foundation.catalog.models import SkillSurfaceManifest
 from hey_robot.logging import HeyRobotLogger
 from hey_robot.protocol import Envelope, SkillIntent, SkillResult
-from hey_robot.providers import ReasoningProvider, build_provider
-from hey_robot.providers.base import UnconfiguredReasoningProvider
+from hey_robot.providers import ReasoningProvider
 from hey_robot.robot_runtime.identity import resolve_robot_family
-from hey_robot.skill_os.base import SkillCatalog
-from hey_robot.skill_os.registry import registry_from_config
-from hey_robot.templates.loader import TemplateStore
 from hey_robot.user_reply import present_tool_result_for_user
 
 logger = HeyRobotLogger(name="core")
@@ -78,19 +62,29 @@ class RobotAgentCore:
         self.spec = spec
         self.io = io
         self.media_resolver = media_resolver
-        self.provider: ReasoningProvider = provider or self._build_provider("agent")
-        self.skill_catalog = self._configured_skill_catalog()
+        self.builder = RobotAgentCoreBuilder(agent_id=agent_id, spec=spec)
+        self.provider: ReasoningProvider = provider or self.builder.build_provider(
+            "agent"
+        )
+        self.skill_catalog = self.builder.configured_skill_catalog()
         self.skill_state = SkillStateMachine()
         self.last_submitted_skill_id: str | None = None
         self._turn_submitted_skill_id: str | None = None
         self.last_feedback_summary: str | None = None
         self.last_next_hint: str | None = None
-        self.runtime = self._build_runtime()
-        self.feedback_evaluator = feedback_evaluator or self._build_feedback_evaluator()
+        self.runtime = self.builder.build_runtime(
+            self.provider,
+            status_snapshot_provider=self._status_snapshot_for_safety,
+        )
+        self.feedback_evaluator = (
+            feedback_evaluator or self.builder.build_feedback_evaluator()
+        )
         self.command_router = CommandRouter()
         self._pending_skills: dict[str, asyncio.Future[str]] = {}
         self._current_tool_call_start = 0
         self._last_contact_envelope: Envelope | None = None
+        from hey_robot.cognition.autonomy import AutonomyManager
+
         self.autonomy = AutonomyManager(
             max_events=int(self.spec.settings.get("autonomy", {}).get("max_events", 50))
             if isinstance(self.spec.settings.get("autonomy"), dict)
@@ -102,7 +96,7 @@ class RobotAgentCore:
             ),
         )
         self.memory = MemoryRuntime.from_path(
-            self._memory_path(), autonomy=self.autonomy
+            self.builder.memory_path(), autonomy=self.autonomy
         )
         self.runtime.memory = self.memory
         self.memory_context_builder = RobotMemoryContextBuilder(
@@ -125,7 +119,7 @@ class RobotAgentCore:
             None  # ToolContext 鈥?populated by _register_tools when class-based
         )
         self._register_tools()
-        self.capabilities = CapabilityLoader(
+        self.skill_surface = SkillSurfaceLoader(
             tools=self.runtime.tools, robot_skills=self.skill_catalog
         )
 
@@ -135,8 +129,8 @@ class RobotAgentCore:
     async def close(self) -> None:
         return None
 
-    def capability_manifest(self) -> CapabilityManifest:
-        return self.capabilities.build(robot_type=self._configured_robot_type())
+    def skill_surface_manifest(self) -> SkillSurfaceManifest:
+        return self.skill_surface.build(robot_type=self._configured_robot_type())
 
     async def handle_turn(self, payload: AgentTurnInput) -> AgentCoreResult:
         self.bind_turn_context(payload)
@@ -148,10 +142,6 @@ class RobotAgentCore:
             f"开始处理 turn：agent={self.agent_id} task_len={len(payload.turn.text)} "
             f"robot={payload.turn.envelope.robot_id} mode={self.spec.settings.get('mode', 'agent')}"
         )
-        mode = decide_turn_mode(self.spec, payload.turn)
-        if mode.is_direct:
-            return await self._direct_turn(payload)
-
         safety_decision = evaluate_user_task(
             payload.turn.text,
             channel=payload.turn.envelope.channel,
@@ -236,7 +226,7 @@ class RobotAgentCore:
             f"turn 完成判定：agent={self.agent_id} tool={result.tool} "
             f"stop_reason={result.stop_reason} reply_len={len(reply_text or '')} "
             f"task_finished={task_finished} "
-            f"capability_calls_in_turn={len(self.runtime.state.tool_calls) - tool_call_start}"
+            f"skill_calls_in_turn={len(self.runtime.state.tool_calls) - tool_call_start}"
         )
         return AgentCoreResult(
             reply_text=reply_text,
@@ -259,7 +249,7 @@ class RobotAgentCore:
         try:
             result_text = await self.skill_gateway.submit(
                 SkillGatewayRequest(
-                    skill=command.capability,
+                    skill=command.skill,
                     objective=command.objective,
                     slots=command.slots,
                     interrupt=command.interrupt,
@@ -269,7 +259,7 @@ class RobotAgentCore:
                         "command_router": True,
                     },
                     result_prefix="command",
-                    enforce_motion_guards=command.capability
+                    enforce_motion_guards=command.skill
                     not in {"stop_motion", "reset_posture"},
                     confirmed=True,
                 )
@@ -282,7 +272,7 @@ class RobotAgentCore:
                 tool="request_skill",
                 metadata={
                     "tool": "request_skill",
-                    "skill": command.capability,
+                    "skill": command.skill,
                     "stop_reason": "command_router_failed",
                     "error": str(exc),
                 },
@@ -295,7 +285,7 @@ class RobotAgentCore:
             metadata={
                 "tool": "request_skill",
                 "args": {
-                    "skill": command.capability,
+                    "skill": command.skill,
                     "objective": command.objective,
                     "slots": command.slots,
                     "interrupt": command.interrupt,
@@ -328,20 +318,19 @@ class RobotAgentCore:
             return False
         if looks_like_internal_agent_protocol(str(result.result or "")):
             return False
-        capability_calls = [
+        skill_calls = [
             record
             for record in self.runtime.state.tool_calls[tool_call_start:]
             if record.name == "request_skill" and record.success
         ]
-        if not capability_calls:
-            logger.debug("final_response 无 capability 调用，视为任务完成")
+        if not skill_calls:
+            logger.debug("final_response 无 skill 调用，视为任务完成")
             return True
         decision = self._latest_feedback_allows_task_completion(
             tool_call_start, final_response=True
         )
         logger.debug(
-            f"latest_feedback 判定：decision={decision} "
-            f"capability_count={len(capability_calls)}"
+            f"latest_feedback 判定：decision={decision} skill_count={len(skill_calls)}"
         )
         return decision
 
@@ -351,16 +340,16 @@ class RobotAgentCore:
         for record in reversed(self.runtime.state.tool_calls[tool_call_start:]):
             if record.name != "request_skill" or not record.success:
                 continue
-            capability = str(record.arguments.get("capability") or "").strip()
+            skill = str(record.arguments.get("skill") or "").strip()
             parsed = self._parse_agent_feedback(record.result)
             if parsed is None:
                 logger.debug(
-                    f"feedback 无法解析（非标准格式），允许完成。capability={capability}"
+                    f"feedback 无法解析（非标准格式），允许完成。skill={skill}"
                 )
                 return True
-            is_perception = is_perception_skill_name(capability)
+            is_perception = is_perception_skill_name(skill)
             logger.debug(
-                f"feedback 解析成功：capability={capability} "
+                f"feedback 解析成功：skill={skill} "
                 f"task_success={parsed.get('task_success')} "
                 f"subgoal_success={parsed.get('subgoal_success')} "
                 f"recommended_action={parsed.get('recommended_action')} "
@@ -370,7 +359,7 @@ class RobotAgentCore:
                 result = (
                     final_response
                     and parsed.get("subgoal_success") is True
-                    and bool(capability)
+                    and bool(skill)
                 )
                 logger.debug(f"task_success=False 分支：返回 {result}")
                 return result
@@ -398,118 +387,6 @@ class RobotAgentCore:
         self.last_submitted_skill_id = skill.skill_id
         self._turn_submitted_skill_id = skill.skill_id
         self.skill_state.submit(skill)
-
-    async def _direct_turn(self, payload: AgentTurnInput) -> AgentCoreResult:
-        if payload.block_actuation:
-            return AgentCoreResult(
-                reply_text="Recovery is required before submitting a new skill.",
-                skill_submitted=False,
-                tool="wait",
-                metadata={"recovery_required": True},
-            )
-        skill = await self.skill_gateway.submit_direct(
-            objective=payload.turn.text,
-            slots={"objective": payload.turn.text, "interrupt": False},
-            metadata=dict(payload.turn.metadata),
-        )
-        return AgentCoreResult(
-            reply_text="Skill submitted. Waiting for execution feedback.",
-            skill_submitted=True,
-            tool="request_skill",
-            metadata={"skill_id": skill.skill_id, "status": "skill_issued"},
-        )
-
-    def _build_runtime(self) -> AgentRuntime:
-        safety_cfg = self.spec.settings.get("safety", {})
-        safety_enabled = (
-            bool(safety_cfg.get("enabled", False))
-            if isinstance(safety_cfg, dict)
-            else False
-        )
-        capability_policy = CapabilityPolicySet.from_dict(
-            self.spec.settings.get("capability_policy")
-        ).for_mode(str(self.spec.settings.get("mode", "agent")))
-        tool_registry = ToolRegistry()
-        return AgentRuntime(
-            self.provider,
-            max_iterations=int(self.spec.settings.get("max_iterations", 8)),
-            provider_timeout_sec=float(
-                self.spec.settings.get("provider_timeout_sec", 300.0)
-            ),
-            turn_timeout_sec=float(self.spec.settings.get("turn_timeout_sec", 120.0)),
-            tool_registry=tool_registry,
-            permission_mode=self.spec.settings.get("permission_mode", "autonomous"),
-            hooks=[RobotSafetyHook(self._status_snapshot_for_safety)]
-            if safety_enabled
-            else [],
-            capability_resolver=CapabilityResolver(
-                tool_registry, policy=capability_policy
-            ),
-            prompt_templates=self._load_prompt_templates(),
-        )
-
-    def _load_prompt_templates(self) -> AgentPromptTemplates:
-        return load_agent_prompt_templates(
-            template_root=self._template_root(),
-            soul_path=self.spec.settings.get("soul_path"),
-        )
-
-    def _template_root(self) -> str | Path:
-        config = self.spec.settings.get("_deployment_config")
-        runtime_dir = (
-            Path(config.resources.runtime_dir)
-            if config is not None
-            else Path("runtime")
-        )
-        return self.spec.settings.get("template_root") or runtime_dir / "templates"
-
-    def _memory_path(self) -> Path:
-        config = self.spec.settings.get("_deployment_config")
-        runtime_dir = (
-            Path(config.resources.runtime_dir)
-            if config is not None
-            else Path("runtime")
-        )
-        return Path(
-            self.spec.settings.get("long_term_memory_path")
-            or runtime_dir / "memory" / "long_term.jsonl"
-        )
-
-    def _build_provider(self, purpose: str) -> ReasoningProvider:
-        if purpose == "agent" and self._direct_mode():
-            return UnconfiguredReasoningProvider(
-                "planner provider is not used in direct mode"
-            )
-        config = self.spec.settings.get("_deployment_config")
-        if config is None:
-            raise ValueError(
-                f"agent [{self.agent_id}] requires an explicit {purpose} provider configuration; "
-                "deterministic fallback has been removed from runtime"
-            )
-        return build_provider(config, self.agent_id, purpose=purpose)
-
-    def _build_feedback_evaluator(self) -> ExecutionFeedbackEvaluator:
-        cfg = self.spec.settings.get("execution_feedback") or {}
-        if not isinstance(cfg, dict):
-            cfg = {}
-        templates = TemplateStore(self._template_root())
-        media_root = str(
-            cfg.get("media_root")
-            or self.spec.settings.get("media_root")
-            or "runtime/media"
-        )
-        resolver = image_resolver_from_root(media_root)
-        backend = str(cfg.get("backend", "status")).lower()
-        vision_backend: ExecutionFeedbackEvaluator | None = None
-        if backend in {"provider", "vlm", "vision", "scene"}:
-            vision_backend = VisionExecutionFeedbackEvaluator(
-                self._build_provider("feedback"),
-                image_resolver=resolver,
-                templates=templates,
-            )
-        return DefaultExecutionFeedbackEvaluator(
-            status_backend=backend, vision_backend=vision_backend
-        )
 
     def _register_tools(self) -> None:
         """Register tools via auto-discovery from the ``agents.tools`` package."""
@@ -776,23 +653,6 @@ class RobotAgentCore:
             )
         return "\n".join(lines)
 
-    def _configured_skill_catalog(self) -> SkillCatalog:
-        config = self.spec.settings.get("_deployment_config")
-        enabled_only = bool(getattr(getattr(config, "skills", None), "enabled", ()))
-        if config is None:
-            enabled_only = False
-        catalog = registry_from_config(config).catalog(
-            enabled_only=enabled_only,
-        )
-        mode = (
-            getattr(getattr(config, "skills", None), "mode", "production")
-            if config is not None
-            else "production"
-        )
-        if mode == "production" and enabled_only:
-            catalog = catalog.semantic_skills()
-        return catalog
-
     @staticmethod
     def _fallback_reply_for_unfinished_turn(result: Any) -> str:
         reason = str(result.result or result.reason or result.stop_reason or "").strip()
@@ -842,9 +702,6 @@ class RobotAgentCore:
 
     def _current_envelope(self):
         return self._current_turn.envelope
-
-    def _direct_mode(self) -> bool:
-        return str(self.spec.settings.get("mode", "agent")).lower() == "direct"
 
     def _next_hint(self) -> str | None:
         return self.last_next_hint

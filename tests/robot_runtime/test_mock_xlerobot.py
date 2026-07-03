@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from hey_robot.config import DeploymentConfig
+from hey_robot.contracts import SkillContract, SkillContractCatalog
 from hey_robot.protocol import (
     Envelope,
     RobotAction,
     RobotSkillAction,
-    RobotSkillCatalog,
-    RobotSkillSpec,
     SkillIntent,
 )
 from hey_robot.robot_runtime import RobotManager, RobotRuntime
@@ -23,40 +22,40 @@ def _runtime(tmp_path, settings: dict | None = None) -> RobotRuntime:
     )
 
 
-def _test_skill_catalog() -> RobotSkillCatalog:
-    return RobotSkillCatalog(
+def _test_skill_catalog() -> SkillContractCatalog:
+    return SkillContractCatalog(
         (
-            RobotSkillSpec(
+            SkillContract(
                 name="move_base",
                 description="Move base.",
                 required_resources=("base",),
                 safety_level="motion",
             ),
-            RobotSkillSpec(
+            SkillContract(
                 name="turn_base",
                 description="Turn base.",
                 required_resources=("base",),
                 safety_level="motion",
             ),
-            RobotSkillSpec(
+            SkillContract(
                 name="move_arm_joints",
                 description="Move arm joints.",
                 required_resources=("arm",),
                 safety_level="motion",
             ),
-            RobotSkillSpec(
+            SkillContract(
                 name="set_gripper",
                 description="Set gripper state.",
                 required_resources=("gripper",),
                 safety_level="motion",
             ),
-            RobotSkillSpec(
+            SkillContract(
                 name="inspect_scene",
                 description="Inspect scene.",
                 required_resources=("camera",),
                 safety_level="observe",
             ),
-            RobotSkillSpec(
+            SkillContract(
                 name="stop_motion",
                 description="Stop motion.",
                 required_resources=("robot",),

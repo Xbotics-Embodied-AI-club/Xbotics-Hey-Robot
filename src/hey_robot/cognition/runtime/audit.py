@@ -18,11 +18,11 @@ class ToolAuditRecord:
     duration_sec: float
     permission_behavior: str
     permission_reason: str
-    capability_behavior: str = "allow"
-    capability_reason: str = "not evaluated"
-    capability_rule: str = "none"
-    capability_source: str = ""
-    capability_safety_level: str = ""
+    tool_policy_behavior: str = "allow"
+    tool_policy_reason: str = "not evaluated"
+    tool_policy_rule: str = "none"
+    tool_policy_source: str = ""
+    tool_policy_safety_level: str = ""
     result_preview: str = ""
     error: str | None = None
     task: str | None = None

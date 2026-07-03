@@ -41,6 +41,7 @@ skills:
     - detect_marker
     - move_base
     - turn_base
+    - base_velocity_step
     - human_follow
     - stop_motion
     - reset_posture

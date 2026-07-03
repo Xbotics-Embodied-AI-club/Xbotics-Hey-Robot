@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import cast
 
 from hey_robot.cognition.tools.registry import ToolRegistry
-from hey_robot.foundation.catalog import CapabilityLoader
+from hey_robot.foundation.catalog import SkillSurfaceLoader
 from hey_robot.skill_os import (
     SkillCatalog,
     SkillSpec,
@@ -11,24 +11,24 @@ from hey_robot.skill_os import (
 )
 
 
-def test_capability_loader_empty_manifest_has_only_runtime_capability_sections() -> (
+def test_skill_surface_loader_empty_manifest_has_only_runtime_surface_sections() -> (
     None
 ):
-    payload = CapabilityLoader().build().to_dict()
+    payload = SkillSurfaceLoader().build().to_dict()
 
     assert payload == {
         "tools": [],
-        "robot_skill_actions": [],
+        "robot_skills": [],
     }
 
 
-def test_capability_loader_builds_manifest() -> None:
+def test_skill_surface_loader_builds_manifest() -> None:
     registry = ToolRegistry()
     registry.register_simple(
         "get_robot_status", lambda: "ok", read_only=True, source="local"
     )
 
-    manifest = CapabilityLoader(
+    manifest = SkillSurfaceLoader(
         tools=registry,
         robot_skills=load_skill_registry().catalog(enabled_only=False),
     ).build(robot_type="xlerobot")
@@ -37,30 +37,41 @@ def test_capability_loader_builds_manifest() -> None:
     assert "prompt_skills" not in payload
     assert payload["tools"][0]["name"] == "get_robot_status"
     assert payload["tools"][0]["source"] == "local"
-    names = {item["name"] for item in payload["robot_skill_actions"]}
+    names = {item["name"] for item in payload["robot_skills"]}
     assert "move_base" in names
     assert "turn_base" in names
     assert "vla_manipulation" in names
     assert "foundation_locomotion_run" not in names
 
 
-def test_capability_loader_manifest_exposes_skill_surface_not_backend_implementations() -> (
+def test_skill_surface_loader_manifest_exposes_skill_surface_not_backend_implementations() -> (
     None
 ):
-    payload = CapabilityLoader(robot_skills=load_skill_registry()).build().to_dict()
+    payload = SkillSurfaceLoader(robot_skills=load_skill_registry()).build().to_dict()
 
-    names = {item["name"] for item in payload["robot_skill_actions"]}
+    names = {item["name"] for item in payload["robot_skills"]}
 
     assert "inspect_scene" in names
-    assert "move_base" in names
-    assert "set_gripper" in names
     assert "reset_posture" in names
-    assert "vla_manipulation" in names
+    assert "move_base" not in names
+    assert "set_gripper" not in names
+    assert "detect_marker" not in names
     assert "vln_navigate_run" not in names
     assert "foundation_locomotion_run" not in names
 
 
-def test_capability_loader_normalizes_tool_defaults_and_filters_robot_skills() -> None:
+def test_skill_surface_loader_respects_configured_skill_surface() -> None:
+    registry = load_skill_registry(enabled=("inspect_scene", "human_follow"))
+
+    payload = SkillSurfaceLoader(robot_skills=registry).build().to_dict()
+
+    names = [item["name"] for item in payload["robot_skills"]]
+    assert names == ["inspect_scene", "human_follow"]
+
+
+def test_skill_surface_loader_normalizes_tool_defaults_and_filters_robot_skills() -> (
+    None
+):
     class ToolInventory:
         def list_tools(self) -> list[dict[str, object]]:
             return [{"name": "raw_status", "annotations": "bad-provider-shape"}]
@@ -87,7 +98,7 @@ def test_capability_loader_normalizes_tool_defaults_and_filters_robot_skills() -
     )
 
     payload = (
-        CapabilityLoader(
+        SkillSurfaceLoader(
             tools=cast(ToolRegistry, ToolInventory()), robot_skills=catalog
         )
         .build(robot_type="xlerobot")
@@ -105,7 +116,7 @@ def test_capability_loader_normalizes_tool_defaults_and_filters_robot_skills() -
             "destructive": False,
         }
     ]
-    assert payload["robot_skill_actions"] == [
+    assert payload["robot_skills"] == [
         {
             "name": "visible_xlerobot",
             "description": "Visible only on xlerobot.",

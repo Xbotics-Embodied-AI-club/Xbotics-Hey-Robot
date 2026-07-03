@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from hey_robot.config import RobotSpec
-from hey_robot.protocol import RobotAction, RobotSkillCatalog, RobotStatus
+from hey_robot.contracts import SkillContractCatalog
+from hey_robot.protocol import RobotAction, RobotStatus
 from hey_robot.robot_runtime.embodiments.base import EmbodimentProfile
 from hey_robot.robot_runtime.observations import DriverObservation
 
@@ -15,7 +16,7 @@ class RobotDriverContext:
     spec: RobotSpec
     deployment_id: str
     embodiment: EmbodimentProfile | None = None
-    skill_catalog: RobotSkillCatalog | None = None
+    skill_catalog: SkillContractCatalog | None = None
 
 
 @dataclass(frozen=True)

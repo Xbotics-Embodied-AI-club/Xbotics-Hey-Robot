@@ -48,7 +48,7 @@ class TaskContract:
 @dataclass(frozen=True)
 class EvidenceRecord:
     source_tool: str
-    capability: str
+    skill: str
     capability_type: str
     evidence_type: str
     strength: EvidenceStrength
@@ -58,7 +58,7 @@ class EvidenceRecord:
     def to_dict(self) -> dict[str, Any]:
         return {
             "source_tool": self.source_tool,
-            "capability": self.capability,
+            "skill": self.skill,
             "capability_type": self.capability_type,
             "evidence_type": self.evidence_type,
             "strength": self.strength,
@@ -99,7 +99,7 @@ class EvaluationResult:
         if self.reason:
             lines.append(f"- reason: {self.reason}")
         lines.append(
-            "- instruction: Continue with the next useful capability call, or explain a concrete safety/capability refusal. Do not final-answer as if the task is complete."
+            "- instruction: Continue with the next useful skill call, or explain a concrete safety/skill refusal. Do not final-answer as if the task is complete."
         )
         return "\n".join(lines)
 
@@ -127,15 +127,15 @@ class EvidenceLedger:
         result: str,
         success: bool,
     ) -> None:
-        capability = _tool_capability(tool, args)
-        capability_type = capability_type_for_name(capability, self.semantics)
+        skill = _tool_skill(tool, args)
+        capability_type = capability_type_for_name(skill, self.semantics)
         evidence_type = evidence_type_for_capability_type(
             capability_type, self.semantics
         )
         self.records.append(
             EvidenceRecord(
                 source_tool=tool,
-                capability=capability,
+                skill=skill,
                 capability_type=capability_type,
                 evidence_type=evidence_type,
                 strength=evidence_strength_for_capability_type(capability_type),
@@ -172,7 +172,7 @@ class EvidenceLedger:
         for record in self.records[-limit:]:
             status = "ok" if record.success else "failed"
             lines.append(
-                f"- {record.capability} [{record.capability_type}/{record.evidence_type}/{record.strength}] -> {status}"
+                f"- {record.skill} [{record.capability_type}/{record.evidence_type}/{record.strength}] -> {status}"
             )
         return "\n".join(lines)
 
@@ -458,7 +458,7 @@ def infer_constraints(text: str, capability_type: str) -> dict[str, Any]:
     return {}
 
 
-def _tool_capability(tool: str, args: dict[str, Any]) -> str:
+def _tool_skill(tool: str, args: dict[str, Any]) -> str:
     if tool == "request_skill":
         return str(args.get("skill") or "").strip() or tool
     return tool

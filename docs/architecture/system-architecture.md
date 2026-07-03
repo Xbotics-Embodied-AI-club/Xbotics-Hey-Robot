@@ -196,10 +196,12 @@ LLM 可见的生产工具包括状态查询、任务上下文、感知、记忆�
 - `production`：`skills.enabled` 只能列出 `agent_visible=True` 的 semantic skill。
 - `bringup`：允许把 primitive/implementation skill 直接暴露给 Agent，用于联调。
 
-当前仓库提供的 real/sim 主配置仍使用 `bringup`，并开放 `move_base`、
-`move_arm_joints`、`set_gripper` 等 primitive。它们仍必须经过 SkillGateway 和
-Skill Controller，不等于 LLM 直接写电机值，但也不是最终的纯 semantic production
-surface。
+当前系统仍处于开发和联调阶段，仓库提供的 real/sim 主配置使用 `bringup`。
+这些配置会把 `move_base`、`turn_base`、`base_velocity_step`、`set_arm_pose`、
+`move_arm_joints`、`set_gripper`、`detect_marker` 等底层调试 skill 显式暴露出来，
+便于验证硬件、仿真和 Skill OS 到 Robot Runtime 的完整链路。
+
+最终生产 profile 仍应使用 `production`，只暴露 `agent_visible=True` 的 semantic skill。
 
 ## 6. Foundation Model 层
 
@@ -369,23 +371,24 @@ skill lifecycle 和 recovery。
 
 ## 12. 能力边界
 
-默认 real/sim 配置启用 11 个非 VLA skill：
+默认 real/sim bringup 配置暴露以下非 VLA semantic skill 和底层调试 skill：
 
 ```text
-inspect_scene, look_around, detect_marker,
-move_base, turn_base, human_follow,
+inspect_scene, look_around, human_follow,
 stop_motion, reset_posture,
+detect_marker,
+move_base, turn_base, base_velocity_step,
 set_arm_pose, move_arm_joints, set_gripper
 ```
 
 因此主线系统支持观察、短步底盘运动、视觉人体跟随、安全停止/复位、机械臂命名姿态、
 关节控制和夹爪控制。
 
-实验配置 `xlerobot.sim.vla_vln.yaml` 额外声明：
+实验配置 `xlerobot.sim.vla_vln.yaml` 的 bringup surface 额外声明：
 
 ```text
 navigate_to, approach_object,
-vla_manipulation, pick_object, place_object
+pick_object, place_object
 ```
 
 这些能力需要独立 ModelService，且受前述 VLA/VLN 限制。当前系统不应被描述为已经具备

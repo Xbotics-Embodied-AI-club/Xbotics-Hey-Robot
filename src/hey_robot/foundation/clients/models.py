@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from hey_robot.protocol import RobotSkillSpec, SkillIntent
+from hey_robot.contracts import SkillContract
+from hey_robot.protocol import SkillIntent
 
 
 @dataclass(frozen=True)
@@ -24,8 +25,9 @@ class ServiceHealth:
 class ServiceInvocationRequest:
     service_id: str
     intent: SkillIntent
-    contract: RobotSkillSpec
+    contract: SkillContract
     timeout_sec: float
+    arguments: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

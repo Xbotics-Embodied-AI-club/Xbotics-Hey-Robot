@@ -13,10 +13,10 @@ from hey_robot.cognition.tools.schema import (
 
 @tool_parameters(
     tool_parameters_schema(
-        capability=StringSchema("Robot capability to propose for confirmation."),
+        skill=StringSchema("Robot skill to propose for confirmation."),
         objective=StringSchema("What would be accomplished if confirmed."),
         slots=ObjectSchema(
-            description="Capability slots to use after confirmation", nullable=True
+            description="Skill slots to use after confirmation", nullable=True
         ),
         interrupt=BooleanSchema(
             description="Whether the confirmed action would interrupt current execution"
@@ -24,11 +24,11 @@ from hey_robot.cognition.tools.schema import (
         confirmation_prompt=StringSchema(
             "User-facing question asking for confirmation."
         ),
-        required=["capability", "objective", "confirmation_prompt"],
+        required=["skill", "objective", "confirmation_prompt"],
     )
 )
-class ProposeCapabilityTool(Tool):
-    name = "propose_capability"
+class ProposeSkillTool(Tool):
+    name = "propose_skill"
     description = "Create a task-level pending confirmation and ask the user to confirm before execution."
     safety_level = "communicate"
     read_only = True
@@ -45,17 +45,17 @@ class ProposeCapabilityTool(Tool):
 
     async def execute(
         self,
-        capability: str,
+        skill: str,
         objective: str,
         confirmation_prompt: str,
         slots: dict | None = None,
         interrupt: bool = False,
     ) -> str:
-        capability = (capability or "").strip()
+        skill = (skill or "").strip()
         objective = (objective or "").replace("__TASK__", self._get_task()).strip()
         prompt = (confirmation_prompt or "").strip()
-        if not capability:
-            raise ValueError("capability must not be empty")
+        if not skill:
+            raise ValueError("skill must not be empty")
         if not objective:
             raise ValueError("objective must not be empty")
         if not prompt:
@@ -63,7 +63,7 @@ class ProposeCapabilityTool(Tool):
         envelope = self._current_envelope()
         proposal = {
             "proposal_id": f"proposal_{uuid.uuid4().hex[:16]}",
-            "capability": capability,
+            "skill": skill,
             "objective": objective,
             "slots": dict(slots or {}),
             "interrupt": bool(interrupt),

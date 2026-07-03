@@ -68,26 +68,6 @@ def _gateway(
     )
 
 
-def test_skill_gateway_submit_direct_notifies_and_submits() -> None:
-    io = FakeGatewayIO()
-    submitted: list[SkillIntent] = []
-    gateway = _gateway(io=io, on_submit=submitted.append)
-
-    intent = asyncio.run(
-        gateway.submit_direct(
-            objective="pick up the block",
-            slots={"objective": "pick up the block", "interrupt": False},
-            metadata={"source": "direct"},
-        )
-    )
-
-    assert io.skills == [intent]
-    assert submitted == [intent]
-    assert intent.name == ""
-    assert intent.objective == "pick up the block"
-    assert intent.metadata["source"] == "direct"
-
-
 def test_skill_gateway_build_interrupt_intent_preserves_active_skill_id() -> None:
     intent = SkillGateway.build_interrupt_intent(
         envelope=Envelope(agent_id="main", robot_id="mock0", episode_id="ep1"),

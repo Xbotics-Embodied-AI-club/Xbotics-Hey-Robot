@@ -43,6 +43,6 @@ def bind_agent_tools(core: RobotAgentCore) -> ToolContext:
     logger.info(f"从类加载了 {len(names)} 个工具：{names}")
     core.runtime.tools = registry
     core.runtime.tool_executor.registry = registry
-    if core.runtime.tool_executor.capability_resolver is not None:
-        core.runtime.tool_executor.capability_resolver.registry = registry
+    if core.runtime.tool_executor.tool_policy_resolver is not None:
+        core.runtime.tool_executor.tool_policy_resolver.registry = registry
     return ctx
