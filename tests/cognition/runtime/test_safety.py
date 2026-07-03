@@ -62,7 +62,7 @@ def test_robot_safety_hook_blocks_compound_skill_objective():
         executor.execute(
             "request_skill",
             {
-                "skill": "vla_manipulation",
+                "skill": "manipulate",
                 "objective": "pick up the cup then place it",
             },
         )

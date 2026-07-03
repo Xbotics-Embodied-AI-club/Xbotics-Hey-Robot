@@ -202,7 +202,7 @@ def test_runtime_wraps_plugin_exception_as_internal_error() -> None:
     assert result.error == "plugin exploded"
 
 
-def test_runtime_executes_vla_manipulation_skill() -> None:
+def test_runtime_executes_manipulate_skill() -> None:
     class ModelServiceAPI:
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict]] = []
@@ -232,12 +232,12 @@ def test_runtime_executes_vla_manipulation_skill() -> None:
             return {"success": True}
 
     model_services = ModelServiceAPI()
-    registry = load_skill_registry(enabled=("vla_manipulation",))
+    registry = load_skill_registry(enabled=("manipulate",))
     runtime = SkillRuntime(registry)
 
     result = __import__("asyncio").run(
         runtime.execute(
-            "vla_manipulation",
+            "manipulate",
             {"task_prompt": "Pick up the red cup.", "max_steps": 1},
             context_factory=lambda invoke: SkillContext(
                 model_services=model_services,
@@ -250,9 +250,9 @@ def test_runtime_executes_vla_manipulation_skill() -> None:
     assert result.success is True
     assert model_services.calls == [
         (
-            "vla_manipulation",
+            "manipulate",
             {
-                "skill_name": "vla_manipulation",
+                "skill_name": "manipulate",
                 "task_prompt": "Pick up the red cup.",
                 "vla_step": 0,
                 "policy_session_id": None,
@@ -261,7 +261,7 @@ def test_runtime_executes_vla_manipulation_skill() -> None:
     ]
 
 
-def test_pick_object_routes_to_required_vla_model_service() -> None:
+def test_manipulate_routes_to_required_vla_model_service() -> None:
     class ModelServiceAPI:
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict]] = []
@@ -282,12 +282,12 @@ def test_pick_object_routes_to_required_vla_model_service() -> None:
             return {"success": True}
 
     model_services = ModelServiceAPI()
-    registry = load_skill_registry(enabled=("pick_object",))
+    registry = load_skill_registry(enabled=("manipulate",))
     runtime = SkillRuntime(registry)
 
     result = __import__("asyncio").run(
         runtime.execute(
-            "pick_object",
+            "manipulate",
             {"task_prompt": "Pick up the red cup.", "max_steps": 1},
             context_factory=lambda invoke: SkillContext(
                 model_services=model_services,
@@ -300,9 +300,9 @@ def test_pick_object_routes_to_required_vla_model_service() -> None:
 
     assert result.success is True
     assert model_services.calls[0] == (
-        "vla_manipulation",
+        "manipulate",
         {
-            "skill_name": "pick_object",
+            "skill_name": "manipulate",
             "task_prompt": "Pick up the red cup.",
             "vla_step": 0,
             "policy_session_id": "pick-1",
@@ -326,12 +326,12 @@ def test_vla_max_steps_exhausted_fails() -> None:
         async def stop_motion(self, **_arguments):
             return {"success": True}
 
-    registry = load_skill_registry(enabled=("vla_manipulation",))
+    registry = load_skill_registry(enabled=("manipulate",))
     runtime = SkillRuntime(registry)
 
     result = __import__("asyncio").run(
         runtime.execute(
-            "vla_manipulation",
+            "manipulate",
             {"task_prompt": "Pick up the red cup.", "max_steps": 1},
             context_factory=lambda invoke: SkillContext(
                 model_services=ModelServiceAPI(),
@@ -395,14 +395,101 @@ def test_vla_adapter_consumes_full_action_chunk_horizon() -> None:
     assert [item.primitive for item in primitives] == [
         "move_arm_joints",
         "set_gripper",
+    ]
+    assert primitives[0].arguments == {
+        "joints": {"shoulder_pan": 0.1},
+        "mode": "absolute",
+    }
+
+
+def test_vla_adapter_consumes_action_chunk_key_directly() -> None:
+    from hey_robot.skill_os.builtins.manipulation_adapter import (
+        vla_output_to_primitives,
+    )
+
+    primitives = vla_output_to_primitives(
+        {
+            "action_chunk": {
+                "actions": [
+                    {"joints": {"shoulder_pan": 0.5}, "gripper": 0.8},
+                ],
+            }
+        }
+    )
+
+    assert [item.primitive for item in primitives] == [
         "move_arm_joints",
         "set_gripper",
     ]
-    assert primitives[2].arguments == {
-        "joints": {"shoulder_pan": 0.2},
+    assert primitives[0].arguments == {
+        "joints": {"shoulder_pan": 0.5},
         "mode": "absolute",
     }
-    assert "chunk action 2" in primitives[2].reason
+    assert primitives[1].arguments == {"opening_pct": 80.0}
+
+
+def test_vla_adapter_falls_back_to_joint_angles_and_gripper_action() -> None:
+    from hey_robot.skill_os.builtins.manipulation_adapter import (
+        vla_output_to_primitives,
+    )
+
+    primitives = vla_output_to_primitives(
+        {
+            "joint_angles": {"shoulder_pan": 0.1, "elbow_flex": 0.2},
+            "gripper_action": 0.5,
+        }
+    )
+
+    assert [item.primitive for item in primitives] == [
+        "move_arm_joints",
+        "set_gripper",
+    ]
+    assert primitives[0].arguments == {
+        "joints": {"shoulder_pan": 0.1, "elbow_flex": 0.2},
+        "mode": "absolute",
+    }
+    assert primitives[1].arguments == {"opening_pct": 50.0}
+
+
+def test_vla_adapter_returns_stop_motion_when_task_done_without_actions() -> None:
+    from hey_robot.skill_os.builtins.manipulation_adapter import (
+        vla_output_to_primitives,
+    )
+
+    primitives = vla_output_to_primitives({"task_done": True})
+
+    assert [item.primitive for item in primitives] == ["stop_motion"]
+    assert primitives[0].arguments == {}
+
+
+def test_vla_adapter_uses_vla_fallback_when_no_structured_result() -> None:
+    from hey_robot.skill_os.builtins.manipulation_adapter import (
+        vla_output_to_primitives,
+    )
+
+    primitives = vla_output_to_primitives(
+        {"vla": {"joint_angles": {"base": 0.0}, "gripper_action": 0.0}}
+    )
+
+    assert [item.primitive for item in primitives] == [
+        "move_arm_joints",
+        "set_gripper",
+    ]
+    assert primitives[1].arguments == {"opening_pct": 0.0}
+
+
+def test_vla_adapter_returns_empty_for_unrecognized_input() -> None:
+    from hey_robot.skill_os.builtins.manipulation_adapter import (
+        vla_output_to_primitives,
+    )
+
+    primitives = vla_output_to_primitives({})
+    assert primitives == []
+
+    primitives = vla_output_to_primitives(
+        {"policy_result": {"kind": "action_chunk", "actions": []}}
+    )
+    assert primitives == []
 
 
 def test_vla_skill_injects_observation_and_consumes_typed_policy_result() -> None:
@@ -460,12 +547,12 @@ def test_vla_skill_injects_observation_and_consumes_typed_policy_result() -> Non
     )
     model_services = ModelServiceAPI()
     robot = FakeRobot()
-    registry = load_skill_registry(enabled=("pick_object",))
+    registry = load_skill_registry(enabled=("manipulate",))
     runtime = SkillRuntime(registry)
 
     result = __import__("asyncio").run(
         runtime.execute(
-            "pick_object",
+            "manipulate",
             {"task_prompt": "Pick up the red cup.", "max_steps": 1},
             context_factory=lambda invoke: SkillContext(
                 model_services=model_services,
@@ -479,7 +566,7 @@ def test_vla_skill_injects_observation_and_consumes_typed_policy_result() -> Non
     )
 
     assert result.success is True
-    assert model_services.calls[0][0] == "vla_manipulation"
+    assert model_services.calls[0][0] == "manipulate"
     sent = model_services.calls[0][1]
     assert sent["observation"]["frame_id"] == 7
     assert sent["observation"]["images"][0]["camera"] == "wrist"
@@ -488,8 +575,6 @@ def test_vla_skill_injects_observation_and_consumes_typed_policy_result() -> Non
     assert robot.calls == [
         ("move_arm_joints", {"joints": {"shoulder_pan": 0.1}, "mode": "absolute"}),
         ("set_gripper", {"opening_pct": 100.0}),
-        ("move_arm_joints", {"joints": {"shoulder_pan": 0.2}, "mode": "absolute"}),
-        ("set_gripper", {"opening_pct": 20.0}),
     ]
 
 
@@ -1190,3 +1275,192 @@ def test_robot_skill_catalog_exposes_capability_semantics() -> None:
     assert approach_object.capability_type == "object_approach"
     assert approach_object.evidence_outputs[0] == "vln_planner_result"
     assert approach_object.required_model_service == "approach_object"
+
+
+def test_extract_vla_policy_data_from_policy_result_with_action_chunk() -> None:
+    from types import SimpleNamespace
+
+    from hey_robot.skill_os.builtins.manipulation import (
+        _extract_vla_policy_data,
+    )
+
+    result = SimpleNamespace(
+        success=True,
+        metrics={
+            "policy_result": {
+                "kind": "action_chunk",
+                "actions": [{"joints": {"shoulder_pan": 0.1}}],
+                "done": True,
+            },
+        },
+    )
+    data = _extract_vla_policy_data(result)
+    assert data["policy_result"]["kind"] == "action_chunk"
+    assert data["task_done"] is True
+
+
+def test_extract_vla_policy_data_when_policy_result_kind_is_action_chunk() -> None:
+    from types import SimpleNamespace
+
+    from hey_robot.skill_os.builtins.manipulation import (
+        _extract_vla_policy_data,
+    )
+
+    result = SimpleNamespace(
+        success=True,
+        metrics={
+            "policy_result": {
+                "kind": "action_chunk",
+                "done": False,
+            },
+        },
+    )
+    data = _extract_vla_policy_data(result)
+    assert data["task_done"] is False
+
+
+def test_extract_vla_policy_data_from_vla_metrics() -> None:
+    from types import SimpleNamespace
+
+    from hey_robot.skill_os.builtins.manipulation import (
+        _extract_vla_policy_data,
+    )
+
+    result = SimpleNamespace(
+        success=True,
+        metrics={"vla": {"joint_angles": {"shoulder_pan": 0.1}, "task_done": True}},
+    )
+    data = _extract_vla_policy_data(result)
+    assert data.get("joint_angles") == {"shoulder_pan": 0.1}
+    assert data.get("task_done") is True
+
+
+def test_extract_vla_policy_data_handles_missing_metrics() -> None:
+    from types import SimpleNamespace
+
+    from hey_robot.skill_os.builtins.manipulation import (
+        _extract_vla_policy_data,
+    )
+
+    result = SimpleNamespace(success=False, status="failed", metrics=None)
+    data = _extract_vla_policy_data(result)
+    assert data == {}
+
+
+def test_vla_task_done_detects_done_true() -> None:
+    from hey_robot.skill_os.builtins.manipulation import _vla_task_done
+
+    assert _vla_task_done({"task_done": True}) is True
+    assert _vla_task_done({"task_done": False}) is False
+
+
+def test_vla_task_done_detects_done_in_policy_result() -> None:
+    from hey_robot.skill_os.builtins.manipulation import _vla_task_done
+
+    assert _vla_task_done({"policy_result": {"done": True}}) is True
+    assert _vla_task_done({"policy_result": {"done": False}}) is False
+
+
+def test_vla_task_done_detects_done_in_action_chunk() -> None:
+    from hey_robot.skill_os.builtins.manipulation import _vla_task_done
+
+    assert _vla_task_done({"action_chunk": {"done": True}}) is True
+    assert _vla_task_done({"action_chunk": {"done": False}}) is False
+    assert _vla_task_done({"action_chunk": {}}) is False
+
+
+def test_vla_task_done_returns_false_for_empty_data() -> None:
+    from hey_robot.skill_os.builtins.manipulation import _vla_task_done
+
+    assert _vla_task_done({}) is False
+
+
+def test_encode_images_with_resolve_images_callback() -> None:
+    import numpy as np
+
+    from hey_robot.skill_os.builtins.manipulation import _encode_images
+
+    images = [
+        ImageRef(uri="cam://front", camera="front"),
+        ImageRef(uri="cam://wrist", camera="wrist"),
+    ]
+
+    def resolve(refs):
+        return [np.zeros((64, 64, 3), dtype=np.uint8) for _ in refs]
+
+    encoded = _encode_images(images, resolve_images=resolve)
+    assert len(encoded) == 2
+    for entry in encoded:
+        assert entry["format"] == "jpeg"
+        assert "data" in entry
+        assert len(entry["data"]) > 0
+
+
+def test_encode_images_with_resolve_images_mismatched_length() -> None:
+    from hey_robot.skill_os.builtins.manipulation import _encode_images
+
+    images = [ImageRef(uri="cam://front", camera="front")]
+
+    def resolve(_refs):
+        return []  # shorter than images — should fall through to file path
+
+    encoded = _encode_images(images, resolve_images=resolve)
+    assert len(encoded) == 1
+    assert encoded[0]["uri"] == "cam://front"
+
+
+def test_encode_images_with_resolve_images_exception_falls_through() -> None:
+    from hey_robot.skill_os.builtins.manipulation import _encode_images
+
+    images = [ImageRef(uri="cam://front", camera="front")]
+
+    def resolve(_refs):
+        raise RuntimeError("decode failed")
+
+    encoded = _encode_images(images, resolve_images=resolve)
+    assert len(encoded) == 1
+    assert encoded[0]["uri"] == "cam://front"
+
+
+def test_encode_images_with_non_numpy_return_falls_through() -> None:
+    from hey_robot.skill_os.builtins.manipulation import _encode_images
+
+    images = [ImageRef(uri="cam://front", camera="front")]
+
+    def resolve(_refs):
+        return ["not_an_ndarray"]
+
+    encoded = _encode_images(images, resolve_images=resolve)
+    assert len(encoded) == 1
+    assert encoded[0]["uri"] == "cam://front"
+
+
+def test_observation_payload_returns_none_for_none_observation() -> None:
+    from hey_robot.skill_os.builtins.manipulation import _observation_payload
+
+    assert _observation_payload(None) is None
+
+
+def test_observation_payload_filters_by_camera() -> None:
+    import numpy as np
+
+    from hey_robot.skill_os.builtins.manipulation import _observation_payload
+
+    observation = RobotObservation(
+        envelope=Envelope(robot_id="xlerobot"),
+        frame_id=42,
+        images=[
+            ImageRef(uri="cam://front", camera="front"),
+            ImageRef(uri="cam://wrist", camera="wrist"),
+        ],
+        proprioception=[0.1, 0.2],
+    )
+
+    def resolve(refs):
+        return [np.zeros((64, 64, 3), dtype=np.uint8) for _ in refs]
+
+    payload = _observation_payload(observation, camera="wrist", resolve_images=resolve)
+    assert payload is not None
+    assert payload["frame_id"] == 42
+    assert len(payload["images"]) == 1
+    assert payload["images"][0]["camera"] == "wrist"

@@ -946,13 +946,13 @@ class TestTaskContextTool:
         runtime_state = AgentState(task="pick the cup")
         runtime_state.add_tool_call(
             "request_skill",
-            {"skill": "vla_manipulation", "objective": "pick the cup"},
+            {"skill": "manipulate", "objective": "pick the cup"},
             "target still not reachable",
             success=False,
         )
         runtime_state.add_tool_call(
             "request_skill",
-            {"skill": "vla_manipulation", "objective": "pick the cup"},
+            {"skill": "manipulate", "objective": "pick the cup"},
             "target still not reachable",
             success=False,
         )

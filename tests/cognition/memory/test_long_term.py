@@ -36,7 +36,7 @@ def test_long_term_memory_store_structured_records(tmp_path) -> None:
         name="table", description="table is in front of the robot", pose={"x": 1.0}
     )
     store.remember_skill_experience(
-        skill_name="vla_manipulation",
+        skill_name="manipulate",
         arguments={"object": "cup"},
         success=False,
         summary="cup slipped",
@@ -47,7 +47,7 @@ def test_long_term_memory_store_structured_records(tmp_path) -> None:
 
     skill_records = store.query("grasp failed cup", kind="skill_experience")
 
-    assert skill_records[0].metadata["skill_name"] == "vla_manipulation"
+    assert skill_records[0].metadata["skill_name"] == "manipulate"
     assert skill_records[0].metadata["failure_mode"] == "grasp_failed"
     assert store.query("table", kind="place")[0].metadata["pose"] == {"x": 1.0}
 
@@ -74,19 +74,19 @@ def test_long_term_memory_query_prefers_latest_skill_experience_for_same_argumen
 
     store.remember(
         kind="skill_experience",
-        key="vla_manipulation",
+        key="manipulate",
         summary='Execution feedback:\n- outcome: failed\n- failure_reason: "unsupported mock skill"',
         metadata={
             "tool": "request_skill",
             "success": True,
             "arguments": {
-                "name": "vla_manipulation",
+                "name": "manipulate",
                 "arguments": {"object": "cup", "location": "bin"},
             },
         },
     )
     store.remember_skill_experience(
-        skill_name="vla_manipulation",
+        skill_name="manipulate",
         arguments={"object": "cup", "location": "bin"},
         success=True,
         summary="Placed cup at bin.",
@@ -135,7 +135,7 @@ def test_long_term_memory_supports_preference_anchor_and_lesson_records(
         success=False,
         failure_mode="viewpoint_bad",
         recovery_hint="reposition",
-        skill_name="vla_manipulation",
+        skill_name="manipulate",
     )
 
     preference_records = store.query("偏好 中文", kind="user_preference")
@@ -167,7 +167,7 @@ def test_long_term_memory_prompt_context_groups_structured_sections(tmp_path) ->
         success=False,
         failure_mode="viewpoint_bad",
         recovery_hint="reposition",
-        skill_name="vla_manipulation",
+        skill_name="manipulate",
     )
     store.remember_entity(name="杯子", summary="杯子在桌面中央", location="桌面中央")
 

@@ -183,7 +183,7 @@ def test_xlerobot_executor_rejects_legacy_provides() -> None:
         pass
 
     result = XLeRobotSkillExecutor(FakeClient()).execute(  # type: ignore[arg-type]
-        RobotSkillAction("vla_manipulation", {"task": "pick up cup"})
+        RobotSkillAction("manipulate", {"task": "pick up cup"})
     )
 
     assert result.success is False

@@ -304,14 +304,14 @@ def test_task_run_store_persists_skill_trace_for_bound_and_completed_skill(tmp_p
         "skill1",
         "pick the cup",
         metadata={
-            "skill": "vla_manipulation",
+            "skill": "manipulate",
             "backend": "foundation",
-            "implementation_name": "vla_manipulation",
+            "implementation_name": "manipulate",
             "implementation_kind": "model_service",
         },
     )
     assert bound is not None
-    assert bound.attempts[-1].skill == "vla_manipulation"
+    assert bound.attempts[-1].skill == "manipulate"
 
     updated = store.bind_skill_trace_metadata(
         "ep1",
@@ -320,18 +320,18 @@ def test_task_run_store_persists_skill_trace_for_bound_and_completed_skill(tmp_p
         success=True,
         summary="picked the cup",
         metadata={
-            "skill": "vla_manipulation",
+            "skill": "manipulate",
             "backend": "foundation",
-            "implementation_name": "vla_manipulation",
+            "implementation_name": "manipulate",
             "implementation_kind": "model_service",
         },
     )
 
     assert updated is not None
     assert updated.skill_trace
-    assert updated.skill_trace[-1]["skill"] == "vla_manipulation"
+    assert updated.skill_trace[-1]["skill"] == "manipulate"
     assert updated.skill_trace[-1]["backend"] == "foundation"
-    assert updated.skill_trace[-1]["implementation_name"] == "vla_manipulation"
+    assert updated.skill_trace[-1]["implementation_name"] == "manipulate"
     assert updated.skill_trace[-1]["status"] == "completed"
 
 
@@ -346,17 +346,17 @@ def test_task_run_skill_trace_keeps_northbound_skill_name_for_composite_skill(tm
         "skill1",
         "hand the cup to the user",
         metadata={
-            "skill": "vla_manipulation",
+            "skill": "manipulate",
             "backend": "foundation",
-            "implementation_name": "vla_manipulation",
+            "implementation_name": "manipulate",
             "implementation_kind": "skill_composite",
         },
     )
 
     assert state is not None
-    assert state.skill_trace[-1]["skill"] == "vla_manipulation"
+    assert state.skill_trace[-1]["skill"] == "manipulate"
     assert state.skill_trace[-1]["implementation_kind"] == "skill_composite"
-    assert state.skill_trace[-1]["implementation_name"] == "vla_manipulation"
+    assert state.skill_trace[-1]["implementation_name"] == "manipulate"
     assert state.skill_trace[-1]["skill"] not in {
         "open_gripper",
         "reset_posture",

@@ -40,7 +40,7 @@ def test_skill_surface_loader_builds_manifest() -> None:
     names = {item["name"] for item in payload["robot_skills"]}
     assert "move_base" in names
     assert "turn_base" in names
-    assert "vla_manipulation" in names
+    assert "manipulate" in names
     assert "foundation_locomotion_run" not in names
 
 

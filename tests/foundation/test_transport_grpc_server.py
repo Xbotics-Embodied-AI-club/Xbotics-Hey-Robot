@@ -30,7 +30,7 @@ def _spec(settings: dict):
                     "enabled": True,
                     "robot_id": "xlerobot",
                     "target": "127.0.0.1:9090",
-                    "provides": ["vla_manipulation"],
+                    "provides": ["manipulate"],
                     "timeout_sec": 5,
                     **settings,
                 }
@@ -472,7 +472,7 @@ def test_vla_policy_executor_calls_action_chunk_endpoint_without_lerobot(
             "skill_id": "pick-1",
             "robot_id": "xlerobot",
             "arguments": {
-                "skill_name": "pick_object",
+                "skill_name": "manipulate",
                 "task_prompt": "pick cup",
                 "policy_session_id": "pick-1",
                 "observation": {
@@ -548,7 +548,7 @@ def test_vla_service_selects_legacy_control_loop_backend() -> None:
                         "enabled": True,
                         "robot_id": "xlerobot",
                         "target": "127.0.0.1:9090",
-                        "provides": ["vla_manipulation"],
+                        "provides": ["manipulate"],
                         "backend_mode": "lerobot_control_loop",
                     }
                 }
@@ -598,7 +598,7 @@ def test_vla_model_servicer_health_execute_cancel() -> None:
                         "enabled": True,
                         "robot_id": "xlerobot",
                         "target": "127.0.0.1:9090",
-                        "provides": ["vla_manipulation"],
+                        "provides": ["manipulate"],
                         "port": 9191,
                         "host": "127.0.0.1",
                         "policy_type": "pi05",
@@ -636,7 +636,7 @@ def test_vla_model_servicer_health_execute_cancel() -> None:
             model_service_pb2.ExecuteSkillRequest(
                 service_id="arm_vla",
                 skill_id="skill-2",
-                skill_name="vla_manipulation",
+                skill_name="manipulate",
                 objective="pick",
                 arguments=_struct(task="pick"),
             ),
@@ -703,7 +703,7 @@ def test_vla_model_service_start_and_stop(monkeypatch) -> None:
                         "enabled": True,
                         "robot_id": "xlerobot",
                         "target": "127.0.0.1:9090",
-                        "provides": ["vla_manipulation"],
+                        "provides": ["manipulate"],
                         "port": 9191,
                         "host": "127.0.0.1",
                     }

@@ -505,9 +505,9 @@ def test_task_runtime_result_text_for_agent_includes_normal_task_continuation_af
         "skill1",
         "grasp the cup",
         metadata={
-            "skill": "vla_manipulation",
+            "skill": "manipulate",
             "backend": "foundation",
-            "implementation_name": "vla_manipulation",
+            "implementation_name": "manipulate",
             "implementation_kind": "model_service",
         },
     )
@@ -587,9 +587,7 @@ def test_task_runtime_result_text_for_agent_includes_normal_task_continuation_af
     assert "- runtime_last_observation_frame: 52" in text
     assert "- runtime_robot_state: holding_object" in text
     assert "Skill trace:" in text
-    assert (
-        "vla_manipulation; backend=foundation; implementation=vla_manipulation" in text
-    )
+    assert "manipulate; backend=foundation; implementation=manipulate" in text
 
 
 def test_task_runtime_result_text_for_agent_keeps_composite_skill_northbound_name(
@@ -608,9 +606,9 @@ def test_task_runtime_result_text_for_agent_keeps_composite_skill_northbound_nam
         "skill1",
         "把杯子递给用户",
         metadata={
-            "skill": "vla_manipulation",
+            "skill": "manipulate",
             "backend": "foundation",
-            "implementation_name": "vla_manipulation",
+            "implementation_name": "manipulate",
             "implementation_kind": "skill_composite",
         },
     )
@@ -649,9 +647,9 @@ def test_task_runtime_result_text_for_agent_keeps_composite_skill_northbound_nam
             status="completed",
             summary="已完成递交动作",
             metadata={
-                "skill": "vla_manipulation",
+                "skill": "manipulate",
                 "backend": "foundation",
-                "implementation_name": "vla_manipulation",
+                "implementation_name": "manipulate",
                 "implementation_kind": "skill_composite",
             },
         ),
@@ -660,9 +658,7 @@ def test_task_runtime_result_text_for_agent_keeps_composite_skill_northbound_nam
 
     assert text is not None
     assert "Skill trace:" in text
-    assert (
-        "vla_manipulation; backend=foundation; implementation=vla_manipulation" in text
-    )
+    assert "manipulate; backend=foundation; implementation=manipulate" in text
     assert "open_gripper; backend=" not in text
     assert "reset_posture; backend=" not in text
 

@@ -133,14 +133,14 @@ def test_capability_runtime_routes_vla_policy_to_grpc_client(
                     "enabled": True,
                     "robot_id": "xlerobot",
                     "target": "127.0.0.1:9090",
-                    "provides": ["vla_manipulation"],
+                    "provides": ["manipulate"],
                 }
             }
         }
     )
 
     runtime = ModelServiceRegistry(config)
-    match = runtime.service_for("vla_manipulation", "xlerobot")
+    match = runtime.service_for("manipulate", "xlerobot")
 
     assert match is not None
     assert isinstance(match[2], GrpcModelServiceClient)

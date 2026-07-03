@@ -107,11 +107,11 @@ class TestXLeRobotSimSkillAdapter:
                 RobotSkillAction("set_arm_pose", {"pose_name": "nonexistent"})
             )
 
-    def test_vla_manipulation_uses_required_model_service(self) -> None:
-        from hey_robot.skill_os.builtins.manipulation import VLAManipulationSkill
+    def test_manipulate_uses_required_model_service(self) -> None:
+        from hey_robot.skill_os.builtins.manipulation import ManipulateSkill
 
-        assert VLAManipulationSkill.spec.required_model_service == "vla_manipulation"
-        assert VLAManipulationSkill.spec.required_resources == (
+        assert ManipulateSkill.spec.required_model_service == "manipulate"
+        assert ManipulateSkill.spec.required_resources == (
             "arm",
             "gripper",
             "camera",

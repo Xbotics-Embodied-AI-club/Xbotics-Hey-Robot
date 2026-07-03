@@ -103,7 +103,7 @@ def _service_with_vla_capability(
                     "type": "mock_vla_policy",
                     "enabled": True,
                     "robot_id": "xlerobot",
-                    "provides": ["vla_manipulation"],
+                    "provides": ["manipulate"],
                     "resources": ["arm", "gripper", "camera"],
                     "timeout_sec": 30,
                     "settings": settings or {},
@@ -1712,18 +1712,18 @@ def test_interrupt_active_run_cancels_active_model_service(tmp_path) -> None:
 
     service = _service_with_vla_capability(tmp_path)
     state = service.states["embodied_skills"]
-    contract = service.plugin_skill_catalog.resolve("vla_manipulation")
+    contract = service.plugin_skill_catalog.resolve("manipulate")
     intent = SkillIntent(
         envelope=Envelope(trace_id="tr1", robot_id="xlerobot"),
         skill_id="vla1",
-        name="vla_manipulation",
+        name="manipulate",
         arguments={"task_prompt": "pick cup"},
         objective="pick",
     )
     run = SkillRun(
         intent=intent,
-        skill_name="vla_manipulation",
-        implementation_name="vla_manipulation",
+        skill_name="manipulate",
+        implementation_name="manipulate",
         implementation_kind="plugin",
         contract=contract,
         execution_plan=SkillExecutionPlan(actions=()),
@@ -1753,19 +1753,19 @@ def test_timeout_cancels_active_model_service(tmp_path) -> None:
 
     service = _service_with_vla_capability(tmp_path)
     state = service.states["embodied_skills"]
-    contract = service.plugin_skill_catalog.resolve("vla_manipulation")
+    contract = service.plugin_skill_catalog.resolve("manipulate")
     intent = SkillIntent(
         envelope=Envelope(trace_id="tr1", robot_id="xlerobot"),
         skill_id="vla-timeout",
-        name="vla_manipulation",
+        name="manipulate",
         arguments={"task_prompt": "pick cup"},
         objective="pick",
         timeout_sec=0.01,
     )
     run = SkillRun(
         intent=intent,
-        skill_name="vla_manipulation",
-        implementation_name="vla_manipulation",
+        skill_name="manipulate",
+        implementation_name="manipulate",
         implementation_kind="plugin",
         contract=contract,
         execution_plan=SkillExecutionPlan(actions=()),

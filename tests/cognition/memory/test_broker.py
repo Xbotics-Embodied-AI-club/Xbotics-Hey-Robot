@@ -36,7 +36,7 @@ def _task_with_attempts(**kw) -> TaskRun:
             attempt_id="a2",
             text="pick up cup",
             status="completed",
-            skill_id="vla_manipulation",
+            skill_id="manipulate",
             success=True,
         ),
     ]
@@ -57,7 +57,7 @@ def _task_with_failed_attempt(**kw) -> TaskRun:
             attempt_id="a2",
             text="pick up cup",
             status="completed",
-            skill_id="vla_manipulation",
+            skill_id="manipulate",
             success=False,
             metadata={
                 "execution_feedback": {
@@ -109,7 +109,7 @@ def test_broker_active_task_includes_task_state_block(tmp_path) -> None:
     assert "pick up the cup" in ctx
     assert "status: active" in ctx
     assert "2 completed, 0 failed" in ctx
-    assert "vla_manipulation -> completed" in ctx
+    assert "manipulate -> completed" in ctx
 
 
 def test_broker_active_task_includes_scene_evidence(tmp_path) -> None:
@@ -222,7 +222,7 @@ def test_broker_feedback_pending_task_includes_last_attempt_block(tmp_path) -> N
     ctx = broker.build(task=task, task_text="pick up the cup")
 
     assert ctx is not None
-    assert "Last attempt: vla_manipulation -> failed" in ctx
+    assert "Last attempt: manipulate -> failed" in ctx
     assert "grasp failed: object slipped from gripper" in ctx
 
 
@@ -294,7 +294,7 @@ def test_broker_always_includes_skill_catalog_when_provided(tmp_path) -> None:
         task = _task(status=status)
         ctx = broker.build(
             task=task,
-            skill_catalog_context="Available skills: inspect_scene, vla_manipulation",
+            skill_catalog_context="Available skills: inspect_scene, manipulate",
         )
         assert ctx is not None
         assert "Available skills" in ctx

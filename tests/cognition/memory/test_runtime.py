@@ -97,7 +97,7 @@ def test_memory_runtime_writes_structured_preference_anchor_and_lesson(
         runtime.write(
             kind="task_lesson",
             name="pick_cup",
-            skill_name="vla_manipulation",
+            skill_name="manipulate",
             success=False,
             failure_mode="viewpoint_bad",
             recovery_hint="reposition",
@@ -120,14 +120,14 @@ def test_memory_runtime_records_capability_tool_result(tmp_path) -> None:
 
     runtime.record_tool_result(
         "request_skill",
-        {"skill": "vla_manipulation", "slots": {"object": "cup"}},
+        {"skill": "manipulate", "slots": {"object": "cup"}},
         "picked cup",
         True,
         context_summary="cup on table",
     )
 
     records = store.query("pick cup", kind="skill_experience")
-    assert records[0].metadata["skill_name"] == "vla_manipulation"
+    assert records[0].metadata["skill_name"] == "manipulate"
     assert records[0].metadata["arguments"] == {"object": "cup"}
     assert records[0].metadata["context_summary"] == "cup on table"
 
