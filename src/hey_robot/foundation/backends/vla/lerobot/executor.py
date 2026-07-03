@@ -6,19 +6,92 @@ Target form (VLA Step 2): stateless inference only, control loop moves to Skill 
 
 from __future__ import annotations
 
+import base64
+import io
 import json
 import threading
 import time
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib import request as urllib_request
 from urllib.parse import urlparse
 
+import numpy as np
+import torch
+from PIL import Image
+from PIL.Image import Resampling
+
 from hey_robot.config import ModelServiceSpec
 from hey_robot.foundation.clients.models import PolicyStepResult
 
 DEFAULT_ARM_CALIBRATION_DIR = "~/.cache/hey_robot/calibrations/robots/so_follower/"
+
+# ── ACT model utilities ────────────────────────────────────────────────────
+
+_IMAGENET_MEAN = (0.485, 0.456, 0.406)
+_IMAGENET_STD = (0.229, 0.224, 0.225)
+
+# Fallback action normalization stats for XLeRobot single-arm joint space.
+# Joint order: shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper
+_ACT_JOINT_NAMES = [
+    "shoulder_pan",
+    "shoulder_lift",
+    "elbow_flex",
+    "wrist_flex",
+    "wrist_roll",
+    "gripper",
+]
+_DEFAULT_ACTION_MEAN = (0.2808, -51.1163, 45.7853, 77.6119, 1.6111, 8.2912)
+_DEFAULT_ACTION_STD = (9.3055, 53.7685, 52.8102, 9.1411, 5.3389, 10.5236)
+
+_RAD_TO_DEG = 180.0 / 3.141592653589793
+_DEG_TO_RAD = 3.141592653589793 / 180.0
+
+_CAMERA_KEY_MAP = {
+    "front": "observation.images.front",
+    "handeye": "observation.images.handeye",
+    "right_wrist": "observation.images.handeye",
+    "left_wrist": "observation.images.handeye",
+}
+
+
+@dataclass
+class _NormalizationStats:
+    mean: torch.Tensor
+    std: torch.Tensor
+
+    def normalize(self, x: torch.Tensor) -> torch.Tensor:
+        return (x - self.mean) / self.std.clamp(min=1e-8)
+
+    def unnormalize(self, x: torch.Tensor) -> torch.Tensor:
+        return x * self.std + self.mean
+
+
+def _extract_input_stats(
+    state_dict: dict[str, torch.Tensor],
+) -> dict[str, _NormalizationStats]:
+    """Extract per-feature input normalization stats from a LeRobot policy checkpoint."""
+    stats: dict[str, _NormalizationStats] = {}
+    for key, tensor in state_dict.items():
+        if not key.startswith("normalize_inputs.buffer_"):
+            continue
+        remainder = key[len("normalize_inputs.buffer_") :]
+        parts = remainder.rsplit(".", 1)
+        if len(parts) != 2:
+            continue
+        feature, stat_type = parts
+        feature = feature.replace("_", ".")
+        if feature not in stats:
+            stats[feature] = _NormalizationStats(
+                mean=torch.zeros_like(tensor), std=torch.ones_like(tensor)
+            )
+        if stat_type == "mean":
+            stats[feature].mean = tensor.clone()
+        elif stat_type == "std":
+            stats[feature].std = tensor.clone()
+    return stats
 
 
 class LeRobotVLAExecutor:
@@ -120,12 +193,13 @@ class LeRobotVLAExecutor:
                 timer.cancel()
                 self.cancel()
 
+            elapsed = time.time() - started_at
             return {
                 "success": True,
                 "status": "completed",
                 "summary": "Arm manipulation done",
                 "metrics": {
-                    "duration_sec": round(time.time() - started_at, 3),
+                    "duration_sec": round(elapsed, 3),
                     "timed_out": timeout_fired.is_set(),
                     "vla": self._public_config(config),
                 },
@@ -144,7 +218,7 @@ class LeRobotVLAExecutor:
                 "success": False,
                 "status": "failed",
                 "failure_mode": "execution_failed",
-                "summary": f"{self.spec.settings.get('tool_name', 'vla_manipulation')} failed: {type(exc).__name__}: {exc}",
+                "summary": f"{self.spec.settings.get('skill_name', 'manipulate')} failed: {type(exc).__name__}: {exc}",
                 "error": str(exc),
                 "metrics": {"vla": self._public_config(config)},
             }
@@ -192,8 +266,8 @@ class LeRobotVLAExecutor:
                 self.spec.settings.get("chunk_size_threshold", 0.5)
             ),
             "load_on_startup": bool(self.spec.settings.get("load_on_startup", False)),
-            "tool_name": self.spec.settings.get("tool_name", "vla_manipulation"),
-            "tool_description": self.spec.settings.get("tool_description", ""),
+            "skill_name": self.spec.settings.get("skill_name", "manipulate"),
+            "skill_description": self.spec.settings.get("skill_description", ""),
             "arm_side": self.spec.settings.get("arm_side"),
         }
         config.update(
@@ -294,21 +368,28 @@ def _infer_arm_side(arm_port: Any) -> str | None:
 class LeRobotVLAPolicyExecutor:
     """Stateless VLA inference executor — one image in, one action out.
 
-    Supports mock mode (returns fake joint actions) for testing the full
-    flow without a real LeRobot policy server.
+    Supports:
+      - mock mode (returns fake joint actions) for testing
+      - direct ACT model loading/inference (no external HTTP server needed)
+      - legacy HTTP endpoint fallback (action_chunk_endpoint)
     """
 
     def __init__(self, service_id: str, spec: ModelServiceSpec) -> None:
         self.service_id = service_id
         self.spec = spec
+        self._policy: Any = None
+        self._policy_stats: dict[str, _NormalizationStats] = {}
+        self._state_stat: _NormalizationStats | None = None
+        self._action_stat: _NormalizationStats | None = None
+        self._imagenet_mean: torch.Tensor | None = None
+        self._imagenet_std: torch.Tensor | None = None
 
     def health(self) -> dict[str, Any]:
         mock_mode = self._mock_mode()
         backend_mode = self._backend_mode()
-        loaded = mock_mode or bool(
-            self.spec.settings.get("server_address")
-            and self.spec.settings.get("model_path")
-        )
+        has_model = bool(self.spec.settings.get("model_path"))
+        has_endpoint = bool(self.spec.settings.get("action_chunk_endpoint"))
+        loaded = mock_mode or has_model or has_endpoint
         return {
             "name": self.service_id,
             "online": True,
@@ -357,13 +438,9 @@ class LeRobotVLAPolicyExecutor:
 
     def _mock_mode(self) -> bool:
         settings = self.spec.settings
-        if settings.get("action_chunk_endpoint"):
-            return False
         if "mock_mode" in settings:
             return bool(settings.get("mock_mode"))
-        if not settings.get("server_address"):
-            return True
-        return bool(not settings.get("model_path"))
+        return not (settings.get("model_path") or settings.get("action_chunk_endpoint"))
 
     def _backend_mode(self) -> str:
         settings = self.spec.settings
@@ -471,12 +548,6 @@ class LeRobotVLAPolicyExecutor:
         )
 
     def _real_inference(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Run an observation -> action-chunk policy step.
-
-        The Foundation executor must not construct a LeRobot RobotClient here:
-        that client owns cameras, arm ports, and a control loop. Until a real
-        external action-chunk policy client is configured, fail explicitly.
-        """
         arguments = dict(payload.get("arguments", {}) or {})
         observation = arguments.get("observation") or payload.get("observation")
         if not isinstance(observation, dict) or not observation.get("images"):
@@ -486,6 +557,14 @@ class LeRobotVLAPolicyExecutor:
                 "failure_mode": "observation_unavailable",
                 "summary": "VLA action_chunk_policy requires observation.images",
             }
+
+        model_path = self.spec.settings.get("model_path")
+        if model_path:
+            return self._direct_act_inference(
+                str(model_path),
+                observation=observation,
+            )
+
         endpoint = self.spec.settings.get("action_chunk_endpoint")
         if endpoint:
             return self._call_action_chunk_endpoint(
@@ -494,11 +573,12 @@ class LeRobotVLAPolicyExecutor:
                 arguments=arguments,
                 observation=observation,
             )
+
         return {
             "success": False,
             "status": "failed",
             "failure_mode": "action_chunk_policy_client_unavailable",
-            "summary": "external VLA action-chunk policy client is not configured",
+            "summary": "no VLA model_path or action_chunk_endpoint configured",
             "metrics": {
                 "vla": {
                     "backend_mode": "action_chunk_policy",
@@ -589,23 +669,204 @@ class LeRobotVLAPolicyExecutor:
             }
         return _action_chunk_policy_result(decoded, observation=observation)
 
-    def _base_config(self, payload: dict[str, Any]) -> dict[str, Any]:
-        arguments = dict(payload.get("arguments", {}) or {})
+    # -- direct ACT model inference -------------------------------------------
+
+    def _load_act_policy(self, model_path: str) -> None:
+        """Lazy-load the ACT policy model and normalization stats."""
+        if self._policy is not None:
+            return
+
+        from lerobot.policies.factory import get_policy_class
+        from safetensors.torch import load_file as load_safetensors
+
+        device = str(self.spec.settings.get("policy_device") or "cuda")
+        model_dir = Path(model_path)
+
+        state_dict = load_safetensors(str(model_dir / "model.safetensors"))
+        config = json.loads((model_dir / "config.json").read_text())
+
+        stats = _extract_input_stats(state_dict)
+        self._state_stat = stats.get("observation.state")
+        self._action_stat = _NormalizationStats(
+            mean=torch.tensor(_DEFAULT_ACTION_MEAN, device=device),
+            std=torch.tensor(_DEFAULT_ACTION_STD, device=device),
+        )
+        for s in (self._state_stat, self._action_stat):
+            if s is not None:
+                s.mean = s.mean.to(device)
+                s.std = s.std.to(device)
+
+        self._imagenet_mean = torch.tensor(_IMAGENET_MEAN, device=device).view(3, 1, 1)
+        self._imagenet_std = torch.tensor(_IMAGENET_STD, device=device).view(3, 1, 1)
+
+        policy_class = get_policy_class(config["type"])
+        self._policy = policy_class.from_pretrained(str(model_dir))
+        self._policy.to(device)
+        self._policy.eval()
+
+    def _direct_act_inference(
+        self,
+        model_path: str,
+        *,
+        observation: dict[str, Any],
+    ) -> dict[str, Any]:
+        try:
+            self._load_act_policy(model_path)
+        except ImportError as exc:
+            return {
+                "success": False,
+                "status": "failed",
+                "failure_mode": "missing_dependency",
+                "summary": f"ACT model dependencies unavailable: {exc}",
+                "error": str(exc),
+            }
+        except Exception as exc:
+            return {
+                "success": False,
+                "status": "failed",
+                "failure_mode": "model_load_failed",
+                "summary": f"Failed to load ACT model from {model_path}: {exc}",
+                "error": str(exc),
+            }
+
+        try:
+            obs_tensors = self._preprocess_act_observation(observation)
+        except Exception as exc:
+            return {
+                "success": False,
+                "status": "failed",
+                "failure_mode": "preprocessing_failed",
+                "summary": f"ACT preprocessing failed: {exc}",
+                "error": str(exc),
+            }
+
+        try:
+            raw = self._run_act_inference(obs_tensors)
+        except Exception as exc:
+            return {
+                "success": False,
+                "status": "failed",
+                "failure_mode": "inference_failed",
+                "summary": f"ACT inference failed: {type(exc).__name__}: {exc}",
+                "error": str(exc),
+                "metrics": {
+                    "vla": {
+                        "backend_mode": "action_chunk_policy",
+                        "frame_id": observation.get("frame_id"),
+                        "hardware_ownership": "none",
+                    }
+                },
+            }
+        actions_out = raw["actions"]
         return {
-            "server_address": self.spec.settings.get("server_address", ""),
-            "model_path": self.spec.settings.get("model_path")
-            or self.spec.settings.get("policy_name", ""),
-            "policy_type": self.spec.settings.get("policy_type", "act"),
-            "arm_port": self.spec.settings.get("arm_port", ""),
-            "camera_config": dict(self.spec.settings.get("camera_config", {}) or {}),
-            "task": arguments.get("task_prompt")
-            or self.spec.settings.get("task_prompt")
-            or payload.get("objective", "manipulate"),
-            "policy_device": self.spec.settings.get("policy_device", "cuda"),
-            "fps": int(self.spec.settings.get("fps", 30)),
-            "actions_per_chunk": int(self.spec.settings.get("actions_per_chunk", 50)),
-            "timeout_sec": float(payload.get("timeout_sec", 30.0)),
+            "success": True,
+            "status": "completed",
+            "summary": "ACT inference completed",
+            "metrics": {
+                "policy_result": {
+                    "kind": "action_chunk",
+                    "actions": actions_out,
+                    "action_space": "xlerobot_single_arm_joint",
+                    "embodiment": "xlerobot",
+                    "horizon": raw["horizon"],
+                    "done": False,
+                    "confidence": 0.8,
+                },
+                "action_chunk": {
+                    "kind": "action_chunk",
+                    "actions": actions_out,
+                    "action_space": "xlerobot_single_arm_joint",
+                    "embodiment": "xlerobot",
+                    "horizon": raw["horizon"],
+                    "done": False,
+                    "confidence": 0.8,
+                },
+                "vla": {
+                    "joint_angles": actions_out[0]["joints"] if actions_out else {},
+                    "gripper_action": actions_out[0]["gripper"] if actions_out else 0.0,
+                    "task_done": False,
+                    "backend_mode": "action_chunk_policy",
+                    "frame_id": observation.get("frame_id"),
+                    "hardware_ownership": "none",
+                },
+            },
         }
+
+    def _preprocess_act_observation(
+        self, observation: dict[str, Any]
+    ) -> dict[str, torch.Tensor]:
+        device = str(self.spec.settings.get("policy_device") or "cuda")
+        result: dict[str, torch.Tensor] = {}
+
+        images = observation.get("images")
+        if isinstance(images, list):
+            for img_entry in images:
+                camera = str(img_entry.get("camera", ""))
+                data = img_entry.get("data", "")
+                target_key = _CAMERA_KEY_MAP.get(camera)
+                if not target_key or not data:
+                    continue
+                try:
+                    raw = base64.b64decode(data)
+                    img = Image.open(io.BytesIO(raw)).convert("RGB")
+                    img = img.resize((640, 480), Resampling.BILINEAR)
+                    arr = np.array(img, dtype=np.float32) / 255.0
+                    tensor = torch.from_numpy(arr).permute(2, 0, 1).to(device)
+                    result[target_key] = tensor
+                except Exception as exc:
+                    logger = __import__("logging").getLogger(__name__)
+                    logger.debug(
+                        "Failed to decode ACT image from camera %s: %s", camera, exc
+                    )
+                    continue
+
+        state = observation.get("proprioception")
+        if isinstance(state, list) and len(state) >= 6:
+            state_deg = [
+                float(v) * _RAD_TO_DEG
+                for v in np.asarray(state[:6], dtype=np.float32).flat
+            ]
+            result["observation.state"] = torch.tensor(
+                state_deg, dtype=torch.float32, device=device
+            )
+        elif isinstance(state, (int, float)):
+            result["observation.state"] = torch.tensor(
+                [float(state)], dtype=torch.float32, device=device
+            )
+
+        return result
+
+    def _run_act_inference(self, obs: dict[str, torch.Tensor]) -> dict[str, Any]:
+        assert self._action_stat is not None, "ACT model not loaded"
+        assert self._imagenet_mean is not None, "ACT model not loaded"
+        assert self._imagenet_std is not None, "ACT model not loaded"
+        batch: dict[str, torch.Tensor] = {}
+        for key, value in obs.items():
+            if "state" in key and self._state_stat is not None:
+                value = self._state_stat.normalize(value)
+            elif "image" in key:
+                value = (value - self._imagenet_mean) / self._imagenet_std
+            batch[key] = value.unsqueeze(0)
+
+        with torch.no_grad():
+            action_chunk = self._policy.predict_action_chunk(batch)
+            if action_chunk.ndim == 3:
+                action_chunk = action_chunk.squeeze(0)
+
+        action_chunk = self._action_stat.unnormalize(action_chunk)
+        actions_raw = action_chunk.cpu().tolist()
+
+        actions_out: list[dict[str, Any]] = []
+        for action_vec in actions_raw:
+            joints: dict[str, float] = {}
+            for i, name in enumerate(_ACT_JOINT_NAMES):
+                if i < len(action_vec):
+                    joints[name] = round(float(action_vec[i]) * _DEG_TO_RAD, 6)
+            gripper_rad = joints.pop("gripper", 0.0)
+            gripper_pct = max(0.0, min(1.0, (gripper_rad + 0.1) / 1.3))
+            actions_out.append({"joints": joints, "gripper": gripper_pct})
+
+        return {"actions": actions_out, "horizon": len(actions_out)}
 
     @staticmethod
     def _lerobot_classes() -> tuple[Any, Any, Any, Any]:

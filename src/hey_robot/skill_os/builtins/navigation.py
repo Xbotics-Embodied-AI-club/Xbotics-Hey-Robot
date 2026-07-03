@@ -107,8 +107,6 @@ class BaseVelocityStepSkill(BaseSkill):
 
 
 class _VLNNavigationSkill(BaseSkill):
-    capability_name = ""
-
     async def execute(self, ctx, arguments):
         if ctx.model_services is None:
             return SkillResult(
@@ -131,7 +129,9 @@ class _VLNNavigationSkill(BaseSkill):
                 payload["reset_policy"] = False
             if look_down_requested:
                 payload["look_down"] = True
-            result = await ctx.model_services.call(self.capability_name, payload)
+            result = await ctx.model_services.call(
+                self.spec.required_model_service, payload
+            )
             planner_data = _extract_vln_planner(result)
             command: PrimitiveCommand | None = None
             try:
@@ -250,7 +250,6 @@ class _VLNNavigationSkill(BaseSkill):
 
 
 class NavigateToSkill(_VLNNavigationSkill):
-    capability_name = "navigate_to"
     spec = spec(
         "navigate_to",
         "Navigate toward a semantic target using a foundation VLN planner.",
@@ -283,7 +282,6 @@ class NavigateToSkill(_VLNNavigationSkill):
 
 
 class ApproachObjectSkill(_VLNNavigationSkill):
-    capability_name = "approach_object"
     spec = spec(
         "approach_object",
         "Approach a visible or named object using a foundation VLN planner.",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
 from hey_robot.protocol import RobotObservation
@@ -92,7 +93,7 @@ class SetGripperSkill(BaseSkill):
         return SkillResult(success=True, summary="Gripper command completed.")
 
 
-class _VLAManipulationSkill(BaseSkill):
+class _ManipulateSkillBase(BaseSkill):
     """Base class for VLA-driven manipulation skills.
 
     Runs a control loop in Skill OS:
@@ -102,8 +103,6 @@ class _VLAManipulationSkill(BaseSkill):
       4. Execute primitives on robot
       5. Repeat until task_done or max_steps reached
     """
-
-    capability_name: str = ""
 
     async def execute(self, ctx, arguments):
         if ctx.model_services is None:
@@ -128,13 +127,13 @@ class _VLAManipulationSkill(BaseSkill):
             arguments.get("task_prompt") or arguments.get("objective") or self.spec.name
         )
         steps: list[dict[str, Any]] = []
-        service_capability = self.spec.required_model_service or self.capability_name
+        service_capability = self.spec.required_model_service
 
         for step_index in range(max_steps):
             payload = _vla_payload(ctx, arguments)
             payload.update(
                 {
-                    "skill_name": self.capability_name,
+                    "skill_name": self.spec.name,
                     "task_prompt": task_prompt,
                     "vla_step": step_index,
                     "policy_session_id": payload.get("policy_session_id")
@@ -234,7 +233,7 @@ class _VLAManipulationSkill(BaseSkill):
             progress=progress,
             metadata={
                 "ux": {
-                    "skill": self.capability_name,
+                    "skill": self.spec.name,
                     "vla": vla,
                     "primitives": [
                         {"primitive": p.primitive, "arguments": dict(p.arguments)}
@@ -253,9 +252,11 @@ def _vla_payload(ctx: Any, arguments: dict[str, Any]) -> dict[str, Any]:
     }
     if "observation" not in payload and "image_path" not in payload:
         observation = ctx.current_observation() if ctx.current_observation else None
+        resolve_images = getattr(ctx, "resolve_images", None)
         observation_payload = _observation_payload(
             observation,
-            camera=payload.get("camera"),
+            camera=None,  # Send ALL cameras — VLA models need multiple views
+            resolve_images=resolve_images,
         )
         if observation_payload is not None:
             payload["observation"] = observation_payload
@@ -263,7 +264,10 @@ def _vla_payload(ctx: Any, arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def _observation_payload(
-    observation: RobotObservation | None, *, camera: object | None = None
+    observation: RobotObservation | None,
+    *,
+    camera: object | None = None,
+    resolve_images: Any = None,
 ) -> dict[str, Any] | None:
     if observation is None:
         return None
@@ -272,13 +276,73 @@ def _observation_payload(
         preferred = [image for image in images if image.camera == str(camera)]
         if preferred:
             images = preferred
+    image_dicts = _encode_images(images, resolve_images)
     return {
         "frame_id": observation.frame_id,
         "timestamp": observation.envelope.timestamp,
-        "images": [asdict(image) for image in images],
+        "images": image_dicts,
         "proprioception": list(observation.proprioception),
         "raw": dict(observation.raw),
     }
+
+
+def _encode_images(
+    images: list[Any], resolve_images: Any = None
+) -> list[dict[str, Any]]:
+    import base64
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    if resolve_images is not None:
+        try:
+            arrays = resolve_images(images)
+            if len(arrays) == len(images):
+                result: list[dict[str, Any]] = []
+                for ref, arr in zip(images, arrays, strict=False):
+                    if not isinstance(arr, np.ndarray):
+                        result.append(asdict(ref))
+                        continue
+                    pil = Image.fromarray(arr)
+                    buf = io.BytesIO()
+                    pil.save(buf, format="JPEG", quality=85)
+                    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                    entry = asdict(ref)
+                    entry["data"] = b64
+                    entry["format"] = "jpeg"
+                    result.append(entry)
+                return result
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).debug(
+                "Failed to resolve images via resolve_images", exc_info=True
+            )
+    # Fallback: try to read from file URIs
+    result = []
+    for ref in images:
+        entry = asdict(ref)
+        uri = str(getattr(ref, "uri", "") or "")
+        if uri.startswith("media://local/"):
+            rel = uri[len("media://local/") :]
+            candidate = Path(rel)
+            if candidate.is_file():
+                try:
+                    import base64 as _b64
+
+                    entry["data"] = _b64.b64encode(candidate.read_bytes()).decode(
+                        "ascii"
+                    )
+                    entry["format"] = "jpeg"
+                except Exception:
+                    import logging
+
+                    logging.getLogger(__name__).debug(
+                        "Failed to read media file from %s", candidate, exc_info=True
+                    )
+        result.append(entry)
+    return result
 
 
 def _extract_vla_policy_data(result: Any) -> dict[str, Any]:
@@ -307,79 +371,10 @@ def _vla_task_done(vla_data: dict[str, Any]) -> bool:
     return False
 
 
-class PickObjectSkill(_VLAManipulationSkill):
-    capability_name = "pick_object"
+class ManipulateSkill(_ManipulateSkillBase):
     spec = spec(
-        "pick_object",
-        "Pick up an object using the VLA manipulation policy.",
-        category="manipulation",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "task_prompt": {"type": "string"},
-                "objective": {"type": "string"},
-                "camera": {"type": "string"},
-                "max_steps": {"type": "integer"},
-            },
-            "required": ["task_prompt"],
-        },
-        required_resources=("arm", "gripper", "camera"),
-        dependencies=("inspect_scene",),
-        driver_primitives=("move_arm_joints", "set_gripper", "stop_motion"),
-        required_model_service="vla_manipulation",
-        safety_level="motion",
-        timeout_sec=60.0,
-        agent_visible=True,
-        feedback_mode="vision",
-        capability_type="object_pick",
-        goal_effects=("grasps_object",),
-        evidence_outputs=("vla_policy_result", "arm_action_result"),
-        cannot_satisfy=("weak_scene_observation",),
-    )
-
-
-class PlaceObjectSkill(_VLAManipulationSkill):
-    capability_name = "place_object"
-    spec = spec(
-        "place_object",
-        "Place a held object at a target location using the VLA manipulation policy.",
-        category="manipulation",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "task_prompt": {"type": "string"},
-                "objective": {"type": "string"},
-                "camera": {"type": "string"},
-                "max_steps": {"type": "integer"},
-            },
-            "required": ["task_prompt"],
-        },
-        required_resources=("arm", "gripper", "camera"),
-        dependencies=("inspect_scene",),
-        driver_primitives=("move_arm_joints", "set_gripper", "stop_motion"),
-        required_model_service="vla_manipulation",
-        safety_level="motion",
-        timeout_sec=60.0,
-        agent_visible=True,
-        feedback_mode="vision",
-        capability_type="object_place",
-        goal_effects=("places_object",),
-        evidence_outputs=("vla_policy_result", "arm_action_result"),
-        cannot_satisfy=("weak_scene_observation",),
-    )
-
-
-class VLAManipulationSkill(_VLAManipulationSkill):
-    """Backward-compatible generic VLA manipulation skill.
-
-    Accepts any task_prompt and delegates to the VLA policy service.
-    Use pick_object / place_object for semantic skill names.
-    """
-
-    capability_name = "vla_manipulation"
-    spec = spec(
-        "vla_manipulation",
-        "Run the deployed VLA policy for a natural-language arm manipulation task.",
+        "manipulate",
+        "Run the deployed manipulation policy for a natural-language arm task.",
         category="manipulation",
         input_schema={
             "type": "object",
@@ -391,17 +386,17 @@ class VLAManipulationSkill(_VLAManipulationSkill):
                 "execution_time": {"type": "number"},
                 "max_steps": {"type": "integer"},
             },
-            "required": ["task_prompt"],
+            "required": [],
         },
         required_resources=("arm", "gripper", "camera"),
         dependencies=("inspect_scene",),
         driver_primitives=("move_arm_joints", "set_gripper", "stop_motion"),
-        required_model_service="vla_manipulation",
+        required_model_service="manipulate",
         safety_level="motion",
         timeout_sec=60.0,
         agent_visible=True,
         feedback_mode="vision",
-        capability_type="vla_manipulation",
+        capability_type="manipulate",
         goal_effects=("manipulates_object",),
         evidence_outputs=("vla_policy_result", "arm_action_result"),
         cannot_satisfy=("weak_scene_observation",),

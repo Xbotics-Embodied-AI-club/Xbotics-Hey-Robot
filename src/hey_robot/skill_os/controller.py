@@ -184,9 +184,10 @@ class SkillControllerService:
     async def _accept_skill(
         self, policy_id: str, state: _SkillControllerState, intent: SkillIntent
     ) -> None:
+        resolved_args = {**dict(intent.arguments), "objective": intent.objective}
         contract, decision = self.skill_runtime.validate(
             intent.name,
-            intent.arguments,
+            resolved_args,
             enabled_only=bool(self.config.skills.enabled),
             status=state.latest_status,
             robot_type=self._robot_type(state.spec.robot_id),
@@ -441,7 +442,7 @@ class SkillControllerService:
         )
         result = await self.skill_runtime.execute(
             run.skill_name,
-            dict(intent.arguments),
+            {**dict(intent.arguments), "objective": intent.objective},
             context_factory=lambda invoke: self._plugin_context(
                 policy_id, state, run, invoke
             ),

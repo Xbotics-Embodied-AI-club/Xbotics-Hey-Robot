@@ -69,12 +69,12 @@ def vla_output_to_primitives(vla_result: dict[str, Any]) -> list[ArmPrimitive]:
 
 
 def _action_chunk_to_primitives(actions: list[Any]) -> list[ArmPrimitive]:
-    primitives: list[ArmPrimitive] = []
-    for index, item in enumerate(actions):
-        if not isinstance(item, dict):
-            continue
-        primitives.extend(_single_action_to_primitives(item, action_index=index))
-    return primitives
+    # Only execute the first action from each chunk — the VLA control loop
+    # re-runs inference at every step, so executing subsequent actions
+    # without re-observing would be open-loop drift.
+    if actions and isinstance(actions[0], dict):
+        return _single_action_to_primitives(actions[0], action_index=0)
+    return []
 
 
 def _single_action_to_primitives(

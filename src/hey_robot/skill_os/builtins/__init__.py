@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from hey_robot.skill_os.builtins.manipulation import (
+    ManipulateSkill,
     MoveArmJointsSkill,
-    PickObjectSkill,
-    PlaceObjectSkill,
     SetArmPoseSkill,
     SetGripperSkill,
-    VLAManipulationSkill,
 )
 from hey_robot.skill_os.builtins.navigation import (
     ApproachObjectSkill,
@@ -41,8 +39,6 @@ def register_skills(registry: SkillRegistry) -> None:
         SetArmPoseSkill(),
         MoveArmJointsSkill(),
         SetGripperSkill(),
-        VLAManipulationSkill(),
-        PickObjectSkill(),
-        PlaceObjectSkill(),
+        ManipulateSkill(),
     ):
         registry.register(skill)
