@@ -54,7 +54,6 @@ from hey_robot.cognition.task_contract import (
     TaskContract,
     TaskEvidenceEvaluator,
     build_task_contract,
-    capability_type_for_name,
 )
 from hey_robot.cognition.tools.registry import ToolRegistry
 from hey_robot.foundation.catalog.resolver import ToolPolicyResolver
@@ -181,7 +180,7 @@ class AgentRuntime:
     ) -> None:
         self._provider = provider
         self.max_iterations = max(1, int(max_iterations))
-        self.tools = tool_registry or ToolRegistry()
+        self.tools = tool_registry if tool_registry is not None else ToolRegistry()
         self.model_loop = ModelLoop(provider=provider, tools=self.tools)
         self.state = AgentState()
         self.prompt_templates = prompt_templates or load_agent_prompt_templates()
@@ -976,13 +975,12 @@ class AgentRuntime:
     ) -> AgentRuntimeResult | None:
         if tool_result.tool != "request_skill" or not tool_result.tool_success:
             return None
-        capability = str(tool_result.args.get("skill") or "").strip()
-        if not capability or is_perception_skill_name(capability):
+        skill = str(tool_result.args.get("skill") or "").strip()
+        if not skill or is_perception_skill_name(skill):
             return None
-        if task_contract.required_capability is None:
+        if task_contract.required_skill is None:
             return None
-        actual_type = capability_type_for_name(capability, evidence_ledger.semantics)
-        if actual_type != task_contract.required_capability.type:
+        if skill != task_contract.required_skill.name:
             return None
         feedback = _execution_feedback_fields(tool_result.result)
         if feedback.get("subgoal_success") is not True:
@@ -1171,15 +1169,16 @@ class AgentRuntime:
             f"task_type: {contract.task_type}",
             f"user_goal: {contract.user_goal}",
         ]
-        if contract.required_capability is not None:
+        if contract.required_skill is not None:
+            lines.append(f"required_skill: {contract.required_skill.name}")
             lines.append(
-                f"required_capability_type: {contract.required_capability.type}"
+                f'recommended_skill_call: request_skill(skill="{contract.required_skill.name}", ...)'
             )
-            if contract.required_capability.constraints:
+            if contract.required_skill.constraints:
                 lines.append(
-                    "required_capability_constraints: "
+                    "required_skill_slots: "
                     + json.dumps(
-                        contract.required_capability.constraints,
+                        contract.required_skill.constraints,
                         ensure_ascii=False,
                         sort_keys=True,
                     )
@@ -1189,13 +1188,12 @@ class AgentRuntime:
                 "completion_evidence_required: "
                 + ", ".join(contract.completion_evidence_required)
             )
-        if contract.allowed_supporting_capabilities:
+        if contract.allowed_supporting_skills:
             lines.append(
-                "supporting_capabilities: "
-                + ", ".join(contract.allowed_supporting_capabilities)
+                "supporting_skills: " + ", ".join(contract.allowed_supporting_skills)
             )
         lines.append(
-            "final_response_rule: final-answer only when required evidence is present, or after a concrete safety/capability refusal."
+            "final_response_rule: final-answer only when required evidence is present, or after a concrete safety/skill refusal."
         )
         return "\n".join(lines)
 
@@ -1214,6 +1212,10 @@ class AgentRuntime:
             "cannot",
             "can't",
             "unable",
+            "do not have",
+            "don't have",
+            "no fresh",
+            "perception unavailable",
             "failed",
             "not safe",
             "无法",
@@ -1222,16 +1224,14 @@ class AgentRuntime:
             "不安全",
             "没有成功",
         )
-        if contract.required_capability is not None and any(
+        if contract.required_skill is not None and any(
             marker in lowered for marker in refusal_markers
         ):
             refusal_evaluation = EvaluationResult(
                 can_finalize=True,
                 goal_satisfied=False,
                 missing_evidence=evaluation.missing_evidence,
-                reason=(
-                    "final candidate reports a concrete safety or capability refusal"
-                ),
+                reason=("final candidate reports a concrete safety or skill refusal"),
             )
             self._record_task_evaluation(contract, ledger, refusal_evaluation, content)
             return refusal_evaluation
@@ -1267,10 +1267,10 @@ class AgentRuntime:
     def _seed_observation_evidence(
         self, contract: TaskContract, ledger: EvidenceLedger
     ) -> None:
-        if (
-            contract.required_capability is None
-            or contract.required_capability.type != "scene_observation"
-        ):
+        if contract.required_skill is None or contract.required_skill.name not in {
+            "inspect_scene",
+            "request_perception",
+        }:
             return
         for record in self.state.tool_calls:
             if not is_perception_evidence_record(
@@ -1393,24 +1393,24 @@ class AgentRuntime:
     ) -> str | None:
         if tool not in {"request_skill", "request_perception"}:
             return None
-        capability = str(args.get("skill") or "").strip()
+        skill = str(args.get("skill") or "").strip()
         objective = str(args.get("objective") or "").strip()
         safety_level = (
             "observe"
             if tool == "request_perception"
-            else _resolve_capability_safety_level(capability)
+            else _resolve_skill_safety_level(skill)
         )
         if success:
-            self.state.last_capability_safety_level = safety_level
-            self.state.last_capability_name = capability or None
+            self.state.last_skill_safety_level = safety_level
+            self.state.last_skill_name = skill or None
             lines = [
                 "Task continuation guidance:",
                 f"- original_task: {payload.task}",
             ]
             if objective:
                 lines.append(f"- latest_completed_step: {objective}")
-            if capability:
-                lines.append(f"- latest_capability: {capability}")
+            if skill:
+                lines.append(f"- latest_skill: {skill}")
             if safety_level in {"motion", "actuate"}:
                 lines.extend(
                     [
@@ -1428,8 +1428,11 @@ class AgentRuntime:
                 action_required = _task_requires_action(task_contract)
                 if action_required:
                     assert task_contract is not None  # implied by _task_requires_action
-                    required_cap = task_contract.required_capability
-                    cap_name = required_cap.type if required_cap else "navigate_to"
+                    cap_name = (
+                        task_contract.required_skill.name
+                        if task_contract.required_skill is not None
+                        else "navigate_to"
+                    )
                     lines.extend(
                         [
                             f'- perception_done: 已经获得了场景感知结果，现在必须调用 request_skill(skill="{cap_name}", ...) 来做实质动作。',
@@ -1456,8 +1459,8 @@ class AgentRuntime:
         ]
         if objective:
             lines.append(f"- failed_step: {objective}")
-        if capability:
-            lines.append(f"- failed_capability: {capability}")
+        if skill:
+            lines.append(f"- failed_skill: {skill}")
         if safety_level in {"motion", "actuate"}:
             lines.append(
                 "- motion_failed: 重试或改用其他动作前，先检查相机和机器人状态。"
@@ -1466,10 +1469,10 @@ class AgentRuntime:
             safety_level == "observe" or tool == "request_perception"
         ):
             assert task_contract is not None  # implied by _task_requires_action
-            required_cap = task_contract.required_capability
             cap_hint = ""
-            if required_cap is not None:
-                cap_hint = f'使用 request_skill(skill="{required_cap.type}", ...) 来执行任务要求的动作。'
+            if task_contract.required_skill is not None:
+                cap_name = task_contract.required_skill.name
+                cap_hint = f'使用 request_skill(skill="{cap_name}", ...) 来执行任务要求的动作。'
             lines.extend(
                 [
                     f"- perception_failed_but_action_required: 感知未成功，但不要反复重试感知。{cap_hint}",
@@ -1542,29 +1545,29 @@ def _task_requires_action(task_contract: TaskContract | None) -> bool:
         return False
     if task_contract.task_type in {"motion", "actuation"}:
         return True
-    if task_contract.required_capability is not None:
-        cap_type = task_contract.required_capability.type
-        if cap_type in {
-            "base_move",
-            "base_turn",
+    if task_contract.required_skill is not None:
+        skill_name = task_contract.required_skill.name
+        if skill_name in {
+            "move_base",
+            "turn_base",
             "human_follow",
-            "semantic_navigation",
-            "object_approach",
-            "gripper_control",
-            "arm_pose",
-            "arm_joint_delta",
+            "navigate_to",
+            "approach_object",
+            "set_gripper",
+            "set_arm_pose",
+            "move_arm_joints",
         }:
             return True
     return False
 
 
-def _resolve_capability_safety_level(capability: str) -> str | None:
-    if not capability:
+def _resolve_skill_safety_level(skill: str) -> str | None:
+    if not skill:
         return None
     try:
         from hey_robot.skill_os.registry import load_skill_registry
 
-        contract = load_skill_registry().catalog(enabled_only=False).get(capability)
+        contract = load_skill_registry().catalog(enabled_only=False).get(skill)
         return contract.safety_level
     except Exception:
         return None

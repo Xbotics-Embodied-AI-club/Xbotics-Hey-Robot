@@ -114,7 +114,7 @@ def test_memory_runtime_writes_structured_preference_anchor_and_lesson(
     assert lesson["metadata"]["failure_mode"] == "viewpoint_bad"
 
 
-def test_memory_runtime_records_capability_tool_result(tmp_path) -> None:
+def test_memory_runtime_records_skill_tool_result(tmp_path) -> None:
     store = LongTermMemoryStore(tmp_path / "long_term.jsonl")
     runtime = MemoryRuntime(store)
 
@@ -174,7 +174,7 @@ def test_memory_runtime_skips_transient_safety_gate_failures(tmp_path) -> None:
         "request_skill",
         {"skill": "turn_base", "slots": {"direction": "left"}},
         (
-            "RuntimeError: ConsecutiveMotionBlocked: last capability 'move_base' "
+            "RuntimeError: ConsecutiveMotionBlocked: last skill 'move_base' "
             "was also a motion/actuation skill. Run inspect_scene or "
             "request_perception to collect fresh visual evidence before issuing "
             "another motion command."
@@ -187,7 +187,7 @@ def test_memory_runtime_skips_transient_safety_gate_failures(tmp_path) -> None:
     assert store.query("turn_base", kind="task_lesson") == []
 
 
-def test_memory_runtime_uses_execution_feedback_success_for_capability_result(
+def test_memory_runtime_uses_execution_feedback_success_for_skill_result(
     tmp_path,
 ) -> None:
     store = LongTermMemoryStore(tmp_path / "long_term.jsonl")

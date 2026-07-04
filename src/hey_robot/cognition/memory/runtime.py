@@ -306,7 +306,7 @@ def _skill_experience_arguments(args: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value
         for key, value in args.items()
-        if key not in {"capability", "objective", "interrupt"} and value is not None
+        if key not in {"skill", "objective", "interrupt"} and value is not None
     }
 
 

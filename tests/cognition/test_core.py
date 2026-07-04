@@ -168,6 +168,28 @@ def test_robot_agent_core_agent_mode_uses_runtime_tool() -> None:
     assert result.reply_text == "open drawer task acknowledged."
 
 
+def test_robot_agent_core_binds_tools_to_runtime_registry() -> None:
+    from tests.conftest import FakeProvider
+
+    core = RobotAgentCore(
+        agent_id="main",
+        spec=AgentSpec(type="robot_agent", settings={"max_iterations": 1}),
+        io=FakeAgentIO(),
+        provider=FakeProvider("ok"),
+    )
+
+    assert core.runtime.model_loop.tools is core.runtime.tools
+    assert core.runtime.tool_executor.registry is core.runtime.tools
+    assert core.runtime.tool_executor.tool_policy_resolver is not None
+    assert (
+        core.runtime.tool_executor.tool_policy_resolver.registry is core.runtime.tools
+    )
+
+    tool_names = {tool["name"] for tool in core.runtime.model_loop.tools.list_tools()}
+    assert "request_skill" in tool_names
+    assert "get_robot_status" in tool_names
+
+
 def test_robot_agent_core_routes_stop_without_provider() -> None:
     from tests.conftest import FakeProvider
 
@@ -603,16 +625,23 @@ def test_robot_agent_core_scene_question_requires_perception_evidence() -> None:
     assert "Scene summary: desk ahead." in provider.last_messages[-1].content
 
 
-def test_robot_agent_core_skips_active_perception_when_observation_is_fresh() -> None:
+def test_robot_agent_core_does_not_treat_fresh_raw_observation_as_scene_evidence() -> (
+    None
+):
     from tests.conftest import FakeProvider
 
-    provider = FakeProvider("The latest frame is available.")
+    provider = FakeProvider(
+        ["The latest frame is available.", "The camera evidence shows a desk."]
+    )
     io = FakeAgentIO()
     core = RobotAgentCore(
         agent_id="main",
         spec=AgentSpec(
             type="robot_agent",
-            settings={"max_iterations": 1, "active_perception_max_age_sec": 30.0},
+            settings={
+                "max_iterations": 2,
+                "active_perception_max_age_sec": 30.0,
+            },
         ),
         io=io,
         provider=provider,
@@ -626,6 +655,13 @@ def test_robot_agent_core_skips_active_perception_when_observation_is_fresh() ->
         envelope=Envelope(agent_id="main", robot_id="mock0"), text="你看到了什么"
     )
 
+    async def submit_and_resolve(skill: SkillIntent) -> None:
+        io.skills.append(skill)
+        assert skill.name == "inspect_scene"
+        assert core.resolve_skill(skill.skill_id, "perception refreshed")
+
+    io.submit_skill = submit_and_resolve  # type: ignore[method-assign]
+
     result = asyncio.run(
         _run_core_turn_with_policy(
             core,
@@ -634,8 +670,13 @@ def test_robot_agent_core_skips_active_perception_when_observation_is_fresh() ->
         )
     )
 
-    assert result.reply_text == "The latest frame is available."
-    assert io.skills == []
+    assert result.reply_text == "The camera evidence shows a desk."
+    assert io.skills[0].name == "inspect_scene"
+    assert provider.last_messages is not None
+    assert (
+        "Perception evidence from request_perception"
+        in provider.last_messages[-1].content
+    )
 
 
 def test_robot_agent_core_uses_tool_result_as_reply_when_runtime_budget_expires() -> (
@@ -685,9 +726,7 @@ def test_robot_agent_core_uses_tool_result_as_reply_when_runtime_budget_expires(
     assert result.metadata["stop_reason"] == "text_response"
 
 
-def test_robot_agent_core_marks_capability_backed_final_response_as_task_finished() -> (
-    None
-):
+def test_robot_agent_core_marks_skill_backed_final_response_as_task_finished() -> None:
     from tests.conftest import FakeProvider
 
     provider = FakeProvider(

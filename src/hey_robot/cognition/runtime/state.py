@@ -19,8 +19,8 @@ class AgentState:
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
     last_observation_summary: str | None = None
     last_error: str | None = None
-    last_capability_safety_level: str | None = None
-    last_capability_name: str | None = None
+    last_skill_safety_level: str | None = None
+    last_skill_name: str | None = None
 
     def reset(self) -> None:
         self.task = ""
@@ -28,8 +28,8 @@ class AgentState:
         self.tool_calls.clear()
         self.last_observation_summary = None
         self.last_error = None
-        self.last_capability_safety_level = None
-        self.last_capability_name = None
+        self.last_skill_safety_level = None
+        self.last_skill_name = None
 
     def add_message(self, role: str, content: str | None) -> None:
         text = (content or "").strip()

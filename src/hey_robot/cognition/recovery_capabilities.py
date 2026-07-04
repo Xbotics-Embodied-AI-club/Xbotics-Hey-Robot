@@ -2,13 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-RECOVERY_SAFE_CAPABILITIES = frozenset(
-    {"inspect_scene", "stop_motion", "reset_posture"}
-)
+RECOVERY_SAFE_SKILLS = frozenset({"inspect_scene", "stop_motion", "reset_posture"})
 
 
-def is_recovery_safe_capability(skill_name: str, slots: dict[str, Any] | None) -> bool:
-    if skill_name in RECOVERY_SAFE_CAPABILITIES:
+def is_recovery_safe_skill(skill_name: str, slots: dict[str, Any] | None) -> bool:
+    if skill_name in RECOVERY_SAFE_SKILLS:
         return True
     if skill_name != "set_gripper":
         return False

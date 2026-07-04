@@ -273,11 +273,11 @@ class TaskRecoveryPlanner:
         failure_mode = str(
             result.failure_mode or result.metadata.get("failure_mode") or ""
         ).lower()
-        capability_error = _capability_unavailable_reason(result, failure_mode)
-        if capability_error is not None:
+        skill_error = _skill_unavailable_reason(result, failure_mode)
+        if skill_error is not None:
             return RecoveryPlaybook(
                 RecoveryStrategy.CLARIFY,
-                capability_error,
+                skill_error,
                 severity="operator_required",
                 actions=(
                     RecoveryAction.HOLD_TASK,
@@ -289,7 +289,7 @@ class TaskRecoveryPlanner:
                     "skill_id": result.skill_id,
                     "status": result.status,
                     "failure_mode": failure_mode or None,
-                    "failure_class": "capability_unavailable",
+                    "failure_class": "skill_unavailable",
                     "recovery_hints": hints,
                 },
             ).decision()
@@ -469,32 +469,34 @@ class TaskRecoveryPlanner:
         ).decision()
 
 
-def _capability_unavailable_reason(
-    result: SkillResult, failure_mode: str
-) -> str | None:
+def _skill_unavailable_reason(result: SkillResult, failure_mode: str) -> str | None:
     text = _failure_text(result, failure_mode)
     if not any(
         marker in text
         for marker in (
             "capability not available",
             "capability unavailable",
+            "skill not available",
+            "skill unavailable",
             "toolunavailable:",
             "not available in this execution context",
             "unsupported capability",
             "unknown capability",
+            "unsupported skill",
+            "unknown skill",
         )
     ):
         return None
-    capability = str(
+    skill = str(
         result.name
-        or result.metadata.get("capability")
+        or result.metadata.get("skill")
         or result.metadata.get("tool")
         or result.skill_id
         or ""
     ).strip()
-    if capability:
-        return f"当前环境不支持“{capability}”这个能力，不能直接重试。请换一个已支持的动作或让我先查看可用能力。"
-    return "当前环境不支持这个能力，不能直接重试。请换一个已支持的动作或让我先查看可用能力。"
+    if skill:
+        return f"当前环境不支持“{skill}”这个技能，不能直接重试。请换一个已支持的动作或让我先查看可用技能。"
+    return "当前环境不支持这个技能，不能直接重试。请换一个已支持的动作或让我先查看可用技能。"
 
 
 def _parameter_error_reason(result: SkillResult, failure_mode: str) -> str | None:

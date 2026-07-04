@@ -18,7 +18,6 @@ class InspectSceneSkill(BaseSkill):
         safety_level="observe",
         timeout_sec=20.0,
         feedback_mode="vision",
-        capability_type="scene_observation",
         goal_effects=("updates_visual_context",),
         evidence_outputs=("weak_scene_observation",),
         cannot_satisfy=(
@@ -61,7 +60,6 @@ class LookAroundSkill(BaseSkill):
         safety_level="observe",
         timeout_sec=30.0,
         feedback_mode="vision",
-        capability_type="scene_observation",
         goal_effects=("updates_visual_context",),
         evidence_outputs=("weak_scene_observation",),
         cannot_satisfy=(
@@ -105,7 +103,6 @@ class DetectMarkerSkill(BaseSkill):
         timeout_sec=6.0,
         agent_visible=False,
         feedback_mode="vision",
-        capability_type="marker_detection",
         goal_effects=("detects_workspace_marker",),
         evidence_outputs=("marker_detection_result",),
         cannot_satisfy=("weak_scene_observation",),

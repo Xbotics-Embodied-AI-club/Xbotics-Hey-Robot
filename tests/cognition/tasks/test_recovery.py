@@ -111,7 +111,7 @@ def test_task_recovery_planner_marks_invalid_joint_as_parameter_error() -> None:
     assert "wrist_yaw" in decision.summary
 
 
-def test_task_recovery_planner_marks_capability_unavailable_as_non_retryable() -> None:
+def test_task_recovery_planner_marks_skill_unavailable_as_non_retryable() -> None:
     planner = TaskRecoveryPlanner()
     decision = planner.decide(
         task=None,
@@ -120,8 +120,8 @@ def test_task_recovery_planner_marks_capability_unavailable_as_non_retryable() -
             skill_id="cmd1",
             name="human_follow",
             status="failed",
-            failure_mode="capability_not_available",
-            error="capability not available: human_follow",
+            failure_mode="skill_not_available",
+            error="skill not available: human_follow",
         ),
         status=None,
     )
@@ -129,7 +129,7 @@ def test_task_recovery_planner_marks_capability_unavailable_as_non_retryable() -
     assert decision.needed is True
     assert decision.strategy == "clarify"
     assert decision.retryable is False
-    assert decision.metadata["failure_class"] == "capability_unavailable"
+    assert decision.metadata["failure_class"] == "skill_unavailable"
     assert "human_follow" in decision.summary
 
 

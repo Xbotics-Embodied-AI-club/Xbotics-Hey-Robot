@@ -85,7 +85,12 @@ def _build_provider(cfg: dict[str, Any], *, purpose: str) -> ReasoningProvider:
             model=model,
             api_base=configured_api_base,
         )
-        api_base = configured_api_base or provider.default_api_base
+        strict_tools = bool(cfg.get("strict_tools", False))
+        api_base = _resolve_provider_api_base(
+            configured_api_base or provider.default_api_base,
+            provider_name=provider.name,
+            strict_tools=strict_tools,
+        )
         headers = {
             **provider.default_headers,
             **dict(cfg.get("extra_headers", {}) or {}),
@@ -100,6 +105,7 @@ def _build_provider(cfg: dict[str, Any], *, purpose: str) -> ReasoningProvider:
             use_responses_api=cfg.get("use_responses_api"),
             provider_name=provider.name,
             supports_required_tool_choice=provider.name != "deepseek",
+            strict_tools=strict_tools,
         )
     raise ValueError(f"unsupported provider: {provider_type}")
 
@@ -142,3 +148,14 @@ def _resolve_configured_api_base(cfg: dict[str, Any]) -> str | None:
                 return resolved
             raise ValueError(f"model provider env var is empty: {env_key}")
     return None
+
+
+def _resolve_provider_api_base(
+    api_base: str | None, *, provider_name: str, strict_tools: bool
+) -> str | None:
+    if not api_base or provider_name != "deepseek" or not strict_tools:
+        return api_base
+    normalized = api_base.rstrip("/")
+    if normalized in {"https://api.deepseek.com", "https://api.deepseek.com/v1"}:
+        return "https://api.deepseek.com/beta"
+    return api_base

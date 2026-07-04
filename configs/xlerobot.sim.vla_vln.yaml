@@ -250,7 +250,6 @@ agents:
       providers:
         planner:
           type: deepseek
-          model: deepseek-chat
           model_env: DEEPSEEK_MODEL
           api_key_env: DEEPSEEK_API_KEY
           base_url_env: DEEPSEEK_BASE_URL

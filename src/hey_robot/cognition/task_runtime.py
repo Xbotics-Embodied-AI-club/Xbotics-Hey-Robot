@@ -1124,7 +1124,7 @@ def _continuation_guidance_for_resume(strategy: str) -> str:
         ),
         "degraded_continue": (
             "Continue the original task while working around the degraded resource. "
-            "Avoid relying on the degraded capability and prefer alternative approaches."
+            "Avoid relying on the degraded skill and prefer alternative approaches."
         ),
         "safe_abort": "Do not continue autonomous actuation; stop and wait for operator intervention.",
         "ask_operator": "Route the task back to the user or operator before continuing.",

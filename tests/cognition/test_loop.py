@@ -1308,7 +1308,7 @@ def test_robot_agent_service_confirmed_pending_confirmation_reports_motion_guard
 
     async def blocked_request_skill(*_args: object, **_kwargs: object) -> str:
         raise RuntimeError(
-            "ConsecutiveMotionBlocked: last capability 'move_base' was also a "
+            "ConsecutiveMotionBlocked: last skill 'move_base' was also a "
             "motion/actuation skill. Run inspect_scene first."
         )
 

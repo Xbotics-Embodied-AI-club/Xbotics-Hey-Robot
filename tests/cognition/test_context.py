@@ -188,7 +188,7 @@ def test_robot_memory_context_builder_orders_catalog_current_and_long_term_memor
     )
     builder = RobotMemoryContextBuilder(
         memory=MemoryRuntime(store),
-        robot_skill_catalog_context_provider=lambda: "Robot capability catalog",
+        robot_skill_catalog_context_provider=lambda: "Robot skill catalog",
     )
 
     context = builder.build(
@@ -199,7 +199,7 @@ def test_robot_memory_context_builder_orders_catalog_current_and_long_term_memor
 
     assert context is not None
     assert context.startswith(
-        "Robot capability catalog\n\nTask context\n\nPerception context\n\nLong-term memory:\n"
+        "Robot skill catalog\n\nTask context\n\nPerception context\n\nLong-term memory:\n"
     )
     assert "response_language=zh-CN" in context
     assert "entity:cup: cup is on the workbench" in context

@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from hey_robot.cognition.recovery_capabilities import is_recovery_safe_capability
+from hey_robot.cognition.recovery_capabilities import is_recovery_safe_skill
 from hey_robot.cognition.task_safety import evaluate_skill_request
 from hey_robot.protocol import Envelope, SkillIntent
 from hey_robot.skill_os.base import SkillCatalog
@@ -68,7 +68,7 @@ class SkillGateway:
             raise ValueError("objective must not be empty")
 
         slots = dict(request.slots or {})
-        if self._recovery_required() and not is_recovery_safe_capability(skill, slots):
+        if self._recovery_required() and not is_recovery_safe_skill(skill, slots):
             raise RuntimeError(
                 "recovery required; inspect, stop, reset, or open the gripper before issuing another skill"
             )
@@ -237,14 +237,14 @@ def _check_consecutive_motion(
     skill_name: str,
     runtime_state: object,
 ) -> str | None:
-    last_level = getattr(runtime_state, "last_capability_safety_level", None)
-    last_name = getattr(runtime_state, "last_capability_name", None)
+    last_level = getattr(runtime_state, "last_skill_safety_level", None)
+    last_name = getattr(runtime_state, "last_skill_name", None)
     if last_level not in {"motion", "actuate"}:
         return None
     if skill_name == "stop_motion":
         return None
     return (
-        f"ConsecutiveMotionBlocked: last capability {last_name!r} was also a motion/actuation skill. "
+        f"ConsecutiveMotionBlocked: last skill {last_name!r} was also a motion/actuation skill. "
         "Run inspect_scene or request_perception to collect fresh visual evidence "
         "before issuing another motion command."
     )

@@ -71,7 +71,7 @@ def test_consecutive_motion_blocked_reply_is_user_facing() -> None:
         tool="request_skill",
         args={"skill": "move_base"},
         result=(
-            "ConsecutiveMotionBlocked: last capability 'move_base' was also a "
+            "ConsecutiveMotionBlocked: last skill 'move_base' was also a "
             "motion/actuation skill. Run inspect_scene first."
         ),
         success=False,

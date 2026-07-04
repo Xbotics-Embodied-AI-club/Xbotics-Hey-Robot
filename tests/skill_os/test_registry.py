@@ -578,7 +578,7 @@ def test_vla_skill_injects_observation_and_consumes_typed_policy_result() -> Non
     ]
 
 
-def test_runtime_executes_navigate_to_skill_through_capability() -> None:
+def test_runtime_executes_navigate_to_skill_through_model_service() -> None:
     class ModelServiceAPI:
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict]] = []
@@ -757,7 +757,9 @@ def test_approach_object_skill_executes_stop_from_vln_planner() -> None:
     assert result.data["steps"][0]["primitive"] == "stop_motion"
 
 
-def test_navigate_to_skill_does_not_execute_primitive_when_capability_fails() -> None:
+def test_navigate_to_skill_does_not_execute_primitive_when_model_service_fails() -> (
+    None
+):
     class ModelServiceAPI:
         async def call(self, name: str, arguments: dict):
             del name, arguments
@@ -1254,25 +1256,27 @@ def test_registry_rejects_duplicate_provides() -> None:
         registry.register(duplicate)
 
 
-def test_robot_skill_catalog_exposes_capability_semantics() -> None:
+def test_robot_skill_catalog_exposes_skill_evidence_semantics() -> None:
     catalog = load_skill_registry().robot_skill_catalog()
 
     turn_base = catalog.get("turn_base")
     inspect_scene = catalog.get("inspect_scene")
 
-    assert turn_base.capability_type == "base_turn"
+    assert turn_base.name == "turn_base"
+    assert turn_base.category == "base"
     assert turn_base.evidence_outputs == ("base_turn_action_result",)
-    assert inspect_scene.capability_type == "scene_observation"
+    assert inspect_scene.name == "inspect_scene"
+    assert inspect_scene.category == "perception"
     assert "base_turn_action_result" in inspect_scene.cannot_satisfy
     assert catalog.get("detect_marker").evidence_outputs == ("marker_detection_result",)
 
     navigate_to = catalog.get("navigate_to")
     approach_object = catalog.get("approach_object")
 
-    assert navigate_to.capability_type == "semantic_navigation"
+    assert navigate_to.name == "navigate_to"
     assert navigate_to.evidence_outputs[0] == "vln_planner_result"
     assert navigate_to.required_model_service == "navigate_to"
-    assert approach_object.capability_type == "object_approach"
+    assert approach_object.name == "approach_object"
     assert approach_object.evidence_outputs[0] == "vln_planner_result"
     assert approach_object.required_model_service == "approach_object"
 

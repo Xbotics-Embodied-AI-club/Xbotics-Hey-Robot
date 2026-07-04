@@ -12,6 +12,7 @@ from hey_robot.providers import (
 )
 from hey_robot.providers.openai_compat_provider import (
     _to_openai_message,
+    _to_openai_tool,
     _validate_required_tool_call,
 )
 
@@ -160,6 +161,74 @@ def test_deepseek_provider_disables_required_tool_choice(monkeypatch) -> None:
 
     assert isinstance(provider, OpenAICompatReasoningProvider)
     assert provider.supports_required_tool_choice is False
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    ["https://api.deepseek.com", "https://api.deepseek.com/v1"],
+)
+def test_deepseek_strict_tools_uses_beta_base_url(monkeypatch, base_url: str) -> None:
+    monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-key")
+    monkeypatch.setenv("DEEPSEEK_BASE_URL", base_url)
+    config = DeploymentConfig(
+        agents={
+            "main": AgentSpec(
+                type="robot_agent",
+                settings={
+                    "providers": {
+                        "planner": {
+                            "type": "deepseek",
+                            "model_env": "DEEPSEEK_MODEL",
+                            "api_key_env": "DEEPSEEK_API_KEY",
+                            "base_url_env": "DEEPSEEK_BASE_URL",
+                            "strict_tools": True,
+                        }
+                    }
+                },
+            )
+        }
+    )
+
+    provider = build_provider(config, "main", purpose="planner")
+
+    assert isinstance(provider, OpenAICompatReasoningProvider)
+    assert provider.api_base == "https://api.deepseek.com/beta"
+    assert provider.strict_tools is True
+
+
+def test_strict_tool_schema_matches_deepseek_requirements() -> None:
+    tool = _to_openai_tool(
+        {
+            "name": "request_skill",
+            "description": "Request one robot skill.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "skill": {"type": "string", "minLength": 1},
+                    "slots": {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "target": {"type": "string"},
+                        },
+                    },
+                },
+                "required": ["skill"],
+            },
+        },
+        strict=True,
+    )
+
+    function = tool["function"]
+    schema = function["parameters"]
+
+    assert function["strict"] is True
+    assert schema["required"] == ["skill", "slots"]
+    assert schema["additionalProperties"] is False
+    assert "minLength" not in schema["properties"]["skill"]
+    assert schema["properties"]["slots"]["type"] == "object"
+    assert schema["properties"]["slots"]["required"] == ["target"]
+    assert schema["properties"]["slots"]["additionalProperties"] is False
 
 
 def test_assistant_history_preserves_tool_calls() -> None:

@@ -18,7 +18,6 @@ class StopMotionSkill(BaseSkill):
         safety_level="stop",
         timeout_sec=8.0,
         feedback_mode="none",
-        capability_type="stop_motion",
         goal_effects=("stops_robot_motion",),
         evidence_outputs=("stop_motion_result",),
     )
@@ -39,7 +38,6 @@ class ResetPostureSkill(BaseSkill):
         safety_level="stop",
         timeout_sec=15.0,
         feedback_mode="none",
-        capability_type="reset_posture",
         goal_effects=("restores_safe_posture",),
         evidence_outputs=("reset_posture_result",),
     )

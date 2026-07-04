@@ -70,7 +70,7 @@ def _service(tmp_path) -> SkillControllerService:
     return service
 
 
-def _service_with_vla_capability(
+def _service_with_vla_skill_service(
     tmp_path, *, settings: dict | None = None, locomotion_settings: dict | None = None
 ) -> SkillControllerService:
     config = DeploymentConfig.from_dict(
@@ -1551,7 +1551,7 @@ def test_camera_auto_injection_in_plugin_context(tmp_path, monkeypatch) -> None:
         name="test_skill",
         description="skill requiring camera",
         required_resources=("camera",),
-        required_model_service="test_capability",
+        required_model_service="test_skill_service",
     )
     intent = SkillIntent(
         envelope=Envelope(trace_id="tr1", robot_id="xlerobot"),
@@ -1578,7 +1578,7 @@ def test_camera_auto_injection_in_plugin_context(tmp_path, monkeypatch) -> None:
 
     ctx = service._plugin_context("embodied_skills", state, run, lambda _n, _a: None)
 
-    asyncio.run(ctx.model_services.call("test_capability", {"target": "cup"}))
+    asyncio.run(ctx.model_services.call("test_skill_service", {"target": "cup"}))
 
     assert len(captured) == 1
     obs = captured[0]["observation"]
@@ -1618,7 +1618,7 @@ def test_camera_auto_injection_skips_when_observation_already_present(
         name="test_skill",
         description="skill requiring camera",
         required_resources=("camera",),
-        required_model_service="test_capability",
+        required_model_service="test_skill_service",
     )
     intent = SkillIntent(
         envelope=Envelope(trace_id="tr1", robot_id="xlerobot"),
@@ -1647,7 +1647,7 @@ def test_camera_auto_injection_skips_when_observation_already_present(
 
     asyncio.run(
         ctx.model_services.call(
-            "test_capability", {"target": "cup", "observation": {"frame_id": 99}}
+            "test_skill_service", {"target": "cup", "observation": {"frame_id": 99}}
         )
     )
 
@@ -1673,7 +1673,7 @@ def test_camera_auto_injection_skips_when_no_frame_available(
         name="test_skill",
         description="skill requiring camera",
         required_resources=("camera",),
-        required_model_service="test_capability",
+        required_model_service="test_skill_service",
     )
     intent = SkillIntent(
         envelope=Envelope(trace_id="tr1", robot_id="xlerobot"),
@@ -1700,7 +1700,7 @@ def test_camera_auto_injection_skips_when_no_frame_available(
 
     ctx = service._plugin_context("embodied_skills", state, run, lambda _n, _a: None)
 
-    asyncio.run(ctx.model_services.call("test_capability", {"target": "cup"}))
+    asyncio.run(ctx.model_services.call("test_skill_service", {"target": "cup"}))
 
     assert len(captured) == 1
     assert "observation" not in captured[0]
@@ -1710,7 +1710,7 @@ def test_interrupt_active_run_cancels_active_model_service(tmp_path) -> None:
     from hey_robot.skill_os.composition import SkillExecutionPlan
     from hey_robot.skill_os.scheduler import SkillRun
 
-    service = _service_with_vla_capability(tmp_path)
+    service = _service_with_vla_skill_service(tmp_path)
     state = service.states["embodied_skills"]
     contract = service.plugin_skill_catalog.resolve("manipulate")
     intent = SkillIntent(
@@ -1751,7 +1751,7 @@ def test_timeout_cancels_active_model_service(tmp_path) -> None:
     from hey_robot.skill_os.composition import SkillExecutionPlan
     from hey_robot.skill_os.scheduler import SkillRun
 
-    service = _service_with_vla_capability(tmp_path)
+    service = _service_with_vla_skill_service(tmp_path)
     state = service.states["embodied_skills"]
     contract = service.plugin_skill_catalog.resolve("manipulate")
     intent = SkillIntent(

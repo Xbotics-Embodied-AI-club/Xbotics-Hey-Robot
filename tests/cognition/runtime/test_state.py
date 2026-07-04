@@ -67,28 +67,26 @@ def test_loop_warning_context_reports_repeated_failures_and_no_progress():
     assert "do not repeat the same action without new evidence" in context
 
 
-def test_last_capability_safety_level_initialized_as_none():
+def test_last_skill_safety_level_initialized_as_none():
     state = AgentState()
-    assert state.last_capability_safety_level is None
-    assert state.last_capability_name is None
+    assert state.last_skill_safety_level is None
+    assert state.last_skill_name is None
 
 
-def test_last_capability_fields_reset_clears_tracking():
+def test_last_skill_fields_reset_clears_tracking():
     state = AgentState(
-        last_capability_safety_level="motion",
-        last_capability_name="move_base",
+        last_skill_safety_level="motion",
+        last_skill_name="move_base",
     )
     state.reset()
-    assert state.last_capability_safety_level is None
-    assert state.last_capability_name is None
+    assert state.last_skill_safety_level is None
+    assert state.last_skill_name is None
 
 
-def test_last_capability_fields_persist_independent_of_tool_calls():
-    state = AgentState(
-        last_capability_safety_level="motion", last_capability_name="move_base"
-    )
+def test_last_skill_fields_persist_independent_of_tool_calls():
+    state = AgentState(last_skill_safety_level="motion", last_skill_name="move_base")
     state.add_tool_call("request_skill", {"skill": "inspect_scene"}, "ok")
-    # tool_calls record is separate from capability tracking — runner sets these
-    assert state.last_capability_safety_level == "motion"
-    assert state.last_capability_name == "move_base"
+    # tool_calls record is separate from skill tracking; runner sets these.
+    assert state.last_skill_safety_level == "motion"
+    assert state.last_skill_name == "move_base"
     assert len(state.tool_calls) == 1

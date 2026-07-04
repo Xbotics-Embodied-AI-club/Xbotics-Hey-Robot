@@ -4,6 +4,7 @@ import asyncio
 import base64
 import io
 import json
+import logging
 from typing import Any
 
 import numpy as np
@@ -28,6 +29,8 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - exercised only in lean envs
     json_repair = None
 
+logger = logging.getLogger("hey_robot.providers.openai_compat")
+
 
 class OpenAICompatReasoningProvider(BaseReasoningProvider):
     """OpenAI-compatible model provider with nanobot-style protocol handling.
@@ -49,6 +52,7 @@ class OpenAICompatReasoningProvider(BaseReasoningProvider):
         use_responses_api: bool | None = None,
         provider_name: str | None = None,
         supports_required_tool_choice: bool = True,
+        strict_tools: bool = False,
     ) -> None:
         super().__init__(generation=generation)
         self.model = model
@@ -59,6 +63,7 @@ class OpenAICompatReasoningProvider(BaseReasoningProvider):
         self.use_responses_api = use_responses_api
         self.provider_name = provider_name
         self.supports_required_tool_choice = supports_required_tool_choice
+        self.strict_tools = strict_tools
         self._client: Any | None = None
 
     def _client_or_create(self) -> Any:
@@ -121,8 +126,22 @@ class OpenAICompatReasoningProvider(BaseReasoningProvider):
             )
             for message in messages
         ]
-        openai_tools = [_to_openai_tool(tool) for tool in tools or []]
+        openai_tools = [
+            _to_openai_tool(tool, strict=self.strict_tools) for tool in tools or []
+        ]
         effective_tool_choice = self._effective_tool_choice(tool_choice)
+        logger.info(
+            "provider request: provider=%s model=%s api_base=%s messages=%s tools=%s "
+            "tool_choice=%s strict_tools=%s responses_api=%s",
+            self.provider_name,
+            model_name,
+            self.api_base,
+            len(openai_messages),
+            [_tool_function_name(tool) for tool in openai_tools],
+            effective_tool_choice or "auto",
+            self.strict_tools,
+            self._should_use_responses_api(model_name, effort),
+        )
         try:
             if self._should_use_responses_api(model_name, effort):
                 client = self._client_or_create()
@@ -184,9 +203,25 @@ class OpenAICompatReasoningProvider(BaseReasoningProvider):
             effort,
             effective_tool_choice,
         )
+        logger.info(
+            "chat completions request body: model=%s tools=%s tool_choice=%s "
+            "has_extra_body=%s has_reasoning_effort=%s",
+            kwargs.get("model"),
+            [_tool_function_name(tool) for tool in kwargs.get("tools", [])],
+            kwargs.get("tool_choice"),
+            "extra_body" in kwargs,
+            "reasoning_effort" in kwargs,
+        )
         response = _sync_client.chat.completions.create(**kwargs)
         parsed = _parse_chat_response(response)
-        return _validate_required_tool_call(parsed, effective_tool_choice, openai_tools)
+        logger.info(
+            "chat completions parsed response: finish_reason=%s error_kind=%s "
+            "tool_calls=%s content_len=%s",
+            parsed.finish_reason,
+            parsed.error_kind,
+            [call.name for call in parsed.tool_calls],
+            len(parsed.content or ""),
+        )
         return _validate_required_tool_call(parsed, effective_tool_choice, openai_tools)
 
     def get_default_model(self) -> str:
@@ -326,6 +361,13 @@ def _to_openai_tool_call(tool_call: ReasoningToolCall) -> dict[str, Any]:
     }
 
 
+def _tool_function_name(tool: dict[str, Any]) -> str:
+    function = tool.get("function") if isinstance(tool, dict) else None
+    if isinstance(function, dict):
+        return str(function.get("name") or "")
+    return str(tool.get("name") or "") if isinstance(tool, dict) else ""
+
+
 def _image_block(image: ReasoningImage) -> dict[str, Any]:
     return {
         "type": "image_url",
@@ -350,22 +392,92 @@ def _encode_image(image: ReasoningImage) -> str:
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
 
-def _to_openai_tool(tool: dict[str, Any]) -> dict[str, Any]:
+def _to_openai_tool(tool: dict[str, Any], *, strict: bool = False) -> dict[str, Any]:
     if tool.get("type") == "function":
-        return tool
+        if not strict:
+            return tool
+        function = dict(tool.get("function") or {})
+        function["parameters"] = _to_strict_tool_schema(
+            function.get("parameters") or {"type": "object", "properties": {}}
+        )
+        function["strict"] = True
+        return {**tool, "function": function}
     input_schema = (
         tool.get("inputSchema")
         or tool.get("input_schema")
         or {"type": "object", "properties": {}}
     )
+    parameters = _to_strict_tool_schema(input_schema) if strict else input_schema
+    function_payload: dict[str, Any] = {
+        "name": str(tool.get("name") or ""),
+        "description": str(tool.get("description") or ""),
+        "parameters": parameters,
+    }
+    if strict:
+        function_payload["strict"] = True
     return {
         "type": "function",
-        "function": {
-            "name": str(tool.get("name") or ""),
-            "description": str(tool.get("description") or ""),
-            "parameters": input_schema,
-        },
+        "function": function_payload,
     }
+
+
+def _to_strict_tool_schema(schema: Any) -> dict[str, Any]:
+    """Return a DeepSeek/OpenAI strict-compatible schema copy.
+
+    DeepSeek strict mode requires object schemas to set all properties as
+    required and additionalProperties=false. We do this only at provider
+    serialization time so local tool validation/defaults stay unchanged.
+    """
+    if not isinstance(schema, dict):
+        return {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False,
+        }
+
+    cleaned = {
+        key: _strict_schema_value(value)
+        for key, value in schema.items()
+        if key
+        not in {
+            "nullable",
+            "minLength",
+            "maxLength",
+            "minItems",
+            "maxItems",
+        }
+    }
+
+    schema_type = cleaned.get("type")
+    if isinstance(schema_type, list):
+        non_null = [item for item in schema_type if item != "null"]
+        cleaned["type"] = non_null[0] if non_null else "string"
+
+    if cleaned.get("type") == "object" or "properties" in cleaned:
+        properties = cleaned.get("properties")
+        if not isinstance(properties, dict):
+            properties = {}
+        cleaned["type"] = "object"
+        cleaned["properties"] = {
+            str(name): _to_strict_tool_schema(value)
+            for name, value in properties.items()
+        }
+        cleaned["required"] = list(cleaned["properties"].keys())
+        cleaned["additionalProperties"] = False
+
+    if cleaned.get("type") == "array" and isinstance(cleaned.get("items"), dict):
+        cleaned["items"] = _to_strict_tool_schema(cleaned["items"])
+
+    return cleaned
+
+
+def _strict_schema_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return _to_strict_tool_schema(value)
+    if isinstance(value, list):
+        return [_strict_schema_value(item) for item in value]
+    return value
 
 
 def _parse_chat_response(response: Any) -> ReasoningResponse:

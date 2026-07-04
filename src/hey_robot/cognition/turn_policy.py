@@ -74,33 +74,24 @@ class RobotTurnPolicy:
         if not bool(assessment.get("needs_refresh")):
             result = json.dumps(
                 {
-                    "tool": "request_perception",
-                    "evidence_status": "ok",
+                    "tool": "raw_observation",
+                    "evidence_status": "raw_frame_only",
                     "freshness": "current",
                     "evidence": {
-                        "status": "ok",
+                        "status": "raw_frame_only",
                         "frame_id": assessment.get("frame_id"),
                         "image_count": assessment.get("image_count", 0),
-                        "summary": "Fresh visual observation is already available in the current robot snapshot.",
+                        "summary": "Fresh raw visual observation is available, but semantic scene evidence has not been produced yet.",
                     },
-                    "result": "Fresh visual observation is already available.",
+                    "result": "Fresh raw visual observation is available.",
                 },
                 ensure_ascii=False,
             )
-            core.runtime.state.add_tool_call(
-                "request_perception",
-                {
-                    "question": payload.turn.text,
-                    "freshness": "current",
-                    "source": "active_perception",
-                },
-                result,
-                success=True,
-            )
             return (
-                "Active perception gate reused fresh current observation before deciding "
+                "Active perception gate found a fresh raw observation before deciding "
                 f"(frame={assessment.get('frame_id')}, images={assessment.get('image_count', 0)}):\n"
-                f"{result}"
+                f"{result}\n"
+                "This is not semantic scene evidence. Use request_perception before answering visual questions."
             )
         question = payload.turn.text
         try:

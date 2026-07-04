@@ -25,7 +25,6 @@ class SetArmPoseSkill(BaseSkill):
         safety_level="motion",
         timeout_sec=12.0,
         agent_visible=False,
-        capability_type="arm_pose",
         goal_effects=("sets_arm_named_pose",),
         evidence_outputs=("arm_pose_action_result",),
         cannot_satisfy=("weak_scene_observation",),
@@ -54,7 +53,6 @@ class MoveArmJointsSkill(BaseSkill):
         safety_level="motion",
         timeout_sec=10.0,
         agent_visible=False,
-        capability_type="arm_joint_delta",
         goal_effects=("changes_arm_joint_positions",),
         evidence_outputs=("arm_joint_action_result",),
         cannot_satisfy=("weak_scene_observation",),
@@ -82,7 +80,6 @@ class SetGripperSkill(BaseSkill):
         safety_level="motion",
         timeout_sec=10.0,
         agent_visible=False,
-        capability_type="gripper_control",
         goal_effects=("changes_gripper_opening",),
         evidence_outputs=("gripper_action_result",),
         cannot_satisfy=("weak_scene_observation",),
@@ -127,7 +124,7 @@ class _ManipulateSkillBase(BaseSkill):
             arguments.get("task_prompt") or arguments.get("objective") or self.spec.name
         )
         steps: list[dict[str, Any]] = []
-        service_capability = self.spec.required_model_service
+        service_name = self.spec.required_model_service
 
         for step_index in range(max_steps):
             payload = _vla_payload(ctx, arguments)
@@ -141,7 +138,7 @@ class _ManipulateSkillBase(BaseSkill):
                 }
             )
             result = await ctx.model_services.call(
-                service_capability,
+                service_name,
                 payload,
             )
             if not bool(getattr(result, "success", False)):
@@ -396,7 +393,6 @@ class ManipulateSkill(_ManipulateSkillBase):
         timeout_sec=60.0,
         agent_visible=True,
         feedback_mode="vision",
-        capability_type="manipulate",
         goal_effects=("manipulates_object",),
         evidence_outputs=("vla_policy_result", "arm_action_result"),
         cannot_satisfy=("weak_scene_observation",),

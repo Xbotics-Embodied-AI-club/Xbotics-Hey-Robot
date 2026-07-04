@@ -68,6 +68,9 @@ conflicts = [
 [tool.uv.extra-build-dependencies]
 flash-attn = ["torch"]
 
+[tool.poe.executor]
+type = "simple"
+
 [tool.black]
 line-length = 88
 target-version = ["py312"]
@@ -125,26 +128,26 @@ dev = [
 
 [tool.poe.tasks._validate-config]
 help = "Validate config file references are not stale"
-cmd = "python scripts/dev/validate_config.py"
+cmd = "uv run --no-sync python scripts/dev/validate_config.py"
 
 [tool.poe.tasks.style]
 help = "Format and auto-fix the repository"
 sequence = [
-    { cmd = "ruff format ." },
-    { cmd = "ruff check . --fix" },
+    { cmd = "uv run --no-sync ruff format ." },
+    { cmd = "uv run --no-sync ruff check . --fix" },
 ]
 
 [tool.poe.tasks.lint]
 help = "Run lint and type checks"
 sequence = [
     { ref = "_validate-config" },
-    { cmd = "ruff check ." },
-    { cmd = "mypy src" },
+    { cmd = "uv run --no-sync ruff check ." },
+    { cmd = "uv run --no-sync mypy src" },
 ]
 
 [tool.poe.tasks.test]
 help = "Run the test suite with coverage"
-cmd = "pytest -q"
+cmd = "uv run --no-sync python -m pytest -q"
 
 [tool.poe.tasks.clean]
 help = "Clean pyc, build, test, and lint artifacts"

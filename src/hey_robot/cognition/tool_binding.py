@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 from hey_robot.cognition.tools import (
     ToolContext,
     ToolLoader,
-    ToolRegistry as NewToolRegistry,
 )
 from hey_robot.logging import HeyRobotLogger
 
@@ -37,12 +36,8 @@ def bind_agent_tools(core: RobotAgentCore) -> ToolContext:
         _get_robot_status=core.get_robot_status,
     )
 
-    registry = NewToolRegistry()
+    registry = core.runtime.tools
     loader = ToolLoader()
     names = loader.load(ctx, registry)
     logger.info(f"从类加载了 {len(names)} 个工具：{names}")
-    core.runtime.tools = registry
-    core.runtime.tool_executor.registry = registry
-    if core.runtime.tool_executor.tool_policy_resolver is not None:
-        core.runtime.tool_executor.tool_policy_resolver.registry = registry
     return ctx

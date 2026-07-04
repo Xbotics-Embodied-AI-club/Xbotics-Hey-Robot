@@ -11,37 +11,35 @@ EvidenceStrength = Literal["weak", "strong", "status", "operator"]
 
 
 @dataclass(frozen=True)
-class CapabilityRequirement:
-    type: str
+class SkillRequirement:
+    name: str
     constraints: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"type": self.type, "constraints": dict(self.constraints)}
+        return {"name": self.name, "constraints": dict(self.constraints)}
 
 
 @dataclass(frozen=True)
 class TaskContract:
     task_type: str
     user_goal: str
-    required_capability: CapabilityRequirement | None = None
+    required_skill: SkillRequirement | None = None
     completion_evidence_required: tuple[str, ...] = ()
-    allowed_supporting_capabilities: tuple[str, ...] = ()
+    allowed_supporting_skills: tuple[str, ...] = ()
 
     @property
-    def requires_capability(self) -> bool:
-        return self.required_capability is not None
+    def requires_skill(self) -> bool:
+        return self.required_skill is not None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "task_type": self.task_type,
             "user_goal": self.user_goal,
-            "required_capability": self.required_capability.to_dict()
-            if self.required_capability is not None
+            "required_skill": self.required_skill.to_dict()
+            if self.required_skill is not None
             else None,
             "completion_evidence_required": list(self.completion_evidence_required),
-            "allowed_supporting_capabilities": list(
-                self.allowed_supporting_capabilities
-            ),
+            "allowed_supporting_skills": list(self.allowed_supporting_skills),
         }
 
 
@@ -49,7 +47,6 @@ class TaskContract:
 class EvidenceRecord:
     source_tool: str
     skill: str
-    capability_type: str
     evidence_type: str
     strength: EvidenceStrength
     success: bool
@@ -59,7 +56,6 @@ class EvidenceRecord:
         return {
             "source_tool": self.source_tool,
             "skill": self.skill,
-            "capability_type": self.capability_type,
             "evidence_type": self.evidence_type,
             "strength": self.strength,
             "success": self.success,
@@ -72,7 +68,7 @@ class EvaluationResult:
     can_finalize: bool
     goal_satisfied: bool
     missing_evidence: tuple[str, ...] = ()
-    next_capability_type: str | None = None
+    next_skill: str | None = None
     reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -80,7 +76,7 @@ class EvaluationResult:
             "can_finalize": self.can_finalize,
             "goal_satisfied": self.goal_satisfied,
             "missing_evidence": list(self.missing_evidence),
-            "next_capability_type": self.next_capability_type,
+            "next_skill": self.next_skill,
             "reason": self.reason,
         }
 
@@ -94,12 +90,17 @@ class EvaluationResult:
         ]
         if self.missing_evidence:
             lines.append(f"- missing_evidence: {', '.join(self.missing_evidence)}")
-        if self.next_capability_type:
-            lines.append(f"- next_capability_type: {self.next_capability_type}")
+        if self.next_skill:
+            lines.append(f"- next_skill: {self.next_skill}")
+            lines.append(
+                f'- recommended_skill_call: request_skill(skill="{self.next_skill}", ...)'
+            )
         if self.reason:
             lines.append(f"- reason: {self.reason}")
         lines.append(
-            "- instruction: Continue with the next useful skill call, or explain a concrete safety/skill refusal. Do not final-answer as if the task is complete."
+            "- instruction: Continue with the next useful request_skill call, "
+            "or explain a concrete safety/skill refusal. Do not final-answer "
+            "as if the task is complete."
         )
         return "\n".join(lines)
 
@@ -107,9 +108,10 @@ class EvaluationResult:
 @dataclass(frozen=True)
 class SkillEvidenceSemantics:
     name: str
-    capability_type: str
     evidence_outputs: tuple[str, ...] = ()
     cannot_satisfy: tuple[str, ...] = ()
+    category: str = "general"
+    safety_level: str = "normal"
 
 
 class EvidenceLedger:
@@ -128,17 +130,13 @@ class EvidenceLedger:
         success: bool,
     ) -> None:
         skill = _tool_skill(tool, args)
-        capability_type = capability_type_for_name(skill, self.semantics)
-        evidence_type = evidence_type_for_capability_type(
-            capability_type, self.semantics
-        )
+        evidence_type = evidence_type_for_skill(skill, self.semantics)
         self.records.append(
             EvidenceRecord(
                 source_tool=tool,
                 skill=skill,
-                capability_type=capability_type,
                 evidence_type=evidence_type,
-                strength=evidence_strength_for_capability_type(capability_type),
+                strength=evidence_strength_for_skill(skill, self.semantics),
                 success=success,
                 summary=str(result or "")[:500],
             )
@@ -150,19 +148,15 @@ class EvidenceLedger:
             for record in self.records
         )
 
-    def has_successful_capability_type(self, capability_type: str) -> bool:
-        return any(
-            record.success and record.capability_type == capability_type
-            for record in self.records
-        )
+    def has_successful_skill(self, skill: str) -> bool:
+        return any(record.success and record.skill == skill for record in self.records)
 
-    def has_attempted_capability_type(self, capability_type: str) -> bool:
-        return any(record.capability_type == capability_type for record in self.records)
+    def has_attempted_skill(self, skill: str) -> bool:
+        return any(record.skill == skill for record in self.records)
 
-    def has_failed_capability_type(self, capability_type: str) -> bool:
+    def has_failed_skill(self, skill: str) -> bool:
         return any(
-            not record.success and record.capability_type == capability_type
-            for record in self.records
+            not record.success and record.skill == skill for record in self.records
         )
 
     def context_for_agent(self, limit: int = 8) -> str:
@@ -172,7 +166,7 @@ class EvidenceLedger:
         for record in self.records[-limit:]:
             status = "ok" if record.success else "failed"
             lines.append(
-                f"- {record.skill} [{record.capability_type}/{record.evidence_type}/{record.strength}] -> {status}"
+                f"- {record.skill} [{record.evidence_type}/{record.strength}] -> {status}"
             )
         return "\n".join(lines)
 
@@ -184,73 +178,80 @@ class TaskEvidenceEvaluator:
     def evaluate(
         self, contract: TaskContract, ledger: EvidenceLedger
     ) -> EvaluationResult:
-        if not contract.requires_capability:
+        if not contract.requires_skill:
             return EvaluationResult(
                 can_finalize=True,
                 goal_satisfied=True,
-                reason="no required capability for this task contract",
+                reason="no required skill for this task contract",
             )
 
-        assert contract.required_capability is not None
-        required_type = contract.required_capability.type
+        assert contract.required_skill is not None
+        required_skill = contract.required_skill.name
         required_evidence = contract.completion_evidence_required
 
-        if ledger.has_successful_capability_type(required_type):
+        if ledger.has_successful_skill(required_skill):
             return EvaluationResult(
                 can_finalize=True,
                 goal_satisfied=True,
-                reason=f"required capability {required_type} completed",
+                reason=f"required skill {required_skill} completed",
+            )
+
+        if required_evidence and all(
+            ledger.has_successful_evidence(evidence) for evidence in required_evidence
+        ):
+            return EvaluationResult(
+                can_finalize=True,
+                goal_satisfied=True,
+                reason=f"required evidence for skill {required_skill} completed",
             )
 
         missing = tuple(
             evidence
             for evidence in required_evidence
             if not ledger.has_successful_evidence(evidence)
-        ) or (evidence_type_for_capability_type(required_type),)
+        ) or (evidence_type_for_skill(required_skill, ledger.semantics),)
 
-        if ledger.has_failed_capability_type(required_type):
+        if ledger.has_failed_skill(required_skill):
             return EvaluationResult(
                 can_finalize=True,
                 goal_satisfied=False,
                 missing_evidence=missing,
-                reason=f"required capability {required_type} was attempted and failed",
+                reason=f"required skill {required_skill} was attempted and failed",
             )
 
         return EvaluationResult(
             can_finalize=False,
             goal_satisfied=False,
             missing_evidence=missing,
-            next_capability_type=required_type,
+            next_skill=required_skill,
             reason=(
-                f"task requires {required_type}, but current evidence only covers "
-                "supporting context or unrelated capabilities"
+                f"task requires skill {required_skill}, but current evidence only "
+                "covers supporting context or unrelated skills"
             ),
         )
 
 
 def build_task_contract(task: str) -> TaskContract:
     text = _normalize(task)
-    capability_type = infer_required_capability_type(text)
-    if capability_type is None:
+    skill_name = infer_required_skill_name(text)
+    if skill_name is None:
         return TaskContract(
             task_type="general",
             user_goal=task,
-            allowed_supporting_capabilities=("scene_observation",),
+            allowed_supporting_skills=("inspect_scene", "request_perception"),
         )
     return TaskContract(
-        task_type=task_type_for_capability_type(capability_type),
+        task_type=task_type_for_skill(skill_name),
         user_goal=task,
-        required_capability=CapabilityRequirement(
-            type=capability_type, constraints=infer_constraints(text, capability_type)
+        required_skill=SkillRequirement(
+            name=skill_name, constraints=infer_constraints(text, skill_name)
         ),
-        completion_evidence_required=(
-            evidence_type_for_capability_type(capability_type),
-        ),
-        allowed_supporting_capabilities=("scene_observation", "motion_safety_check"),
+        completion_evidence_required=(evidence_type_for_skill(skill_name),),
+        allowed_supporting_skills=("inspect_scene", "request_perception"),
     )
 
 
-def infer_required_capability_type(text: str) -> str | None:
+def infer_required_skill_name(text: str) -> str | None:
     if _contains_any(text, ("apriltag", "aruco")) or (
         _contains_any(text, ("marker", "工作区标记", "标记"))
         and _contains_any(
@@ -268,7 +269,7 @@ def infer_required_capability_type(text: str) -> str | None:
             ),
         )
     ):
-        return "marker_detection"
+        return "detect_marker"
     if _contains_any(text, ("stop", "halt", "停下", "停止")):
         return "stop_motion"
     if _contains_any(text, ("安全姿态", "恢复姿态", "reset posture")):
@@ -286,21 +287,21 @@ def infer_required_capability_type(text: str) -> str | None:
             "走近",
         ),
     ):
-        return "object_approach"
+        return "approach_object"
     if _looks_like_semantic_navigation(text):
-        return "semantic_navigation"
+        return "navigate_to"
     if _contains_any(text, ("gripper", "夹爪", "爪")) and _contains_any(
         text, ("open", "close", "张开", "闭合", "打开", "合上", "%")
     ):
-        return "gripper_control"
+        return "set_gripper"
     if _contains_any(text, ("home", "位姿")) and _contains_any(
         text, ("arm", "机械臂", "回到", "恢复")
     ):
-        return "arm_pose"
+        return "set_arm_pose"
     if _contains_any(
         text, ("joint", "关节", "shoulder", "elbow", "wrist")
     ) and _contains_any(text, ("转", "move", "rotate", "度")):
-        return "arm_joint_delta"
+        return "move_arm_joints"
     if _contains_any(text, ("arm", "机械臂", "末端", "夹爪")) and _contains_any(
         text,
         (
@@ -317,11 +318,11 @@ def infer_required_capability_type(text: str) -> str | None:
             "微调",
         ),
     ):
-        return "arm_joint_delta"
+        return "move_arm_joints"
     if _contains_any(
         text, ("left", "right", "turn", "左转", "右转", "转向", "往左", "往右")
     ):
-        return "base_turn"
+        return "turn_base"
     if _contains_any(
         text,
         (
@@ -334,10 +335,10 @@ def infer_required_capability_type(text: str) -> str | None:
             "往前",
             "向前",
             "走走",
-            "走一些",
+            "走一点",
         ),
     ):
-        return "base_move"
+        return "move_base"
     if _contains_any(
         text,
         (
@@ -351,110 +352,100 @@ def infer_required_capability_type(text: str) -> str | None:
             "前面有什么",
         ),
     ):
-        return "scene_observation"
+        return "inspect_scene"
     return None
 
 
-def task_type_for_capability_type(capability_type: str) -> str:
-    if capability_type in {"scene_observation", "marker_detection"}:
+def task_type_for_skill(skill_name: str) -> str:
+    semantic = default_skill_semantics().get(skill_name)
+    category = semantic.category if semantic is not None else ""
+    if skill_name in {
+        "inspect_scene",
+        "look_around",
+        "request_perception",
+        "detect_marker",
+    }:
         return "observation"
-    if capability_type in {
-        "base_move",
-        "base_turn",
+    if category in {"base", "navigation"} or skill_name in {
+        "move_base",
+        "turn_base",
         "human_follow",
-        "semantic_navigation",
-        "object_approach",
+        "navigate_to",
+        "approach_object",
     }:
         return "motion"
-    if capability_type in {"gripper_control", "arm_pose", "arm_joint_delta"}:
+    if category in {"arm", "gripper", "manipulation"} or skill_name in {
+        "set_gripper",
+        "set_arm_pose",
+        "move_arm_joints",
+    }:
         return "actuation"
-    if capability_type in {"stop_motion", "reset_posture"}:
+    if skill_name in {"stop_motion", "reset_posture"}:
         return "safety"
     return "general"
 
 
 @lru_cache(maxsize=1)
 def default_skill_semantics() -> dict[str, SkillEvidenceSemantics]:
-    semantics: dict[str, SkillEvidenceSemantics] = {}
+    semantics: dict[str, SkillEvidenceSemantics] = {
+        "request_perception": SkillEvidenceSemantics(
+            name="request_perception",
+            evidence_outputs=("weak_scene_observation",),
+            category="perception",
+            safety_level="observe",
+        )
+    }
     for spec in load_skill_registry().robot_skill_catalog().list():
-        capability_type = spec.capability_type
-        if not capability_type:
-            continue
         semantics[spec.name] = SkillEvidenceSemantics(
             name=spec.name,
-            capability_type=capability_type,
             evidence_outputs=tuple(spec.evidence_outputs),
             cannot_satisfy=tuple(spec.cannot_satisfy),
+            category=spec.category,
+            safety_level=spec.safety_level,
         )
     return semantics
 
 
-def capability_type_for_name(
-    name: str, semantics: dict[str, SkillEvidenceSemantics] | None = None
+def evidence_type_for_skill(
+    skill_name: str, semantics: dict[str, SkillEvidenceSemantics] | None = None
 ) -> str:
-    semantic = (semantics or default_skill_semantics()).get(name)
-    if semantic is not None:
-        return semantic.capability_type
-    mapping = {
-        "request_perception": "scene_observation",
-        "inspect_scene": "scene_observation",
-        "look_around": "scene_observation",
-        "detect_marker": "marker_detection",
-        "move_base": "base_move",
-        "turn_base": "base_turn",
-        "navigate_to": "semantic_navigation",
-        "approach_object": "object_approach",
-        "human_follow": "human_follow",
-        "set_gripper": "gripper_control",
-        "set_arm_pose": "arm_pose",
-        "move_arm_joints": "arm_joint_delta",
-        "stop_motion": "stop_motion",
-        "reset_posture": "reset_posture",
-    }
-    if name in mapping:
-        return mapping[name]
-    if is_perception_skill_name(name):
-        return "scene_observation"
-    return name
+    semantic = (semantics or default_skill_semantics()).get(skill_name)
+    if semantic is not None and semantic.evidence_outputs:
+        return semantic.evidence_outputs[0]
+    if is_perception_skill_name(skill_name):
+        return "weak_scene_observation"
+    return f"{skill_name}_result"
 
 
-def evidence_type_for_capability_type(
-    capability_type: str, semantics: dict[str, SkillEvidenceSemantics] | None = None
-) -> str:
-    for semantic in (semantics or default_skill_semantics()).values():
-        if semantic.capability_type == capability_type and semantic.evidence_outputs:
-            return semantic.evidence_outputs[0]
-    mapping = {
-        "scene_observation": "weak_scene_observation",
-        "marker_detection": "marker_detection_result",
-        "base_move": "base_move_action_result",
-        "base_turn": "base_turn_action_result",
-        "semantic_navigation": "vln_planner_result",
-        "object_approach": "vln_planner_result",
-        "human_follow": "human_follow_action_result",
-        "gripper_control": "gripper_action_result",
-        "arm_pose": "arm_pose_action_result",
-        "arm_joint_delta": "arm_joint_action_result",
-        "stop_motion": "stop_motion_result",
-        "reset_posture": "reset_posture_result",
-    }
-    return mapping.get(capability_type, f"{capability_type}_result")
-
-
-def evidence_strength_for_capability_type(capability_type: str) -> EvidenceStrength:
-    if capability_type == "scene_observation":
+def evidence_strength_for_skill(
+    skill_name: str, semantics: dict[str, SkillEvidenceSemantics] | None = None
+) -> EvidenceStrength:
+    semantic = (semantics or default_skill_semantics()).get(skill_name)
+    if semantic is not None and semantic.safety_level == "observe":
         return "weak"
-    if capability_type == "marker_detection":
+    if skill_name == "detect_marker":
         return "strong"
     return "status"
 
 
-def infer_constraints(text: str, capability_type: str) -> dict[str, Any]:
-    if capability_type == "base_turn":
+def infer_constraints(text: str, skill_name: str) -> dict[str, Any]:
+    if skill_name == "turn_base":
         if _contains_any(text, ("left", "左")):
-            return {"direction": "left"}
+            return {"direction": "left", "angle_deg": 30}
         if _contains_any(text, ("right", "右")):
-            return {"direction": "right"}
+            return {"direction": "right", "angle_deg": 30}
+    if skill_name == "move_base":
+        if _contains_any(text, ("forward", "前", "往前", "向前")):
+            return {"direction": "forward", "distance_cm": 20}
+        if _contains_any(text, ("backward", "后", "后退", "往后", "向后")):
+            return {"direction": "backward", "distance_cm": 20}
+    if skill_name == "set_gripper":
+        if _contains_any(text, ("open", "打开", "张开")):
+            return {"action": "open"}
+        if _contains_any(text, ("close", "关闭", "闭合", "合上")):
+            return {"action": "close"}
+    if skill_name == "set_arm_pose" and "home" in text:
+        return {"pose_name": "home"}
     return {}
 
 

@@ -33,7 +33,6 @@ class SkillContract:
     interruptible: bool = True
     feedback_mode: FeedbackMode = "status"
     refresh_observation: bool = True
-    capability_type: str | None = None
     goal_effects: tuple[str, ...] = ()
     evidence_outputs: tuple[str, ...] = ()
     cannot_satisfy: tuple[str, ...] = ()

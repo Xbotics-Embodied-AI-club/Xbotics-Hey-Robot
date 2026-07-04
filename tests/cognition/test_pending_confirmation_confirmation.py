@@ -5,7 +5,7 @@ from hey_robot.config import DeploymentConfig
 from hey_robot.protocol import Envelope, UserTurn
 
 
-def test_start_phrase_confirms_pending_capability(tmp_path) -> None:
+def test_start_phrase_confirms_pending_skill(tmp_path) -> None:
     config = DeploymentConfig.from_dict(
         {
             "agents": {

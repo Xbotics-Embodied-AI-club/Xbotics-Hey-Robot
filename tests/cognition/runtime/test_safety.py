@@ -243,7 +243,7 @@ def test_robot_safety_hook_does_not_block_after_failed_prior_base_motion():
     assert result.result == "issued move_base: retry move forward"
 
 
-def test_robot_safety_hook_does_not_block_non_motion_capability_with_prior_base_motion():
+def test_robot_safety_hook_does_not_block_non_motion_skill_with_prior_base_motion():
     registry = ToolRegistry()
     registry.register_simple(
         "request_skill",

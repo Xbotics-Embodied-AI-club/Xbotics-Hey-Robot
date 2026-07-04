@@ -607,7 +607,7 @@ class TestRequestPerceptionTool:
 
         pending: dict = {}
         io = _FakeIO(pending_skills=pending)
-        io.query_scene_evidence = None  # type: ignore[method-assign,assignment]  # shadow class method to simulate missing capability
+        io.query_scene_evidence = None  # type: ignore[method-assign,assignment]  # shadow class method to simulate missing skill
         ctx = _build_ctx(io=io, pending_skills=pending)
         tool = RequestPerceptionTool(ctx)
         result = await tool.execute()
@@ -754,8 +754,8 @@ class TestRequestSkillTool:
         ctx._current_envelope = lambda: Envelope(
             robot_id="mock0", channel="test", episode_id="ep1"
         )
-        ctx.runtime_state.last_capability_safety_level = "motion"
-        ctx.runtime_state.last_capability_name = "move_base"
+        ctx.runtime_state.last_skill_safety_level = "motion"
+        ctx.runtime_state.last_skill_name = "move_base"
         tool = RequestSkillTool(ctx)
         with pytest.raises(RuntimeError, match="ConsecutiveMotionBlocked"):
             await tool.execute(skill="move_base", objective="move again")
@@ -777,8 +777,8 @@ class TestRequestSkillTool:
         ctx._current_envelope = lambda: Envelope(
             robot_id="mock0", channel="test", episode_id="ep1"
         )
-        ctx.runtime_state.last_capability_safety_level = "motion"
-        ctx.runtime_state.last_capability_name = "move_base"
+        ctx.runtime_state.last_skill_safety_level = "motion"
+        ctx.runtime_state.last_skill_name = "move_base"
         tool = RequestSkillTool(ctx)
         result = await tool.execute(skill="stop_motion", objective="emergency stop")
         assert "controller_status=completed" in result
@@ -800,8 +800,8 @@ class TestRequestSkillTool:
         ctx._current_envelope = lambda: Envelope(
             robot_id="mock0", channel="test", episode_id="ep1"
         )
-        ctx.runtime_state.last_capability_safety_level = "observe"
-        ctx.runtime_state.last_capability_name = "inspect_scene"
+        ctx.runtime_state.last_skill_safety_level = "observe"
+        ctx.runtime_state.last_skill_name = "inspect_scene"
         tool = RequestSkillTool(ctx)
         result = await tool.execute(skill="move_base", objective="move after inspect")
         assert "controller_status=completed" in result

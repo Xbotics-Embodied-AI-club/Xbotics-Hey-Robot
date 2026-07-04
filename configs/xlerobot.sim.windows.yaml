@@ -177,7 +177,7 @@ robots:
       linear_speed: 0.2
       angular_speed: 0.45
       viewer:
-        enabled: false
+        enabled: true
 
 model_services: {}
 
