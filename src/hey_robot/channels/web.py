@@ -443,6 +443,36 @@ class WebChannel:
             self._cached_access_urls = [self._format_url(host)]
             return self._cached_access_urls
         addresses: set[str] = set()
+        # 通过 SIOCGIFADDR ioctl 枚举所有网卡IP，这是 Linux 上最可靠的方式。
+        # 相比 UDP connect 能发现所有接口，相比 getaddrinfo 不依赖 /etc/hosts。
+        try:
+            import fcntl
+            import struct
+
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            for ifname in socket.if_nameindex():
+                try:
+                    ifreq = struct.pack("256s", ifname[1].encode()[:15])
+                    addr_bytes = fcntl.ioctl(sock.fileno(), 0x8915, ifreq)
+                    addr = socket.inet_ntoa(addr_bytes[20:24])
+                    if addr and not addr.startswith("127."):
+                        addresses.add(addr)
+                except OSError:
+                    pass
+            sock.close()
+        except (ImportError, OSError):
+            # 回退方案：UDP connect 技巧，探测默认路由接口的本地地址（不实际发包）
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.settimeout(0)
+                s.connect(("8.8.8.8", 80))
+                addr = s.getsockname()[0]
+                s.close()
+                if addr and not addr.startswith("127."):
+                    addresses.add(addr)
+            except OSError:
+                pass
+        # 补充 getaddrinfo（Windows 上生效，多网卡机器可能提供额外地址）
         try:
             hostname = socket.gethostname()
             for family, *_rest, sockaddr in socket.getaddrinfo(hostname, None):

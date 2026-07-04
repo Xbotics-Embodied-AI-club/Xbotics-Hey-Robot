@@ -111,9 +111,9 @@ channels:
     tts_echo_guard_sec: 1.0
     reply_tts: true
     recorder:
-      input_device: null  # 使用系统默认输入设备（PulseAudio）
+      input_device: "sof-hda-dsp: - (hw:1,7)"  # DMIC16kHz（原生支持 16kHz）
       sample_rate: 16000
-      channels: 1
+      channels: 2  # DMIC 为双声道，streaming_asr 会自动下混为单声道
       block_ms: 100
       energy_threshold: 0.012
       silence_sec: 0.9

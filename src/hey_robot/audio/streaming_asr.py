@@ -98,7 +98,11 @@ class SherpaStreamingVoiceEngine:
         chunks: list[np.ndarray] = []
         while True:
             samples, _overflow = stream.read(self._samples_per_read)
-            frame = np.asarray(samples, dtype=np.float32).reshape(-1)
+            frame = np.asarray(samples, dtype=np.float32)
+            if frame.ndim == 2 and frame.shape[1] > 1:
+                frame = frame.mean(axis=1)  # 多声道取平均降为单声道
+            else:
+                frame = frame.reshape(-1)
             chunks.append(frame.copy())
             asr_stream.accept_waveform(self.recorder.sample_rate, frame)
             while self._recognizer.is_ready(asr_stream):
