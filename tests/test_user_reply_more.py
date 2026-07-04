@@ -100,17 +100,24 @@ def test_internal_reply_empty_and_variants() -> None:
     assert not looks_like_internal_user_reply("")
     assert not looks_like_internal_user_reply("   ")
     assert looks_like_internal_user_reply("execution feedback for skill move_base")
-    assert looks_like_internal_user_reply("execution feedback for skill inspect_scene: ...")
-    assert looks_like_internal_user_reply('用户说"继续"，回顾一下之前的进展，然后决定下一步。')
+    assert looks_like_internal_user_reply(
+        "execution feedback for skill inspect_scene: ..."
+    )
+    assert looks_like_internal_user_reply(
+        '用户说"继续"，回顾一下之前的进展，然后决定下一步。'
+    )
 
 
 def test_request_skill_no_skill_name_empty_result() -> None:
-    assert present_tool_result_for_user(
-        tool="request_skill",
-        args={},
-        result="",
-        success=True,
-    ) is None
+    assert (
+        present_tool_result_for_user(
+            tool="request_skill",
+            args={},
+            result="",
+            success=True,
+        )
+        is None
+    )
 
 
 def test_request_skill_inspect_scene_failure_empty_result() -> None:
