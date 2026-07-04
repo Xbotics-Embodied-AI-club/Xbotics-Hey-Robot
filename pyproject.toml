@@ -64,6 +64,12 @@ conflicts = [
         { group = "vln" },
     ],
 ]
+override-dependencies = [
+    # lerobot 强制依赖 opencv-python-headless（无 cv2.imshow），
+    # 但项目需要完整的 opencv-python（human_follow 等 UI 场景），
+    # opencv-python 是 headless 的超集，可以安全替换。
+    "opencv-python==4.10.0.84",
+]
 
 [tool.uv.extra-build-dependencies]
 flash-attn = ["torch"]

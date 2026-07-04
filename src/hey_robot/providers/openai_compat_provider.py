@@ -130,17 +130,13 @@ class OpenAICompatReasoningProvider(BaseReasoningProvider):
             _to_openai_tool(tool, strict=self.strict_tools) for tool in tools or []
         ]
         effective_tool_choice = self._effective_tool_choice(tool_choice)
-        logger.info(
-            "provider request: provider=%s model=%s api_base=%s messages=%s tools=%s "
-            "tool_choice=%s strict_tools=%s responses_api=%s",
-            self.provider_name,
-            model_name,
-            self.api_base,
-            len(openai_messages),
-            [_tool_function_name(tool) for tool in openai_tools],
-            effective_tool_choice or "auto",
-            self.strict_tools,
-            self._should_use_responses_api(model_name, effort),
+        logger.debug(
+            f"provider request: provider={self.provider_name} model={model_name} "
+            f"api_base={self.api_base} messages={len(openai_messages)} "
+            f"tools={[_tool_function_name(t) for t in openai_tools]} "
+            f"tool_choice={effective_tool_choice or 'auto'} "
+            f"strict_tools={self.strict_tools} "
+            f"responses_api={self._should_use_responses_api(model_name, effort)}"
         )
         try:
             if self._should_use_responses_api(model_name, effort):
@@ -203,24 +199,20 @@ class OpenAICompatReasoningProvider(BaseReasoningProvider):
             effort,
             effective_tool_choice,
         )
-        logger.info(
-            "chat completions request body: model=%s tools=%s tool_choice=%s "
-            "has_extra_body=%s has_reasoning_effort=%s",
-            kwargs.get("model"),
-            [_tool_function_name(tool) for tool in kwargs.get("tools", [])],
-            kwargs.get("tool_choice"),
-            "extra_body" in kwargs,
-            "reasoning_effort" in kwargs,
+        logger.debug(
+            f"chat completions request body: model={kwargs.get('model')} "
+            f"tools={[_tool_function_name(t) for t in kwargs.get('tools', [])]} "
+            f"tool_choice={kwargs.get('tool_choice')} "
+            f"has_extra_body={'extra_body' in kwargs} "
+            f"has_reasoning_effort={'reasoning_effort' in kwargs}"
         )
         response = _sync_client.chat.completions.create(**kwargs)
         parsed = _parse_chat_response(response)
-        logger.info(
-            "chat completions parsed response: finish_reason=%s error_kind=%s "
-            "tool_calls=%s content_len=%s",
-            parsed.finish_reason,
-            parsed.error_kind,
-            [call.name for call in parsed.tool_calls],
-            len(parsed.content or ""),
+        logger.debug(
+            f"chat completions parsed response: finish_reason={parsed.finish_reason} "
+            f"error_kind={parsed.error_kind} "
+            f"tool_calls={[c.name for c in parsed.tool_calls]} "
+            f"content_len={len(parsed.content or '')}"
         )
         return _validate_required_tool_call(parsed, effective_tool_choice, openai_tools)
 

@@ -11,7 +11,7 @@ deployment:
       robot_status_log_every_frames: 5
 
 logging:
-  level: DEBUG
+  level: INFO
   theme: dark
   json_format: false
   file_path: logs/xlerobot.sim.ubuntu/app.log
@@ -170,7 +170,7 @@ robots:
       linear_speed: 0.2
       angular_speed: 0.45
       viewer:
-        enabled: false
+        enabled: true
 
 model_services: {}
 

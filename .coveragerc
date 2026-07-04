@@ -10,9 +10,15 @@ omit =
     src/hey_robot/channels/feishu/transport.py
     src/hey_robot/foundation/contract/v1/model_service_pb2.py
     src/hey_robot/foundation/contract/v1/model_service_pb2_grpc.py
-    src/hey_robot/robots/components/*
-    src/hey_robot/robots/lekiwi/*
-    src/hey_robot/robots/so101/*
-    src/hey_robot/robots/xlerobot/hardware/*
-    src/hey_robot/robots/xlerobot/driver.py
-    src/hey_robot/robots/service.py
+    src/hey_robot/robot_runtime/components/*
+    src/hey_robot/robot_runtime/lekiwi/*
+    src/hey_robot/robot_runtime/so101/*
+    src/hey_robot/robot_runtime/xlerobot/hardware/*
+    src/hey_robot/robot_runtime/xlerobot/driver.py
+    src/hey_robot/robot_runtime/service.py
+    src/hey_robot/robot_runtime/mock.py
+    src/hey_robot/robot_runtime/simulation/*
+    src/hey_robot/human_follow/*
+    src/hey_robot/channels/feishu/channel.py
+    src/hey_robot/channels/feishu/inbound.py
+    src/hey_robot/bus/client.py
