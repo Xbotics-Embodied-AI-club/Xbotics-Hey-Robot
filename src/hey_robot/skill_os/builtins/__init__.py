@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from hey_robot.skill_os.builtins.dock_manipulation import (
+    PickWandSkill,
+    PlaceWandSkill,
+)
 from hey_robot.skill_os.builtins.manipulation import (
     ManipulateSkill,
     MoveArmJointsSkill,
@@ -20,6 +24,11 @@ from hey_robot.skill_os.builtins.perception import (
     LookAroundSkill,
 )
 from hey_robot.skill_os.builtins.safety import ResetPostureSkill, StopMotionSkill
+from hey_robot.skill_os.builtins.tabletop_manipulation import (
+    INTERNAL_PRIMITIVES,
+    PickSkill,
+    PlaceSkill,
+)
 from hey_robot.skill_os.registry import SkillRegistry
 
 
@@ -40,5 +49,10 @@ def register_skills(registry: SkillRegistry) -> None:
         MoveArmJointsSkill(),
         SetGripperSkill(),
         ManipulateSkill(),
+        PickSkill(),
+        PlaceSkill(),
+        PickWandSkill(),
+        PlaceWandSkill(),
+        *INTERNAL_PRIMITIVES,
     ):
         registry.register(skill)

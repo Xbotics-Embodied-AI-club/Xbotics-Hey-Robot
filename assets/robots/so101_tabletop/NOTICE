@@ -1,0 +1,11 @@
+Vector OS Nano
+Copyright 2024-2026 Vector Robotics
+
+This directory includes software and assets adapted from Vector OS Nano:
+https://github.com/VectorRobotics/vector-os-nano
+
+Licensed under the Apache License, Version 2.0.
+
+The upstream NOTICE attributes LeRobot SO-ARM100 assets under Apache-2.0 and
+MuJoCo under Apache-2.0. Vector Robotics and Vector OS Nano are trademarks of
+Vector Robotics; this attribution does not imply endorsement.

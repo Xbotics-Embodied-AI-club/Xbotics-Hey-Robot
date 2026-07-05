@@ -45,6 +45,18 @@ class RobotActionPort:
     async def reset_posture(self, **arguments: Any) -> dict[str, Any]:
         return await self.run("reset_posture", arguments)
 
+    async def arm_get_state(self, **arguments: Any) -> dict[str, Any]:
+        return await self.run("arm_get_state", arguments)
+
+    async def arm_solve_position_ik(self, **arguments: Any) -> dict[str, Any]:
+        return await self.run("arm_solve_position_ik", arguments)
+
+    async def sim_locate_object(self, **arguments: Any) -> dict[str, Any]:
+        return await self.run("sim_locate_object", arguments)
+
+    async def sim_get_object_state(self, **arguments: Any) -> dict[str, Any]:
+        return await self.run("sim_get_object_state", arguments)
+
 
 class PerceptionPort:
     def __init__(self, robot: RobotActionPort) -> None:

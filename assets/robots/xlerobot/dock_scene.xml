@@ -1,0 +1,66 @@
+<!--
+  XLeRobot dock manipulation scene.
+  Includes xlerobot.xml + wand dock + cat wand + base lock.
+-->
+<mujoco model="xlerobot_dock">
+
+  <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast">
+    <flag contact="enable"/>
+  </option>
+
+  <default>
+    <joint damping="0.5" armature="0.05"/>
+    <geom condim="4" friction="1 0.005 0.0001"
+          solimp="0.95 0.99 0.001" solref="0.02 1"/>
+  </default>
+
+  <!-- XLeRobot model -->
+  <include file="xlerobot.xml"/>
+
+  <!-- Lock mobile base in place -->
+  <actuator>
+    <position name="base_x_lock" joint="root_x_axis_joint" kp="100"/>
+    <position name="base_y_lock" joint="root_y_axis_joint" kp="100"/>
+    <position name="base_yaw_lock" joint="root_z_rotation_joint" kp="100"/>
+  </actuator>
+
+  <worldbody>
+    <!-- Ground -->
+    <geom name="floor" type="plane" size="3 3 0.01" condim="3"/>
+
+    <!-- Lighting -->
+    <light pos="2 0 3" dir="0 0 -1" diffuse="0.8 0.8 0.8"/>
+    <light pos="0 2 2" dir="0 -1 -1" diffuse="0.3 0.3 0.3"/>
+
+    <!-- Wand dock on the robot chassis -->
+    <body name="wand_dock" pos="0.35 0.05 0.62">
+      <geom name="dock_base" type="cylinder" size="0.04 0.015"
+            rgba="0.4 0.4 0.5 1" mass="0.1"/>
+      <geom name="pillar_1" type="cylinder" size="0.005 0.06"
+            pos="0.015 0.015 0.065" rgba="0.35 0.35 0.45 1" mass="0.01"/>
+      <geom name="pillar_2" type="cylinder" size="0.005 0.06"
+            pos="-0.015 0.015 0.065" rgba="0.35 0.35 0.45 1" mass="0.01"/>
+      <geom name="pillar_3" type="cylinder" size="0.005 0.06"
+            pos="0.015 -0.015 0.065" rgba="0.35 0.35 0.45 1" mass="0.01"/>
+      <geom name="pillar_4" type="cylinder" size="0.005 0.06"
+            pos="-0.015 -0.015 0.065" rgba="0.35 0.35 0.45 1" mass="0.01"/>
+      <site name="dock_insertion" pos="0 0 0.10" size="0.005" rgba="0 1 0 0.5"/>
+    </body>
+
+    <!-- Cat wand (free body, initially held in dock by active dock_weld) -->
+    <body name="cat_wand" pos="0.35 0.05 0.725">
+      <freejoint name="cat_wand_free"/>
+      <geom name="wand_stick" type="cylinder" size="0.005 0.075"
+            pos="0 0 0.075" rgba="0.82 0.55 0.35 1" mass="0.015" condim="4"/>
+      <geom name="wand_ball" type="sphere" size="0.022"
+            pos="0 0 0.155" rgba="1.0 0.3 0.3 1" mass="0.005"/>
+      <site name="wand_grasp" pos="0 0 0.08" size="0.005" rgba="1 1 0 0.5"/>
+    </body>
+  </worldbody>
+
+  <equality>
+    <weld name="dock_weld" body1="wand_dock" body2="cat_wand" active="true"/>
+    <weld name="grip_weld" body1="Fixed_Jaw_2" body2="cat_wand" active="false"/>
+  </equality>
+
+</mujoco>

@@ -179,6 +179,73 @@ DEFAULT_EMBODIMENT_PROFILES: dict[str, EmbodimentProfile] = {
         readiness_resources=("arm", "gripper", "camera"),
         metadata={"driver_kind": "native"},
     ),
+    "so101_tabletop_sim": EmbodimentProfile(
+        name="so101_tabletop_sim",
+        robot_family="so101",
+        environment="sim",
+        camera_layout={
+            "default_camera": "overhead",
+            "owner": "simulation",
+            "cameras": ("overhead", "front", "side"),
+        },
+        pose_library=("home",),
+        named_poses={
+            "home": {
+                "shoulder_pan": -0.014,
+                "shoulder_lift": -1.238,
+                "elbow_flex": 0.562,
+                "wrist_flex": 0.858,
+                "wrist_roll": 0.311,
+            }
+        },
+        gripper_range=(0.0, 1.0),
+        readiness_resources=(
+            "arm",
+            "gripper",
+            "camera",
+            "overhead_camera",
+            "front_camera",
+            "side_camera",
+        ),
+        metadata={
+            "driver_kind": "mujoco",
+            "perception_source": "mujoco_ground_truth",
+            "grasp_model": "conditional_weld",
+        },
+    ),
+    "so101_mobile_sim": EmbodimentProfile(
+        name="so101_mobile_sim",
+        robot_family="so101_mobile",
+        environment="sim",
+        camera_layout={
+            "default_camera": "front",
+            "owner": "simulation",
+            "cameras": ("front", "right_wrist"),
+        },
+        pose_library=("home",),
+        named_poses={
+            "home": {
+                "shoulder_pan": 0.0,
+                "shoulder_lift": 0.8,
+                "elbow_flex": 0.7,
+                "wrist_flex": -0.6,
+                "wrist_roll": 0.0,
+            }
+        },
+        gripper_range=(0.0, 1.7),
+        readiness_resources=(
+            "arm",
+            "gripper",
+            "camera",
+            "front_camera",
+            "right_wrist_camera",
+        ),
+        metadata={
+            "driver_kind": "mujoco",
+            "perception_source": "mujoco_ground_truth",
+            "grasp_model": "conditional_weld",
+        },
+    ),
     "lekiwi_real": EmbodimentProfile(
         name="lekiwi_real",
         robot_family="lekiwi",
