@@ -169,8 +169,8 @@ robots:
     embodiment_profile: xlerobot_sim
     enabled: true
     settings:
-      # Official XLeRobot MuJoCo scene with native fixed cameras.
-      mjcf_path: assets/robots/xlerobot/scene.xml
+      # XLeRobot home MuJoCo scene.
+      mjcf_path: assets/robots/xlerobot/home_scene.xml
       render_width: 640
       render_height: 480
       control_hz: 2.0

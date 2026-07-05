@@ -207,7 +207,7 @@ model_services:
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `mjcf_path` | `assets/robots/xlerobot/scene.xml` | MuJoCo 场景文件 |
+| `mjcf_path` | `assets/robots/xlerobot/home_scene.xml` | MuJoCo 场景文件 |
 | `render_width` | `640` | 渲染宽度 |
 | `render_height` | `480` | 渲染高度 |
 | `control_hz` | `2.0` | 控制频率 |
