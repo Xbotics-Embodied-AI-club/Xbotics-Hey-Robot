@@ -126,6 +126,17 @@ class DockOracle:
             return None
         return object_name, samples
 
+    def resolve_name(self, query: str) -> str | None:
+        """Return the MuJoCo body name matching *query*, or None."""
+        normalized = str(query or "").lower().strip()
+        if not normalized:
+            return None
+        for name in self.arm.get_object_positions():
+            aliases = ALL_ALIASES.get(name, (name,))
+            if any(alias in normalized for alias in aliases):
+                return name
+        return None
+
     def caption(self) -> str:
         names = list(self.arm.get_object_positions())
         if not names:

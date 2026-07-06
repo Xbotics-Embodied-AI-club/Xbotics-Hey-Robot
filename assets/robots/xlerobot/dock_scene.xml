@@ -32,8 +32,14 @@
     <light pos="2 0 3" dir="0 0 -1" diffuse="0.8 0.8 0.8"/>
     <light pos="0 2 2" dir="0 -1 -1" diffuse="0.3 0.3 0.3"/>
 
-    <!-- Wand dock on the robot chassis -->
-    <body name="wand_dock" pos="0.35 0.05 0.62">
+    <!-- Tabletop camera: views the wand dock on the right side from front/left. -->
+    <camera name="table_view"
+            pos="0.5 0.0 1.1"
+            xyaxes="0.8 0.6 0  -0.4 0.53 0.75"
+            fovy="75"/>
+
+    <!-- Wand dock on the right side (where right arm was removed) -->
+    <body name="wand_dock" pos="0.04 0.133 0.62">
       <geom name="dock_base" type="cylinder" size="0.04 0.015"
             rgba="0.4 0.4 0.5 1" mass="0.1"/>
       <geom name="pillar_1" type="cylinder" size="0.005 0.06"
@@ -48,7 +54,7 @@
     </body>
 
     <!-- Cat wand (free body, initially held in dock by active dock_weld) -->
-    <body name="cat_wand" pos="0.35 0.05 0.725">
+    <body name="cat_wand" pos="0.04 0.133 0.725">
       <freejoint name="cat_wand_free"/>
       <geom name="wand_stick" type="cylinder" size="0.005 0.075"
             pos="0 0 0.075" rgba="0.82 0.55 0.35 1" mass="0.015" condim="4"/>
@@ -60,7 +66,7 @@
 
   <equality>
     <weld name="dock_weld" body1="wand_dock" body2="cat_wand" active="true"/>
-    <weld name="grip_weld" body1="Fixed_Jaw_2" body2="cat_wand" active="false"/>
+    <weld name="grip_weld" body1="Fixed_Jaw" body2="cat_wand" active="false"/>
   </equality>
 
 </mujoco>

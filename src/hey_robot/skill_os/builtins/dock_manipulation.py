@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 Vector Robotics
 # Modified for Xbotics Hey Robot: dock wand pick and place.
+#
+# Supports two localisation modes:
+#   "oracle"     — sim_locate_object reads MuJoCo ground truth (sim only)
+#   "perception" — camera + bbox → ray-plane intersection → 3D (sim + real)
 from __future__ import annotations
 
 import asyncio
@@ -14,11 +18,11 @@ from hey_robot.skill_os.base import BaseSkill, SkillResult
 from hey_robot.skill_os.builtins.common import spec
 
 JOINT_NAMES = (
-    "Rotation_2",
-    "Pitch_2",
-    "Elbow_2",
-    "Wrist_Pitch_2",
-    "Wrist_Roll_2",
+    "Rotation",
+    "Pitch",
+    "Elbow",
+    "Wrist_Pitch",
+    "Wrist_Roll",
 )
 WORKSPACE_MIN_XY = 0.05
 WORKSPACE_MAX_XY = 0.50
@@ -55,7 +59,11 @@ def _joint_payload(positions: list[float]) -> dict[str, float]:
 
 
 class PickWandSkill(BaseSkill):
-    """Pick the cat wand from the dock."""
+    """Pick the cat wand from the dock.
+
+    Mode "oracle" (default): uses sim_locate_object (MuJoCo ground truth).
+    Mode "perception": camera → bbox → ray-plane intersection → 3D.
+    """
 
     spec = spec(
         "pick_wand_from_dock",
@@ -66,6 +74,18 @@ class PickWandSkill(BaseSkill):
             "properties": {
                 "object_label": {"type": "string"},
                 "max_retries": {"type": "integer"},
+                "mode": {
+                    "type": "string",
+                    "description": "oracle (sim ground truth) or perception (ray-plane)",
+                },
+                "camera": {
+                    "type": "string",
+                    "description": "camera name for perception mode (default: front)",
+                },
+                "plane_z": {
+                    "type": "number",
+                    "description": "table plane z-height override for perception mode",
+                },
             },
         },
         required_resources=("arm", "gripper"),
@@ -84,6 +104,8 @@ class PickWandSkill(BaseSkill):
         ),
         driver_primitives=(
             "sim_locate_object",
+            "perceive_grasp_point",
+            "get_camera_geometry",
             "sim_get_object_state",
             "arm_get_state",
             "arm_solve_position_ik",
@@ -100,10 +122,22 @@ class PickWandSkill(BaseSkill):
     async def execute(self, ctx, arguments):
         label = str(arguments.get("object_label") or "wand")
         max_retries = min(3, max(1, int(arguments.get("max_retries") or 1)))
+        mode = str(arguments.get("mode") or "oracle").lower()
+        camera = str(arguments.get("camera") or "front")
+        plane_z = (
+            float(arguments["plane_z"])
+            if arguments.get("plane_z") is not None
+            else None
+        )
         transform = load_transform(None)
 
         for attempt in range(1, max_retries + 1):
-            result = await self._attempt(ctx, label, transform)
+            if mode == "perception":
+                result = await self._attempt_perception(
+                    ctx, label, transform, camera, plane_z
+                )
+            else:
+                result = await self._attempt_oracle(ctx, label, transform)
             if result.success:
                 return result
             if attempt < max_retries and result.failure_mode != "object_not_found":
@@ -111,12 +145,13 @@ class PickWandSkill(BaseSkill):
                 await asyncio.sleep(0.5)
         return result
 
-    async def _attempt(self, ctx, label, transform):
+    async def _attempt_oracle(self, ctx, label, transform):
+        """Locate wand via MuJoCo ground truth (simulation only)."""
         # 1. Open gripper
         await _primitive(ctx, "set_gripper", {"action": "open"})
         await asyncio.sleep(0.2)
 
-        # 2. Locate wand
+        # 2. Locate wand via oracle
         located = await _primitive(
             ctx,
             "sim_locate_object",
@@ -138,6 +173,46 @@ class PickWandSkill(BaseSkill):
         except (ValueError, IndexError):
             return _failure("failed to cluster 3D samples", "no_3d_samples")
         target_xyz = camera_to_base(point, transform).tolist()
+
+        return await self._execute_pick(ctx, target_xyz, source="oracle")
+
+    async def _attempt_perception(self, ctx, label, transform, camera, plane_z):
+        """Locate wand via bbox → ray-plane intersection (sim + real hardware)."""
+        # 1. Open gripper
+        await _primitive(ctx, "set_gripper", {"action": "open"})
+        await asyncio.sleep(0.2)
+
+        # 2. Locate wand via perception pipeline
+        perceive_args: dict[str, Any] = {
+            "query": label,
+            "camera": camera,
+            "sample_count": 20,
+            "sample_interval": 0.05,
+            "cluster_threshold": 0.015,
+        }
+        if plane_z is not None:
+            perceive_args["plane_z"] = plane_z
+
+        located = await _primitive(ctx, "perceive_grasp_point", perceive_args)
+        if not located.get("operation_success"):
+            return _failure(
+                f"wand not found (perception): {label}",
+                located.get("failure_mode", "object_not_found"),
+                query=label,
+                method="ray_plane_intersection",
+            )
+        point_3d = located.get("point_3d")
+        if not point_3d or len(point_3d) != 3:
+            return _failure("no 3D point from perception", "no_3d_samples")
+        point = np.asarray(point_3d, dtype=float)
+        target_xyz = camera_to_base(point, transform).tolist()
+
+        return await self._execute_pick(
+            ctx, target_xyz, source="ray_plane_intersection"
+        )
+
+    async def _execute_pick(self, ctx, target_xyz, source):
+        """Execute the pick motion from a computed target_xyz (shared tail)."""
 
         # 4. Validate workspace
         xy = float(np.linalg.norm(target_xyz[:2]))
@@ -213,12 +288,13 @@ class PickWandSkill(BaseSkill):
 
         return SkillResult(
             success=True,
-            summary="wand picked from dock",
+            summary=f"wand picked from dock [{source}]",
             status="completed",
             data={
                 "held_object": held,
                 "weld_active": wand_weld,
                 "target_xyz": target_xyz,
+                "source": source,
                 "attempts": 1,
             },
         )
@@ -273,9 +349,9 @@ class PlaceWandSkill(BaseSkill):
         if wand_pos is None:
             return _failure("wand position unknown", "place_not_confirmed")
 
-        # Dock position from scene: wand_dock body at (0.35, 0.05, 0.45) base_link
-        # dock_insertion site is at z=0.105 above dock body, so insertion is at:
-        dock_x, dock_y, dock_z = 0.35, 0.05, 0.64  # wand world pos when in dock
+        # Dock position from scene: wand_dock body at (0.04, 0.133, 0.62) base_link
+        # dock_insertion site is at z=0.10 above dock body, so insertion is at:
+        dock_x, dock_y, dock_z = 0.04, 0.133, 0.72  # wand world pos when in dock
 
         # 3. Compute approach above dock
         approach_xyz = [dock_x, dock_y, dock_z + PLACE_APPROACH_HEIGHT]

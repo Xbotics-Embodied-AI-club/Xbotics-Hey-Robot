@@ -3,8 +3,6 @@
 # Modified for Xbotics Hey Robot: XLeRobot weld-based jaw gripper.
 from __future__ import annotations
 
-import time
-
 import numpy as np
 
 from hey_robot.robot_runtime.simulation.so101_mobile.arm import So101MobileArmKernel
@@ -14,7 +12,7 @@ from hey_robot.robot_runtime.simulation.so101_mobile.session import (
 
 JAW_OPEN = 1.7
 JAW_CLOSED = 0.0
-JAW_ACTUATOR_NAME = "Jaw_R"
+JAW_ACTUATOR_NAME = "Jaw_L"
 GRASP_RADIUS = 0.06
 SETTLE_STEPS = 400
 
@@ -83,20 +81,23 @@ class WandGripperKernel:
 
         data = self.session.data
         model = self.session.model
+        # Freeze arm joints (position + velocity) so only the jaw moves.
+        arm_qpos_addresses = [
+            int(model.jnt_qposadr[jid]) for jid in self.arm._joint_ids
+        ]
+        arm_dof_addresses = [int(model.jnt_dofadr[jid]) for jid in self.arm._joint_ids]
+        frozen_qpos = [float(data.qpos[adr]) for adr in arm_qpos_addresses]
         start = float(data.ctrl[self._actuator_id])
-        dt = float(self.session.model.opt.timestep)
-        sync_interval = max(1, int(1.0 / 60.0 / dt))
-        wall_start = time.monotonic()
         for index in range(SETTLE_STEPS):
             alpha = (index + 1) / SETTLE_STEPS
             data.ctrl[self._actuator_id] = start + alpha * (target - start)
+            self.session.clamp_base()
+            # Freeze arm in place — kp=50 is too weak to hold against gravity
+            for adr, value in zip(arm_qpos_addresses, frozen_qpos, strict=True):
+                data.qpos[adr] = float(value)
+            for adr in arm_dof_addresses:
+                data.qvel[adr] = 0.0
             mujoco.mj_step(model, data)
-            if self.session.viewer is not None and index % sync_interval == 0:
-                self.session.viewer.sync()
-                elapsed_sim = (index + 1) * dt
-                remaining = elapsed_sim - (time.monotonic() - wall_start)
-                if remaining > 0:
-                    time.sleep(remaining)
 
     def _try_grasp(self) -> None:
         import mujoco
@@ -155,6 +156,7 @@ class WandGripperKernel:
         model.eq_data[grip_eq_id, 6:10] = relative_quaternion
         self._held_object = nearest_name
         for _ in range(50):
+            self.session.clamp_base()
             mujoco.mj_step(model, data)
         if self.session.viewer is not None:
             self.session.viewer.sync()

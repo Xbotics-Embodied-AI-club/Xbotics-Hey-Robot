@@ -32,6 +32,12 @@ def configure_mujoco_gl() -> str | None:
 class So101MobileSession:
     """Single owner of the SO101 mobile dock MuJoCo state."""
 
+    BASE_JOINT_NAMES = (
+        "root_x_axis_joint",
+        "root_y_axis_joint",
+        "root_z_rotation_joint",
+    )
+
     def __init__(
         self,
         scene_path: str | Path = DEFAULT_SCENE,
@@ -48,6 +54,8 @@ class So101MobileSession:
         self.data: Any = None
         self.renderer: Any = None
         self.viewer: Any = None
+        self._base_qpos_addresses: list[int] = []
+        self._base_dof_addresses: list[int] = []
 
     @property
     def connected(self) -> bool:
@@ -62,6 +70,7 @@ class So101MobileSession:
         self.model = mujoco.MjModel.from_xml_path(str(self.scene_path))
         self.data = mujoco.MjData(self.model)
         mujoco.mj_forward(self.model, self.data)
+        self._cache_base_addresses()
         self._settle()
         self.renderer = mujoco.Renderer(
             self.model, height=self.render_height, width=self.render_width
@@ -79,6 +88,43 @@ class So101MobileSession:
     def require_connected(self) -> None:
         if not self.connected:
             raise RuntimeError("SO101 mobile simulation is not connected")
+
+    def _cache_base_addresses(self) -> None:
+        import mujoco
+
+        self._base_qpos_addresses.clear()
+        self._base_dof_addresses.clear()
+        for name in self.BASE_JOINT_NAMES:
+            jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
+            self._base_qpos_addresses.append(int(self.model.jnt_qposadr[jid]))
+            self._base_dof_addresses.append(int(self.model.jnt_dofadr[jid]))
+
+    def clamp_base(self) -> None:
+        """Zero base qpos and qvel at every address — no mj_forward.
+
+        Call this at every simulation step during arm motion to prevent
+        the 70 kg mobile base from drifting under arm reaction forces.
+        """
+        for adr in self._base_qpos_addresses:
+            self.data.qpos[adr] = 0.0
+        for adr in self._base_dof_addresses:
+            self.data.qvel[adr] = 0.0
+
+    def lock_base(self) -> None:
+        """Zero the mobile base joints (x, y, yaw) to origin."""
+        self.require_connected()
+        import logging
+
+        import mujoco
+
+        for name in ("root_x_axis_joint", "root_y_axis_joint", "root_z_rotation_joint"):
+            try:
+                jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
+                adr = self.model.jnt_qposadr[jid]
+                self.data.qpos[adr] = 0.0
+            except Exception:
+                logging.debug("base lock: joint %s not found in model", name)
+        mujoco.mj_forward(self.model, self.data)
 
     def _settle(self, duration: float = 0.1) -> None:
         """Brief step to resolve contacts, then lock base at origin."""

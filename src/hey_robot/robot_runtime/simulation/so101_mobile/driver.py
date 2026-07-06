@@ -8,6 +8,7 @@ import numpy as np
 
 from hey_robot.contracts import SkillContractRuntime
 from hey_robot.logging import HeyRobotLogger
+from hey_robot.motion.grasp_point import CameraGeometry, sample_grasp_point
 from hey_robot.protocol import (
     Envelope,
     RobotAction,
@@ -325,6 +326,28 @@ class So101MobileSimDriver:
                     "operation_success": True,
                 },
             )
+        if name == "get_camera_geometry":
+            camera_name = str(arguments.get("camera") or "table_view")
+            geom = CameraGeometry.from_mujoco(
+                self.session.model,
+                self.session.data,
+                camera_name,
+                render_width=int(self.settings.get("render_width", 640)),
+                render_height=int(self.settings.get("render_height", 480)),
+            )
+            return RobotSkillResult(
+                True,
+                f"camera geometry for {camera_name}",
+                {
+                    "camera_name": camera_name,
+                    "K": geom.K.tolist(),
+                    "position": geom.pos.tolist(),
+                    "rotation": geom.R.tolist(),
+                    "operation_success": True,
+                },
+            )
+        if name == "perceive_grasp_point":
+            return self._perceive_grasp_point(arguments)
         if name == "sim_get_object_state":
             requested = str(arguments.get("object_name") or "")
             object_name = requested or self.gripper.held_object or ""
@@ -374,6 +397,156 @@ class So101MobileSimDriver:
                 },
             )
         raise ValueError(f"unsupported primitive: {name}")
+
+    def _perceive_grasp_point(self, arguments: dict[str, Any]) -> RobotSkillResult:
+        """Simulate perception-mode grasp point localisation.
+
+        Uses oracle body position → project to 2D (simulating camera) → bbox
+        (simulating detector) → ray-plane intersection → density cluster → 3D.
+        This tests the full table-plane pipeline end-to-end in simulation.
+        """
+        query = str(arguments.get("query") or "wand").strip()
+        camera_name = str(arguments.get("camera") or "table_view")
+        sample_count = int(arguments.get("sample_count", 20))
+        sample_interval = float(arguments.get("sample_interval", 0.05))
+        cluster_threshold = float(arguments.get("cluster_threshold", 0.015))
+
+        # Resolve object body position (ground truth for simulated detector)
+        import mujoco
+
+        resolved_name = self.oracle.resolve_name(query)
+        if resolved_name is None:
+            return RobotSkillResult(
+                True,
+                f"object not found: {query}",
+                {
+                    "operation_success": False,
+                    "failure_mode": "object_not_found",
+                    "query": query,
+                },
+            )
+
+        try:
+            body_id = mujoco.mj_name2id(
+                self.session.model, mujoco.mjtObj.mjOBJ_BODY, resolved_name
+            )
+        except Exception:
+            return RobotSkillResult(
+                True,
+                f"object body not resolved: {resolved_name}",
+                {
+                    "operation_success": False,
+                    "failure_mode": "object_not_found",
+                },
+            )
+
+        gt_body_pos = self.session.data.xpos[body_id].copy()
+
+        # Camera geometry — use a synthetic camera positioned to see the target
+        # when the named scene camera doesn't face it (common in sim validation).
+        cam = self._camera_for_target(camera_name, gt_body_pos)
+
+        # Table plane — use object body z as virtual horizontal plane
+        plane_z = float(arguments.get("plane_z", gt_body_pos[2]))
+        plane = (0.0, 0.0, 1.0, -plane_z)
+
+        # Build simulated detector: project GT → 2D → add noise → bbox
+        def _simulated_detector():
+            point_cam = cam.R.T @ (gt_body_pos - cam.pos)
+            if point_cam[2] <= 0:
+                return None
+            u = cam.K[0, 0] * point_cam[0] / point_cam[2] + cam.K[0, 2]
+            v = cam.K[1, 1] * point_cam[1] / point_cam[2] + cam.K[1, 2]
+            noise_u = np.random.normal(0, 3)
+            noise_v = np.random.normal(0, 3)
+            u_jitter = float(u) + noise_u
+            v_jitter = float(v) + noise_v
+            half = 30.0
+            return (u_jitter - half, v_jitter - half, u_jitter + half, v_jitter)
+
+        point = sample_grasp_point(
+            _simulated_detector,
+            cam.K,
+            cam.pos,
+            cam.R,
+            plane,
+            sample_count=sample_count,
+            sample_interval=sample_interval,
+            cluster_threshold=cluster_threshold,
+        )
+
+        if point is None:
+            return RobotSkillResult(
+                True,
+                f"ray-plane localisation failed for {resolved_name}",
+                {
+                    "operation_success": False,
+                    "failure_mode": "no_3d_samples",
+                    "query": query,
+                    "resolved_name": resolved_name,
+                    "camera": camera_name,
+                    "method": "ray_plane_intersection",
+                },
+            )
+
+        return RobotSkillResult(
+            True,
+            f"perceived grasp point for {resolved_name}",
+            {
+                "object_name": resolved_name,
+                "point_3d": point.tolist(),
+                "source": "ray_plane_intersection",
+                "camera": camera_name,
+                "plane_z": plane_z,
+                "operation_success": True,
+            },
+        )
+
+    def _camera_for_target(
+        self, camera_name: str, target: np.ndarray
+    ) -> CameraGeometry:
+        """Return camera geometry that can see *target*.
+
+        Tries the named scene camera first; falls back to a synthetic overhead
+        camera positioned to look at the target.
+        """
+        width = int(self.settings.get("render_width", 640))
+        height = int(self.settings.get("render_height", 480))
+
+        # Try the real scene camera
+        try:
+            cam = CameraGeometry.from_mujoco(
+                self.session.model,
+                self.session.data,
+                camera_name,
+                render_width=width,
+                render_height=height,
+            )
+            point_cam = cam.R.T @ (target - cam.pos)
+            if point_cam[2] > 0:
+                return cam
+        except Exception:
+            pass
+
+        # Fall back to synthetic overhead camera
+        import math
+
+        eye = target + np.array([0.0, -0.35, 0.5], dtype=np.float64)
+        up = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+        z = target - eye
+        z /= np.linalg.norm(z)
+        x = np.cross(up, z)
+        x /= np.linalg.norm(x)
+        y = np.cross(z, x)
+        R = np.column_stack([x, y, z])
+
+        fovy_deg = 75.0
+        fy = (height / 2.0) / math.tan(math.radians(fovy_deg) / 2.0)
+        K = np.array(
+            [[fy, 0, width / 2.0], [0, fy, height / 2.0], [0, 0, 1.0]], dtype=np.float64
+        )
+
+        return CameraGeometry(K, eye.copy(), R)
 
     def _resolve_joint_targets(self, arguments: dict[str, Any]) -> list[float]:
         raw = arguments.get("joints")

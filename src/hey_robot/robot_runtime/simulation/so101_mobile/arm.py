@@ -13,20 +13,20 @@ from hey_robot.robot_runtime.simulation.so101_mobile.session import (
 )
 
 ARM_JOINT_NAMES: tuple[str, ...] = (
-    "Rotation_2",
-    "Pitch_2",
-    "Elbow_2",
-    "Wrist_Pitch_2",
-    "Wrist_Roll_2",
+    "Rotation",
+    "Pitch",
+    "Elbow",
+    "Wrist_Pitch",
+    "Wrist_Roll",
 )
 ARM_ACTUATOR_NAMES: tuple[str, ...] = (
-    "Rotation_R",
-    "Pitch_R",
-    "Elbow_R",
-    "Wrist_Pitch_R",
-    "Wrist_Roll_R",
+    "Rotation_L",
+    "Pitch_L",
+    "Elbow_L",
+    "Wrist_Pitch_L",
+    "Wrist_Roll_L",
 )
-EE_BODY_NAME = "Fixed_Jaw_tip_2"
+EE_BODY_NAME = "Fixed_Jaw_tip"
 
 IK_MAX_ITER = 100
 IK_TOL = 1e-3
@@ -84,6 +84,9 @@ class So101MobileArmKernel:
         data = self.session.data
         import mujoco
 
+        # Re-lock mobile base at origin before arm motion
+        self.session.lock_base()
+
         dt = float(model.opt.timestep)
         steps = max(1, int(float(duration) / dt))
         sync_interval = max(1, int(1.0 / 60.0 / dt))
@@ -96,6 +99,7 @@ class So101MobileArmKernel:
                 self._actuator_ids, start, positions, strict=True
             ):
                 data.ctrl[actuator] = initial + alpha * (target - initial)
+            self.session.clamp_base()
             mujoco.mj_step(model, data)
             if self.session.viewer is not None and index % sync_interval == 0:
                 self.session.viewer.sync()
@@ -103,6 +107,10 @@ class So101MobileArmKernel:
                 remaining = elapsed_sim - (time.monotonic() - wall_start)
                 if remaining > 0:
                     time.sleep(remaining)
+        # Snap actuator targets to actual joint positions to prevent
+        # residual-force drift in subsequent gripper motions.
+        for actuator_id, name in zip(self._actuator_ids, ARM_JOINT_NAMES, strict=True):
+            data.ctrl[actuator_id] = float(data.joint(name).qpos[0])
         return True
 
     def stop(self) -> None:
@@ -112,6 +120,7 @@ class So101MobileArmKernel:
         for actuator, position in zip(self._actuator_ids, positions, strict=True):
             self.session.data.ctrl[actuator] = position
         for _ in range(max(1, int(0.05 / self.session.model.opt.timestep))):
+            self.session.clamp_base()
             mujoco.mj_step(self.session.model, self.session.data)
         if self.session.viewer is not None:
             self.session.viewer.sync()
@@ -148,6 +157,8 @@ class So101MobileArmKernel:
         target = np.asarray(target_xyz, dtype=np.float64)
         if target.shape != (3,) or not np.all(np.isfinite(target)):
             return None
+        # Re-lock mobile base at origin before IK
+        self.session.lock_base()
         data = self.session.data
         model = self.session.model
         old_qpos = data.qpos.copy()
