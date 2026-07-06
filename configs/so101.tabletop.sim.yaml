@@ -53,6 +53,7 @@ identity:
   unified_user_episodes: true
   bindings:
     "cli:sender:local-user": owner
+    "web:sender:web-user": owner
 
 channels:
   cli:
@@ -62,6 +63,15 @@ channels:
     prompt: "so101-tabletop> "
     sender_id: local-user
     chat_id: so101-tabletop-local
+  web:
+    type: web
+    enabled: true
+    account_id: so101-web
+    sender_id: web-user
+    host: 0.0.0.0
+    port: 8080
+    access_log: false
+    uvicorn_log_level: warning
 
 robots:
   tabletop_arm:

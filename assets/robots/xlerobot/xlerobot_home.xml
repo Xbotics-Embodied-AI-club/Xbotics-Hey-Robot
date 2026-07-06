@@ -243,7 +243,7 @@
                 </body>
               </body>
             </body>
-            <body name="top_base_link" pos="0.15 0 0.73">
+            <body name="top_base_link" pos="0.07 0 0.73">
               <inertial pos="0 0 0" quat="0.707107 0 0 0.707107" mass="4.3542" diaginertia="0.005 0.0045 0.0045" />
               <geom name="top_base_link_visual1" pos="0.016 -0.006 -0.727" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.3 0.3 0.3 1" mesh="topbase1" />
               <geom name="top_base_link_visual2" pos="0.016 -0.006 -0.727" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.02 0.02 0.02 1" mesh="topbase2" />

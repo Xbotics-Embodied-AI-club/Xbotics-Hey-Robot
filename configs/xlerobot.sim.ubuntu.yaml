@@ -46,6 +46,8 @@ skills:
     - set_arm_pose
     - move_arm_joints
     - set_gripper
+    - pick_wand_from_dock
+    - place_wand_to_dock
 
 notifications:
   defaults:
@@ -163,7 +165,7 @@ robots:
     embodiment_profile: xlerobot_sim
     enabled: true
     settings:
-      mjcf_path: assets/robots/xlerobot/home_scene.xml
+      mjcf_path: assets/robots/xlerobot/cat_play_home_scene.xml
       render_width: 640
       render_height: 480
       control_hz: 2.0

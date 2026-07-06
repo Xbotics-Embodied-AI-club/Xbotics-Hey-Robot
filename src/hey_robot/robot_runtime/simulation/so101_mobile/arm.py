@@ -179,7 +179,10 @@ class So101MobileArmKernel:
                 data.qpos[address] = float(value)
 
             for _ in range(IK_MAX_ITER):
-                mujoco.mj_forward(model, data)
+                # Position IK needs transforms and Jacobians, not collision or
+                # dynamics. This keeps IK fast in the complete home scene.
+                mujoco.mj_kinematics(model, data)
+                mujoco.mj_comPos(model, data)
                 error = target - data.xpos[self._ee_body_id]
                 if float(np.linalg.norm(error)) < IK_TOL:
                     result = [float(data.qpos[address]) for address in qpos_addresses]
@@ -200,7 +203,8 @@ class So101MobileArmKernel:
             data.qpos[:] = old_qpos
             data.qvel[:] = old_qvel
             data.ctrl[:] = old_ctrl
-            mujoco.mj_forward(model, data)
+            mujoco.mj_kinematics(model, data)
+            mujoco.mj_comPos(model, data)
 
     def ee_position(self) -> np.ndarray:
         return np.asarray(

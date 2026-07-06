@@ -4,8 +4,10 @@ import pytest
 
 from hey_robot.config import RobotSpec
 from hey_robot.protocol import RobotSkillAction, SkillIntent
+from hey_robot.robot_runtime import get_embodiment_profile
 from hey_robot.robot_runtime.base import RobotDriverContext
 from hey_robot.robot_runtime.simulation.so101_mobile import So101MobileSimDriver
+from hey_robot.robot_runtime.simulation.xlerobot_sim_driver import XLeRobotSimDriver
 from hey_robot.skill_os.builtins.dock_manipulation import PickWandSkill, PlaceWandSkill
 from hey_robot.skill_os.context import SkillContext
 
@@ -45,6 +47,37 @@ class DirectRobotPort:
         return self.driver.last_skill_result.to_dict()
 
 
+def _dual_arm_driver() -> XLeRobotSimDriver:
+    import mujoco
+
+    scene = "assets/robots/xlerobot/cat_play_home_scene.xml"
+    spec = RobotSpec(
+        type="xlerobot_sim",
+        family="xlerobot",
+        environment="sim",
+        driver="mujoco",
+        embodiment_profile="xlerobot_sim",
+        settings={"mjcf_path": scene},
+    )
+    context = RobotDriverContext(
+        robot_id="dual_test",
+        spec=spec,
+        deployment_id="test",
+        embodiment=get_embodiment_profile(spec),
+        skill_catalog=None,
+    )
+    driver = XLeRobotSimDriver(context)
+    driver.model = mujoco.MjModel.from_xml_path(scene)
+    driver.data = mujoco.MjData(driver.model)
+    for actuator_id, position in driver.adapter.arm_rest_positions().items():
+        driver.data.ctrl[actuator_id] = position
+        driver._set_actuator_joint_position(actuator_id, position)
+    mujoco.mj_forward(driver.model, driver.data)
+    driver._initialize_dock_manipulation()
+    driver.state = "idle"
+    return driver
+
+
 @pytest.mark.asyncio
 async def test_pick_wand_from_dock():
     driver = So101MobileSimDriver(_context())
@@ -79,6 +112,20 @@ async def test_pick_and_place_cycle():
         assert driver.gripper.weld_states().get("cat_wand", True) is False
     finally:
         await driver.close()
+
+
+@pytest.mark.asyncio
+async def test_dual_arm_xlerobot_left_arm_pick_and_place_cycle():
+    driver = _dual_arm_driver()
+    ctx = SkillContext(robot=DirectRobotPort(driver))
+
+    pick_result = await PickWandSkill().execute(ctx, {})
+    assert pick_result.success, pick_result.error
+    assert driver._dock_gripper.held_object == "cat_wand"
+
+    place_result = await PlaceWandSkill().execute(ctx, {})
+    assert place_result.success, place_result.error
+    assert driver._dock_gripper.held_object is None
 
 
 @pytest.mark.asyncio

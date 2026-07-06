@@ -67,7 +67,7 @@ class PickWandSkill(BaseSkill):
 
     spec = spec(
         "pick_wand_from_dock",
-        "Pick the cat wand from the dock using the right arm.",
+        "Pick the cat wand from the dock using the left arm.",
         category="arm",
         input_schema={
             "type": "object",
@@ -89,7 +89,7 @@ class PickWandSkill(BaseSkill):
             },
         },
         required_resources=("arm", "gripper"),
-        supported_robots=("so101_mobile",),
+        supported_robots=("so101_mobile", "xlerobot"),
         success_criteria=("wand is held and lifted from dock",),
         failure_modes=(
             "no_arm",
@@ -314,7 +314,7 @@ class PlaceWandSkill(BaseSkill):
             },
         },
         required_resources=("arm", "gripper"),
-        supported_robots=("so101_mobile",),
+        supported_robots=("so101_mobile", "xlerobot"),
         success_criteria=("wand is released in dock",),
         failure_modes=(
             "gripper_empty",
@@ -349,9 +349,12 @@ class PlaceWandSkill(BaseSkill):
         if wand_pos is None:
             return _failure("wand position unknown", "place_not_confirmed")
 
-        # Dock position from scene: wand_dock body at (0.04, 0.133, 0.62) base_link
-        # dock_insertion site is at z=0.10 above dock body, so insertion is at:
-        dock_x, dock_y, dock_z = 0.04, 0.133, 0.72  # wand world pos when in dock
+        dock_target = state.get("dock_target")
+        if isinstance(dock_target, (list, tuple)) and len(dock_target) == 3:
+            dock_x, dock_y, dock_z = (float(value) for value in dock_target)
+        else:
+            # Backward-compatible target used by the original single-arm scene.
+            dock_x, dock_y, dock_z = 0.04, 0.133, 0.72
 
         # 3. Compute approach above dock
         approach_xyz = [dock_x, dock_y, dock_z + PLACE_APPROACH_HEIGHT]

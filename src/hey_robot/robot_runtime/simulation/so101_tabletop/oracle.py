@@ -97,8 +97,11 @@ class TabletopOracle:
         sample_count: int = 1,
         sample_interval: float = 0.0,
     ) -> tuple[str, list[list[float]]] | None:
+        normalized_query = str(query or "").strip()
         detections = self.detect(query)
-        if not detections and not str(query or "").strip():
+        if not detections:
+            if normalized_query:
+                return None
             positions = self.arm.get_object_positions()
             if not positions:
                 return None

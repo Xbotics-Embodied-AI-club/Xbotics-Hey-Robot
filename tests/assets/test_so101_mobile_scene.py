@@ -21,15 +21,15 @@ def test_scene_contains_dock_and_wand():
         assert body_id >= 0, f"missing body: {name}"
 
 
-def test_scene_has_right_arm_joints():
+def test_single_arm_scene_has_arm_joints():
     model = mujoco.MjModel.from_xml_path(str(SCENE_PATH))
     for name in (
-        "Rotation_2",
-        "Pitch_2",
-        "Elbow_2",
-        "Wrist_Pitch_2",
-        "Wrist_Roll_2",
-        "Jaw_2",
+        "Rotation",
+        "Pitch",
+        "Elbow",
+        "Wrist_Pitch",
+        "Wrist_Roll",
+        "Jaw",
     ):
         joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
         assert joint_id >= 0, f"missing joint: {name}"
@@ -42,15 +42,15 @@ def test_scene_has_cameras():
         assert cam_id >= 0, f"missing camera: {name}"
 
 
-def test_scene_has_right_actuators():
+def test_single_arm_scene_has_left_actuators():
     model = mujoco.MjModel.from_xml_path(str(SCENE_PATH))
     for name in (
-        "Rotation_R",
-        "Pitch_R",
-        "Elbow_R",
-        "Wrist_Pitch_R",
-        "Wrist_Roll_R",
-        "Jaw_R",
+        "Rotation_L",
+        "Pitch_L",
+        "Elbow_L",
+        "Wrist_Pitch_L",
+        "Wrist_Roll_L",
+        "Jaw_L",
     ):
         act_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, name)
         assert act_id >= 0, f"missing actuator: {name}"

@@ -43,16 +43,25 @@ skills:
 
 notifications:
   defaults:
-    channels: [cli]
+    channels: [cli, web]
   channels:
     cli: {}
-  kinds: {}
+    web: {}
+  kinds:
+    task_watchdog:
+      severity: critical
+      channels: [web, feishu]
+    proactive_message:
+      severity: info
+      channels: [web]
 
 identity:
   enabled: true
   unified_user_episodes: true
   bindings:
     "cli:sender:local-user": owner
+    "web:sender:web-user": owner
+    "feishu:sender:ou_160f4368eb2ada4edda22bd33ce435af": owner
 
 channels:
   cli:
@@ -62,6 +71,20 @@ channels:
     prompt: "so101-dock> "
     sender_id: local-user
     chat_id: so101-dock-local
+  web:
+    type: web
+    enabled: true
+    account_id: so101-dock-web
+    sender_id: web-user
+    host: 0.0.0.0
+    port: 8080
+    access_log: false
+    uvicorn_log_level: warning
+  feishu:
+    type: feishu
+    enabled: true
+    account_id: so101-dock-feishu
+    chat_id: ""
 
 robots:
   dock_arm:

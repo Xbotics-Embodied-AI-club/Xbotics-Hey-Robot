@@ -4,6 +4,8 @@
 -->
 <mujoco model="xlerobot_dock">
 
+  <statistic center="0 0 0.65" extent="1.2"/>
+
   <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast">
     <flag contact="enable"/>
   </option>
@@ -32,14 +34,14 @@
     <light pos="2 0 3" dir="0 0 -1" diffuse="0.8 0.8 0.8"/>
     <light pos="0 2 2" dir="0 -1 -1" diffuse="0.3 0.3 0.3"/>
 
-    <!-- Tabletop camera: views the wand dock on the right side from front/left. -->
+    <!-- Tabletop camera: views the wand dock from front/above. -->
     <camera name="table_view"
-            pos="0.5 0.0 1.1"
-            xyaxes="0.8 0.6 0  -0.4 0.53 0.75"
+            pos="0.5 -0.15 1.0"
+            xyaxes="0.6 0.8 0  -0.35 0.26 0.9"
             fovy="75"/>
 
-    <!-- Wand dock on the right side (where right arm was removed) -->
-    <body name="wand_dock" pos="0.04 0.133 0.62">
+    <!-- Wand dock sits on the cart's upper platform, inside its front edge. -->
+    <body name="wand_dock" pos="0.10 0.0 0.72">
       <geom name="dock_base" type="cylinder" size="0.04 0.015"
             rgba="0.4 0.4 0.5 1" mass="0.1"/>
       <geom name="pillar_1" type="cylinder" size="0.005 0.06"
@@ -54,18 +56,19 @@
     </body>
 
     <!-- Cat wand (free body, initially held in dock by active dock_weld) -->
-    <body name="cat_wand" pos="0.04 0.133 0.725">
+    <body name="cat_wand" pos="0.10 0.0 0.825">
       <freejoint name="cat_wand_free"/>
-      <geom name="wand_stick" type="cylinder" size="0.005 0.075"
-            pos="0 0 0.075" rgba="0.82 0.55 0.35 1" mass="0.015" condim="4"/>
+      <geom name="wand_stick" type="cylinder" size="0.005 0.10"
+            pos="0 0 0.10" rgba="0.82 0.55 0.35 1" mass="0.015" condim="4"/>
       <geom name="wand_ball" type="sphere" size="0.022"
-            pos="0 0 0.155" rgba="1.0 0.3 0.3 1" mass="0.005"/>
-      <site name="wand_grasp" pos="0 0 0.08" size="0.005" rgba="1 1 0 0.5"/>
+            pos="0 0 0.205" rgba="1.0 0.3 0.3 1" mass="0.005"/>
+      <site name="wand_grasp" pos="0 0 0.15" size="0.005" rgba="1 1 0 0.5"/>
     </body>
   </worldbody>
 
   <equality>
     <weld name="dock_weld" body1="wand_dock" body2="cat_wand" active="true"/>
+    <!-- Fixed_Jaw belongs to the left-arm actuator group (Rotation_L ... Jaw_L). -->
     <weld name="grip_weld" body1="Fixed_Jaw" body2="cat_wand" active="false"/>
   </equality>
 

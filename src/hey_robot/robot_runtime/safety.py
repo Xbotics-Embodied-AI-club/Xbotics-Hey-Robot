@@ -56,8 +56,10 @@ class RobotSafetySupervisor:
             return SafetyDecision(
                 False, f"battery critical{suffix}", metadata={"battery": battery}
             )
-        if capabilities.action_dimensions is not None and len(action.values) != int(
-            capabilities.action_dimensions
+        if (
+            capabilities.action_dimensions is not None
+            and len(action.values) > 0
+            and len(action.values) != int(capabilities.action_dimensions)
         ):
             return SafetyDecision(
                 False,

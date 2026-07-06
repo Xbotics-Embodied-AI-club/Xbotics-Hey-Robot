@@ -1,0 +1,6 @@
+Tue Jul  7 00:43:19 2026
+ERROR: mjv_updateCamera: track body id is outside valid range
+
+Tue Jul  7 00:50:18 2026
+WARNING: Nan, Inf or huge value in QACC at DOF 5. The simulation is unstable. Time = 0.0700.
+

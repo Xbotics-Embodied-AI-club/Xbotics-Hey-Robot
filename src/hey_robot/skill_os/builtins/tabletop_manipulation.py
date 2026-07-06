@@ -152,6 +152,12 @@ class PickSkill(BaseSkill):
             or arguments.get("query")
             or ""
         )
+        if not query.strip():
+            return _failure(
+                "no object_label provided; LLM planner must include "
+                "'object_label' in the skill slots when calling pick",
+                "object_not_found",
+            )
         sample_count = max(1, int(arguments.get("sample_count", 20)))
         located = await _primitive(
             ctx,
@@ -457,7 +463,7 @@ class DriverPrimitiveSkill(BaseSkill):
             category=category,
             input_schema={"type": "object", "properties": {}},
             required_resources=resources,
-            supported_robots=("so101",),
+            supported_robots=("so101", "so101_mobile", "xlerobot"),
             safety_level="motion" if resources else "normal",
             agent_visible=False,
             refresh_observation=False,
