@@ -131,8 +131,8 @@ def sample_grasp_point(
 
     arr = np.array(samples, dtype=np.float64)
     if len(arr) < 3:
-        return np.median(arr, axis=0)
-    return density_cluster_mean(arr, cluster_threshold)
+        return np.median(arr, axis=0)  # type: ignore[no-any-return]
+    return density_cluster_mean(arr, cluster_threshold)  # type: ignore[no-any-return]
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +186,7 @@ class CameraGeometry:
             raise ValueError(f"MuJoCo camera not found: {camera_name}")
 
         fovy_deg = float(model.cam_fovy[cam_id])
-        K = np.array(
+        intrinsic = np.array(
             [
                 [0.0, 0, render_width / 2.0],
                 [0, 0.0, render_height / 2.0],
@@ -195,19 +195,19 @@ class CameraGeometry:
             dtype=np.float64,
         )
         fy = (render_height / 2.0) / np.tan(np.deg2rad(fovy_deg) / 2.0)
-        K[0, 0] = fy
-        K[1, 1] = fy
+        intrinsic[0, 0] = fy
+        intrinsic[1, 1] = fy
 
         pos = data.cam_xpos[cam_id].copy()
-        R_mjc = data.cam_xmat[cam_id].reshape(3, 3).copy()
+        rot_mujoco = data.cam_xmat[cam_id].reshape(3, 3).copy()
 
         # Convert MuJoCo camera frame → OpenCV convention.
         # MuJoCo: +X right, +Y up, +Z back (view along -Z)
         # OpenCV:  +X right, +Y down, +Z forward
-        S = np.diag([1.0, -1.0, -1.0])
-        R = R_mjc @ S
+        convert = np.diag([1.0, -1.0, -1.0])
+        rot_opencv = rot_mujoco @ convert
 
-        return cls(K, pos, R)
+        return cls(intrinsic, pos, rot_opencv)
 
 
 def grasp_point_from_bbox_with_camera(

@@ -71,18 +71,21 @@ def ray_plane_intersection(
         to the plane or the intersection is behind the camera.
     """
     u, v = float(pixel[0]), float(pixel[1])
-    K = np.asarray(camera_matrix, dtype=np.float64)
+    intrinsic = np.asarray(camera_matrix, dtype=np.float64)
     pos = np.asarray(cam_position, dtype=np.float64)
-    R = np.asarray(cam_rotation, dtype=np.float64)
+    rotation = np.asarray(cam_rotation, dtype=np.float64)
     a, b, c, d = (float(plane[0]), float(plane[1]), float(plane[2]), float(plane[3]))
 
-    fx, fy, cx, cy = float(K[0, 0]), float(K[1, 1]), float(K[0, 2]), float(K[1, 2])
+    fx = float(intrinsic[0, 0])
+    fy = float(intrinsic[1, 1])
+    cx = float(intrinsic[0, 2])
+    cy = float(intrinsic[1, 2])
 
     # Camera-frame ray (OpenCV convention: z forward, x right, y down).
     ray_cam = np.array([(u - cx) / fx, (v - cy) / fy, 1.0], dtype=np.float64)
 
     # World-frame ray.
-    ray_world = R @ ray_cam
+    ray_world = rotation @ ray_cam
 
     # Ray-plane intersection: n·(pos + t*ray) + d = 0 → t = -(n·pos + d) / (n·ray).
     denom = a * ray_world[0] + b * ray_world[1] + c * ray_world[2]
@@ -92,7 +95,7 @@ def ray_plane_intersection(
     if t <= 0:
         return None  # plane behind camera
 
-    return pos + t * ray_world
+    return pos + t * ray_world  # type: ignore[no-any-return]
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +152,7 @@ class TablePlaneCalibration:
         resolved = Path(path).expanduser()
         if not resolved.exists():
             raise FileNotFoundError(f"Calibration file not found: {resolved}")
-        payload = yaml.safe_load(resolved) or {}
+        payload = yaml.safe_load(str(resolved)) or {}
         coeffs = payload.get("plane")
         if not isinstance(coeffs, (list, tuple)) or len(coeffs) != 4:
             raise ValueError("Invalid calibration file: missing or malformed 'plane'")

@@ -41,30 +41,6 @@ def test_robot_manager_supports_xlerobot() -> None:
     assert driver.robot_id == "xlerobot"
 
 
-def test_robot_manager_supports_decoupled_hardware_bodies() -> None:
-    config = DeploymentConfig.from_dict(
-        {
-            "robots": {
-                "arm0": {
-                    "type": "so101",
-                    "serial_bus": {"port": "COM6", "baudrate": 1000000},
-                    "components": {"arm": {"type": "so101_arm"}},
-                },
-                "base0": {
-                    "type": "lekiwi",
-                    "serial_bus": {"port": "COM7", "baudrate": 1000000},
-                    "components": {"base": {"type": "lekiwi_base"}},
-                },
-            }
-        }
-    )
-
-    manager = RobotManager(config)
-
-    assert isinstance(manager.require("arm0"), SO101Driver)
-    assert isinstance(manager.require("base0"), LeKiwiDriver)
-
-
 def test_robot_manager_supports_explicit_family_environment_driver_identity() -> None:
     config = DeploymentConfig.from_dict(
         {

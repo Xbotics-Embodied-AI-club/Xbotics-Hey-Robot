@@ -42,15 +42,6 @@ _DEFAULT_SIM_CAMERA_LAYOUT: dict[str, dict[str, Any]] = {
         "elevation": -10.0,
         "lookat": [0.0, 0.0, 0.0],
     },
-    "left_wrist": {
-        "camera_name": "left_wrist",
-        "prefer_native": True,
-        "body": "Left_Arm_Camera",
-        "distance": 0.35,
-        "azimuth": 180.0,
-        "elevation": -15.0,
-        "lookat": [0.0, 0.0, 0.0],
-    },
     "right_wrist": {
         "camera_name": "right_wrist",
         "prefer_native": True,
@@ -257,9 +248,11 @@ class XLeRobotSimDriver:
         self.data = await asyncio.to_thread(mujoco.MjData, self.model)
 
         rest = self.adapter.arm_rest_positions()
+        num_ctrl = len(self.data.ctrl)
         for idx, pos in rest.items():
-            self.data.ctrl[idx] = pos
-            self._set_actuator_joint_position(idx, pos)
+            if idx < num_ctrl:
+                self.data.ctrl[idx] = pos
+                self._set_actuator_joint_position(idx, pos)
         self._hold_head_camera()
 
         await asyncio.to_thread(mujoco.mj_forward, self.model, self.data)
@@ -487,19 +480,22 @@ class XLeRobotSimDriver:
                 f"{self._gripper_debug_state()}"
             )
 
+        num_ctrl = len(self.data.ctrl)
         if cmd.arm_targets:
             self._stop_base_motion()
             if cmd.delta_mode:
                 for idx, delta in cmd.arm_targets.items():
-                    self.data.ctrl[idx] = float(self.data.ctrl[idx]) + delta
+                    if idx < num_ctrl:
+                        self.data.ctrl[idx] = float(self.data.ctrl[idx]) + delta
             else:
                 for idx, target in cmd.arm_targets.items():
-                    self.data.ctrl[idx] = target
+                    if idx < num_ctrl:
+                        self.data.ctrl[idx] = target
 
         if cmd.jaw_left is not None:
             self._stop_base_motion()
             gripper_indices = self.adapter.gripper_actuator_indices()
-            if gripper_indices is not None:
+            if gripper_indices is not None and gripper_indices[0] < num_ctrl:
                 self.data.ctrl[gripper_indices[0]] = cmd.jaw_left
                 logger.info(
                     f"{self.robot_id} gripper_debug phase=write_left "
@@ -514,7 +510,7 @@ class XLeRobotSimDriver:
         if cmd.jaw_right is not None:
             self._stop_base_motion()
             gripper_indices = self.adapter.gripper_actuator_indices()
-            if gripper_indices is not None:
+            if gripper_indices is not None and gripper_indices[1] < num_ctrl:
                 self.data.ctrl[gripper_indices[1]] = cmd.jaw_right
                 logger.info(
                     f"{self.robot_id} gripper_debug phase=write_right "
@@ -612,9 +608,11 @@ class XLeRobotSimDriver:
 
         await asyncio.to_thread(mujoco.mj_resetData, self.model, self.data)
         rest = self.adapter.arm_rest_positions()
+        num_ctrl = len(self.data.ctrl)
         for idx, pos in rest.items():
-            self.data.ctrl[idx] = pos
-            self._set_actuator_joint_position(idx, pos)
+            if idx < num_ctrl:
+                self.data.ctrl[idx] = pos
+                self._set_actuator_joint_position(idx, pos)
         self._hold_head_camera()
         self._stop_base_motion()
         await asyncio.to_thread(mujoco.mj_forward, self.model, self.data)
@@ -948,6 +946,8 @@ class XLeRobotSimDriver:
 
     def _move_dock_left_arm(self, positions: list[float], duration: float) -> None:
         """Move the left arm with deterministic kinematic interpolation."""
+        if self._dock_session is None:
+            return
         import mujoco
 
         actuator_ids = self.adapter.arm_actuator_indices(self._dock_arm_side)[:5]
@@ -1234,7 +1234,10 @@ class XLeRobotSimDriver:
         actuator_indices: set[int] = set()
         for arm in ("left", "right"):
             actuator_indices.update(self.adapter.arm_actuator_indices(arm))
+        num_actuator = int(self.model.nu)
         for actuator_idx in sorted(actuator_indices):
+            if actuator_idx >= num_actuator:
+                continue
             joint_id = int(self.model.actuator_trnid[actuator_idx][0])
             if joint_id < 0 or joint_id >= self.model.njnt:
                 continue
@@ -1265,11 +1268,16 @@ class XLeRobotSimDriver:
     def _stop_base_motion(self) -> None:
         if self.data is None:
             return
+        import mujoco
+
         # Zero both actuator targets and simulated base state so later arm/gripper
         # settle steps do not integrate residual chassis motion.
-        self.data.ctrl[15] = 0.0
-        self.data.ctrl[16] = 0.0
-        self.data.ctrl[17] = 0.0
+        for lock_name in ("base_x_lock", "base_y_lock", "base_yaw_lock"):
+            lock_id = mujoco.mj_name2id(
+                self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, lock_name
+            )
+            if lock_id >= 0:
+                self.data.ctrl[lock_id] = 0.0
         self.data.qvel[0] = 0.0
         self.data.qvel[1] = 0.0
         self.data.qvel[2] = 0.0
@@ -1414,21 +1422,22 @@ class XLeRobotSimDriver:
             self.last_arm_status = {}
             return
         joint_states: dict[str, float] = {}
+        num_ctrl = len(self.data.ctrl)
         for name in _ARM_JOINT_NAMES:
             indices = self.adapter.joint_to_actuators(name)
             if indices is None:
                 continue
-            left_idx = indices[0]
-            if left_idx < len(self.data.ctrl):
-                joint_states[name] = float(self.data.ctrl[left_idx])
-            else:
-                joint_states[name] = 0.0
+            # Pick the first actuator index that is within bounds.
+            valid = next((idx for idx in indices if idx < num_ctrl), None)
+            joint_states[name] = (
+                float(self.data.ctrl[valid]) if valid is not None else 0.0
+            )
         gripper_indices = self.adapter.gripper_actuator_indices()
-        jaw_l = (
-            self._joint_position_for_actuator(gripper_indices[0])
-            if gripper_indices is not None and gripper_indices[0] < len(self.data.ctrl)
-            else 0.0
-        )
+        jaw_l = 0.0
+        if gripper_indices is not None:
+            valid_grip = next((idx for idx in gripper_indices if idx < num_ctrl), None)
+            if valid_grip is not None:
+                jaw_l = self._joint_position_for_actuator(valid_grip)
         gripper_open_value = self.adapter.gripper_open_value
         gripper_pct = (
             jaw_l / gripper_open_value * 100.0 if gripper_open_value > 0 else 0.0
@@ -1664,9 +1673,12 @@ class XLeRobotSimDriver:
                 camera.fixedcamid = camera_id
                 return camera
         camera.type = mujoco.mjtCamera.mjCAMERA_TRACKING
-        camera.trackbodyid = mujoco.mj_name2id(
-            self.model, mujoco.mjtObj.mjOBJ_BODY, body_name
-        )
+        track_body = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+        if track_body < 0:
+            track_body = mujoco.mj_name2id(
+                self.model, mujoco.mjtObj.mjOBJ_BODY, _ROBOT_BODY
+            )
+        camera.trackbodyid = track_body
         camera.distance = float(layout.get("distance", 0.8))
         camera.azimuth = float(layout.get("azimuth", 180.0))
         camera.elevation = float(layout.get("elevation", -20.0))

@@ -14,8 +14,7 @@ from hey_robot.robot_runtime.simulation.xlerobot_sim_driver import XLeRobotSimDr
 SCENE_PATH = (
     Path(__file__).resolve().parents[2]
     / "assets"
-    / "robots"
-    / "xlerobot"
+    / "scenes"
     / "cat_play_home_scene.xml"
 )
 
