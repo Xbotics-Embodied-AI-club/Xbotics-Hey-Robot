@@ -4,14 +4,8 @@ from hey_robot.config import DeploymentConfig
 from hey_robot.contracts import SkillContractCatalog
 from hey_robot.robot_runtime.base import RobotDriver, RobotDriverContext
 from hey_robot.robot_runtime.embodiments import get_embodiment_profile
-from hey_robot.robot_runtime.lekiwi import LeKiwiDriver
 from hey_robot.robot_runtime.mock import MockRobotDriver
-from hey_robot.robot_runtime.simulation.so101_mobile import So101MobileSimDriver
-from hey_robot.robot_runtime.simulation.so101_tabletop import (
-    So101TabletopSimDriver,
-)
 from hey_robot.robot_runtime.simulation.xlerobot_sim_driver import XLeRobotSimDriver
-from hey_robot.robot_runtime.so101 import SO101Driver
 from hey_robot.robot_runtime.xlerobot import XLeRobotDriver
 
 
@@ -56,20 +50,8 @@ class RobotManager:
             if spec.robot_family == "xlerobot" and spec.driver_kind == "mujoco":
                 self._drivers[robot_id] = XLeRobotSimDriver(context)
                 continue
-            if spec.robot_family == "so101" and spec.driver_kind == "mujoco":
-                self._drivers[robot_id] = So101TabletopSimDriver(context)
-                continue
-            if spec.robot_family == "so101_mobile" and spec.driver_kind == "mujoco":
-                self._drivers[robot_id] = So101MobileSimDriver(context)
-                continue
             if spec.robot_family == "xlerobot" and spec.driver_kind == "native":
                 self._drivers[robot_id] = XLeRobotDriver(context)
-                continue
-            if spec.robot_family == "so101" and spec.driver_kind == "native":
-                self._drivers[robot_id] = SO101Driver(context)
-                continue
-            if spec.robot_family == "lekiwi":
-                self._drivers[robot_id] = LeKiwiDriver(context)
                 continue
             raise ValueError(
                 "unsupported robot driver combination: "

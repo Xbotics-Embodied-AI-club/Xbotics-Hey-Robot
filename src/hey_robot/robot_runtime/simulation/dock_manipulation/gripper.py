@@ -1,28 +1,35 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 Vector Robotics
-# Modified for Xbotics Hey Robot.
+# Modified for Xbotics Hey Robot: shared dock gripper kernel.
 from __future__ import annotations
-
-import time
 
 import numpy as np
 
-from hey_robot.robot_runtime.simulation.so101_tabletop.arm import So101ArmKernel
-from hey_robot.robot_runtime.simulation.so101_tabletop.session import (
-    So101TabletopSession,
+from hey_robot.robot_runtime.simulation.dock_manipulation.arm import (
+    DockSession,
+    So101MobileArmKernel,
 )
 
-JAW_OPEN = 0.8
-JAW_CLOSED = -0.17
-JAW_ACTUATOR_NAME = "act_jaw_visual"
-GRASP_RADIUS = 0.05
+JAW_OPEN = 1.7
+JAW_CLOSED = 0.0
+JAW_ACTUATOR_NAME = "Jaw_L"
+GRASP_RADIUS = 0.06
 SETTLE_STEPS = 400
 
 
-class WeldGripperKernel:
-    def __init__(self, session: So101TabletopSession, arm: So101ArmKernel) -> None:
+class WandGripperKernel:
+    """Weld-based gripper for XLeRobot right jaw (Jaw_R)."""
+
+    def __init__(
+        self,
+        session: DockSession,
+        arm: So101MobileArmKernel,
+        *,
+        jaw_actuator_name: str = JAW_ACTUATOR_NAME,
+    ) -> None:
         self.session = session
         self.arm = arm
+        self._jaw_actuator_name = jaw_actuator_name
         self._actuator_id = -1
         self._held_object: str | None = None
         self._is_open = True
@@ -31,7 +38,7 @@ class WeldGripperKernel:
         import mujoco
 
         self._actuator_id = self.session.id_for(
-            mujoco.mjtObj.mjOBJ_ACTUATOR, JAW_ACTUATOR_NAME
+            mujoco.mjtObj.mjOBJ_ACTUATOR, self._jaw_actuator_name
         )
         self._sync_held_from_constraints()
         self._is_open = self._held_object is None
@@ -81,20 +88,23 @@ class WeldGripperKernel:
 
         data = self.session.data
         model = self.session.model
+        # Freeze arm joints (position + velocity) so only the jaw moves.
+        arm_qpos_addresses = [
+            int(model.jnt_qposadr[jid]) for jid in self.arm._joint_ids
+        ]
+        arm_dof_addresses = [int(model.jnt_dofadr[jid]) for jid in self.arm._joint_ids]
+        frozen_qpos = [float(data.qpos[adr]) for adr in arm_qpos_addresses]
         start = float(data.ctrl[self._actuator_id])
-        dt = float(self.session.model.opt.timestep)
-        sync_interval = max(1, int(1.0 / 60.0 / dt))
-        wall_start = time.monotonic()
         for index in range(SETTLE_STEPS):
             alpha = (index + 1) / SETTLE_STEPS
             data.ctrl[self._actuator_id] = start + alpha * (target - start)
+            self.session.clamp_base()
+            # Freeze arm in place — kp=50 is too weak to hold against gravity
+            for adr, value in zip(arm_qpos_addresses, frozen_qpos, strict=True):
+                data.qpos[adr] = float(value)
+            for adr in arm_dof_addresses:
+                data.qvel[adr] = 0.0
             mujoco.mj_step(model, data)
-            if self.session.viewer is not None and index % sync_interval == 0:
-                self.session.viewer.sync()
-                elapsed_sim = (index + 1) * dt
-                remaining = elapsed_sim - (time.monotonic() - wall_start)
-                if remaining > 0:
-                    time.sleep(remaining)
 
     def _try_grasp(self) -> None:
         import mujoco
@@ -115,6 +125,9 @@ class WeldGripperKernel:
 
         model = self.session.model
         data = self.session.data
+        # Find the grip weld (body1=Fixed_Jaw_2 or gripper link, body2=target)
+        grip_eq_id = -1
+        dock_eq_id = -1
         for equality_id in range(model.neq):
             if model.eq_type[equality_id] != mujoco.mjtEq.mjEQ_WELD:
                 continue
@@ -123,31 +136,50 @@ class WeldGripperKernel:
             if body2_name != nearest_name:
                 continue
             body1_id = int(model.eq_obj1id[equality_id])
-            position1 = data.xpos[body1_id]
-            rotation1 = data.xmat[body1_id].reshape(3, 3)
-            position2 = data.xpos[body2_id]
-            rotation2 = data.xmat[body2_id].reshape(3, 3)
-            relative_position = rotation1.T @ (position2 - position1)
-            relative_rotation = rotation1.T @ rotation2
-            relative_quaternion = np.zeros(4, dtype=float)
-            mujoco.mju_mat2Quat(relative_quaternion, relative_rotation.reshape(-1))
-            model.eq_data[equality_id, :3] = 0.0
-            model.eq_data[equality_id, 3:6] = relative_position
-            model.eq_data[equality_id, 6:10] = relative_quaternion
-            data.eq_active[equality_id] = 1
-            self._held_object = nearest_name
-            for _ in range(50):
-                mujoco.mj_step(model, data)
-            if self.session.viewer is not None:
-                self.session.viewer.sync()
+            body1_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, body1_id)
+            if body1_name == "wand_dock":
+                dock_eq_id = equality_id
+            else:
+                grip_eq_id = equality_id
+        if grip_eq_id < 0:
             return
+        # Activate grip weld, deactivate dock weld
+        data.eq_active[grip_eq_id] = 1
+        if dock_eq_id >= 0:
+            data.eq_active[dock_eq_id] = 0
+        # Compute relative transform for grip weld
+        body1_id = int(model.eq_obj1id[grip_eq_id])
+        body2_id = int(model.eq_obj2id[grip_eq_id])
+        position1 = data.xpos[body1_id]
+        rotation1 = data.xmat[body1_id].reshape(3, 3)
+        position2 = data.xpos[body2_id]
+        rotation2 = data.xmat[body2_id].reshape(3, 3)
+        relative_position = rotation1.T @ (position2 - position1)
+        relative_rotation = rotation1.T @ rotation2
+        relative_quaternion = np.zeros(4, dtype=float)
+        mujoco.mju_mat2Quat(relative_quaternion, relative_rotation.reshape(-1))
+        model.eq_data[grip_eq_id, :3] = 0.0
+        model.eq_data[grip_eq_id, 3:6] = relative_position
+        model.eq_data[grip_eq_id, 6:10] = relative_quaternion
+        self._held_object = nearest_name
+        for _ in range(50):
+            self.session.clamp_base()
+            mujoco.mj_step(model, data)
+        if self.session.viewer is not None:
+            self.session.viewer.sync()
 
     def _release_all(self) -> None:
         import mujoco
 
         for equality_id in range(self.session.model.neq):
             if self.session.model.eq_type[equality_id] == mujoco.mjtEq.mjEQ_WELD:
-                self.session.data.eq_active[equality_id] = 0
+                body1_id = int(self.session.model.eq_obj1id[equality_id])
+                body1_name = mujoco.mj_id2name(
+                    self.session.model, mujoco.mjtObj.mjOBJ_BODY, body1_id
+                )
+                self.session.data.eq_active[equality_id] = (
+                    1 if body1_name == "wand_dock" else 0
+                )
         self._held_object = None
 
     def _sync_held_from_constraints(self) -> None:

@@ -58,6 +58,20 @@ def _joint_payload(positions: list[float]) -> dict[str, float]:
     }
 
 
+def _ik_args(
+    target_xyz: list[float],
+    *,
+    current_joints: list[float] | None = None,
+    target_axis: Any = None,
+) -> dict[str, Any]:
+    args: dict[str, Any] = {"target_xyz": target_xyz}
+    if current_joints is not None:
+        args["current_joints"] = current_joints
+    if isinstance(target_axis, (list, tuple)) and len(target_axis) == 3:
+        args["target_axis"] = [float(value) for value in target_axis]
+    return args
+
+
 class PickWandSkill(BaseSkill):
     """Pick the cat wand from the dock.
 
@@ -173,8 +187,11 @@ class PickWandSkill(BaseSkill):
         except (ValueError, IndexError):
             return _failure("failed to cluster 3D samples", "no_3d_samples")
         target_xyz = camera_to_base(point, transform).tolist()
+        target_axis = located.get("grasp_axis")
 
-        return await self._execute_pick(ctx, target_xyz, source="oracle")
+        return await self._execute_pick(
+            ctx, target_xyz, source="oracle", target_axis=target_axis
+        )
 
     async def _attempt_perception(self, ctx, label, transform, camera, plane_z):
         """Locate wand via bbox → ray-plane intersection (sim + real hardware)."""
@@ -211,7 +228,7 @@ class PickWandSkill(BaseSkill):
             ctx, target_xyz, source="ray_plane_intersection"
         )
 
-    async def _execute_pick(self, ctx, target_xyz, source):
+    async def _execute_pick(self, ctx, target_xyz, source, target_axis=None):
         """Execute the pick motion from a computed target_xyz (shared tail)."""
 
         # 4. Validate workspace
@@ -227,7 +244,7 @@ class PickWandSkill(BaseSkill):
         pre_ik = await _primitive(
             ctx,
             "arm_solve_position_ik",
-            {"target_xyz": pre_grasp},
+            _ik_args(pre_grasp),
         )
         if not pre_ik.get("operation_success"):
             return _failure("IK unreachable for pre-grasp", "ik_unreachable")
@@ -236,7 +253,11 @@ class PickWandSkill(BaseSkill):
         grasp_ik = await _primitive(
             ctx,
             "arm_solve_position_ik",
-            {"target_xyz": target_xyz, "current_joints": pre_ik["joint_positions"]},
+            _ik_args(
+                target_xyz,
+                current_joints=pre_ik["joint_positions"],
+                target_axis=target_axis,
+            ),
         )
         if not grasp_ik.get("operation_success"):
             return _failure("IK unreachable for grasp", "ik_unreachable")

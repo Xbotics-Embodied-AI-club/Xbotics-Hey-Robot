@@ -174,7 +174,7 @@ class TestXLeRobotSimDriver:
         import mujoco
 
         model = mujoco.MjModel.from_xml_path(
-            str(Path("assets/robots/xlerobot/scene.xml").resolve())
+            str(Path("assets/scenes/scene.xml").resolve())
         )
 
         for body_name in (
@@ -200,7 +200,7 @@ class TestXLeRobotSimDriver:
         import mujoco
 
         model = mujoco.MjModel.from_xml_path(
-            str(Path("assets/robots/xlerobot/scene.xml").resolve())
+            str(Path("assets/scenes/scene.xml").resolve())
         )
 
         expected = {

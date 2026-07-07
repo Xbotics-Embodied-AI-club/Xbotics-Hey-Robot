@@ -17,7 +17,7 @@
   </default>
 
   <!-- XLeRobot model -->
-  <include file="xlerobot.xml"/>
+  <include file="../robots/xlerobot/xlerobot.xml"/>
 
   <!-- Lock mobile base in place -->
   <actuator>
@@ -58,11 +58,12 @@
     <!-- Cat wand (free body, initially held in dock by active dock_weld) -->
     <body name="cat_wand" pos="0.10 0.0 0.825">
       <freejoint name="cat_wand_free"/>
-      <geom name="wand_stick" type="cylinder" size="0.005 0.10"
-            pos="0 0 0.10" rgba="0.82 0.55 0.35 1" mass="0.015" condim="4"/>
+      <geom name="wand_stick" type="cylinder" size="0.005"
+            fromto="0 0 0 0.188 0 0.068"
+            rgba="0.82 0.55 0.35 1" mass="0.015" condim="4"/>
       <geom name="wand_ball" type="sphere" size="0.022"
-            pos="0 0 0.205" rgba="1.0 0.3 0.3 1" mass="0.005"/>
-      <site name="wand_grasp" pos="0 0 0.15" size="0.005" rgba="1 1 0 0.5"/>
+            pos="0.21 0 0.076" rgba="1.0 0.3 0.3 1" mass="0.005"/>
+      <site name="wand_grasp" pos="0.035 0 0.0127" size="0.005" rgba="1 1 0 0.5"/>
     </body>
   </worldbody>
 

@@ -7,7 +7,6 @@ from pathlib import Path
 import cv2
 import mujoco
 import numpy as np
-
 from hey_robot.robot_runtime.simulation.so101_mobile.arm import So101MobileArmKernel
 from hey_robot.robot_runtime.simulation.so101_mobile.gripper import WandGripperKernel
 from hey_robot.robot_runtime.simulation.so101_mobile.session import So101MobileSession

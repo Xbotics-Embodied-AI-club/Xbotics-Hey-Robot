@@ -1,6 +1,6 @@
-<mujoco model="xlerobot_home_scene">
+<mujoco model="xlerobot_home_cat_scene">
   <compiler angle="radian" autolimits="true"/>
-  <include file="./xlerobot_home.xml"/>
+  <include file="../robots/xlerobot/xlerobot_home_cat.xml"/>
 
   <option cone="elliptic" impratio="100"/>
 
