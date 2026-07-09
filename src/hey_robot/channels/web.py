@@ -449,11 +449,14 @@ class WebChannel:
             import fcntl
             import struct
 
+            ioctl = getattr(fcntl, "ioctl", None)
+            if ioctl is None:
+                raise ImportError("fcntl.ioctl unavailable")
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             for ifname in socket.if_nameindex():
                 try:
                     ifreq = struct.pack("256s", ifname[1].encode()[:15])
-                    addr_bytes = fcntl.ioctl(sock.fileno(), 0x8915, ifreq)
+                    addr_bytes = ioctl(sock.fileno(), 0x8915, ifreq)
                     addr = socket.inet_ntoa(addr_bytes[20:24])
                     if addr and not addr.startswith("127."):
                         addresses.add(addr)

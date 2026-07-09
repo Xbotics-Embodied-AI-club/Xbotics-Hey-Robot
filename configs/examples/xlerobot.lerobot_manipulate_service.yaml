@@ -1,0 +1,25 @@
+# Route Hey Robot manipulate calls to the generic LeRobot policy endpoint.
+#
+# Start one explicit LeRobot policy:
+#   python scripts/vla/serve_lerobot_policy.py \
+#     --policy-type smolvla \
+#     --checkpoint models/xlerobot-home-so101-smolvla/checkpoints/last/pretrained_model \
+#     --dataset-repo-id xlerobot_home_so101_single_arm \
+#     --dataset-root data/lerobot \
+#     --host 127.0.0.1 \
+#     --port 18080
+#
+# Copy these settings into model_services.manipulate.settings.
+
+backend: action_chunk_policy
+backend_mode: action_chunk_policy
+action_chunk_endpoint: http://127.0.0.1:18080/predict
+
+active_arm: right
+state_schema: so101_single_arm_rad_gripper01
+action_schema: so101_single_arm_rad_gripper01
+camera_names:
+  - front
+  - right_wrist
+
+model_path: ""
