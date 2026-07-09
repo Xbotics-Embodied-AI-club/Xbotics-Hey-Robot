@@ -102,7 +102,14 @@ async def evaluate(args: argparse.Namespace) -> None:
                     "done": bool(action_chunk.get("done", False)),
                 }
                 episode_trace.append(step_record)
-                if _success(driver, mode=str(args.success_mode)):
+                if _success(
+                    driver,
+                    mode=str(args.success_mode),
+                    object_body=args.object_body,
+                    target_body=args.target_body,
+                    min_lift_m=float(args.min_lift_m),
+                    max_distance_m=float(args.max_distance_m),
+                ):
                     success = True
                     failure_mode = ""
                     break
@@ -193,13 +200,47 @@ def _post_json(
         return json.loads(response.read().decode("utf-8"))
 
 
-def _success(driver: XLeRobotSimDriver, *, mode: str) -> bool:
+def _success(
+    driver: XLeRobotSimDriver,
+    *,
+    mode: str,
+    object_body: str | None = None,
+    target_body: str | None = None,
+    min_lift_m: float = 0.03,
+    max_distance_m: float = 0.08,
+) -> bool:
     if mode == "none":
         return False
     if mode == "gripper_closed":
         status = dict(driver.last_arm_status or {})
         return float(status.get("gripper_opening_pct") or 100.0) < 25.0
+    if mode == "object_lifted":
+        position = _body_position_base(driver, object_body)
+        return bool(position[2] >= min_lift_m)
+    if mode == "object_near_target":
+        object_position = np.asarray(
+            _body_position_base(driver, object_body), dtype=float
+        )
+        target_position = np.asarray(
+            _body_position_base(driver, target_body), dtype=float
+        )
+        return bool(np.linalg.norm(object_position - target_position) <= max_distance_m)
     raise ValueError(f"unsupported success mode: {mode}")
+
+
+def _body_position_base(
+    driver: XLeRobotSimDriver,
+    body_name: str | None,
+) -> tuple[float, float, float]:
+    if not body_name:
+        raise ValueError("success mode requires --object-body or --target-body")
+    position_fn = getattr(driver, "_body_position_base", None)
+    if not callable(position_fn):
+        raise ValueError("driver does not expose body position lookup")
+    value = position_fn(str(body_name))
+    if not isinstance(value, tuple | list) or len(value) != 3:
+        raise ValueError(f"invalid body position for {body_name!r}: {value!r}")
+    return float(value[0]), float(value[1]), float(value[2])
 
 
 def _summary(results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -243,8 +284,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--image-size", default="256x256")
     parser.add_argument("--timeout-sec", type=float, default=30.0)
     parser.add_argument(
-        "--success-mode", choices=("none", "gripper_closed"), default="gripper_closed"
+        "--success-mode",
+        choices=("none", "gripper_closed", "object_lifted", "object_near_target"),
+        default="gripper_closed",
     )
+    parser.add_argument("--object-body", default=None)
+    parser.add_argument("--target-body", default=None)
+    parser.add_argument("--min-lift-m", type=float, default=0.03)
+    parser.add_argument("--max-distance-m", type=float, default=0.08)
     parser.add_argument("--out", default="runtime/eval/home_so101_policy")
     return parser.parse_args()
 
