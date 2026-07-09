@@ -17,8 +17,8 @@ def planner_output_to_primitive(
     image_width: int = 640,
     _image_height: int = 480,
     center_band_ratio: float = 0.25,
-    min_turn_deg: float = 5.0,
-    max_turn_deg: float = 15.0,
+    min_turn_deg: float = 10.0,
+    max_turn_deg: float = 30.0,
     forward_step_cm: float = 15.0,
 ) -> PrimitiveCommand:
     if bool(planner.get("stop")) or planner.get("mode") == "stop":

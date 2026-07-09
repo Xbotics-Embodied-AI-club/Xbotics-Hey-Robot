@@ -97,6 +97,15 @@ class VLNPlannerResult:
         }
 
 
+_DEFAULT_VLN_PROMPT_TEMPLATE = (
+    "You are an autonomous navigation assistant. "
+    "Your task is to <instruction>. "
+    "Where should you go next to stay on track? "
+    "Please output the next waypoint's coordinates in the image. "
+    "Please output STOP when you have successfully completed the task."
+)
+
+
 class InternVLAN1System2Executor:
     """Planner-only VLN executor for InternVLA-N1 System 2.
 
@@ -277,6 +286,7 @@ class InternVLAN1System2Executor:
         planner_input = self._build_planner_input(payload)
         model = self._load_model()
         policy_session_id = self._reset_policy_session_if_needed(model, payload)
+        self._apply_prompt_override(model)
         output = model.s2_step(
             planner_input.rgb,
             planner_input.depth,
@@ -284,6 +294,15 @@ class InternVLAN1System2Executor:
             planner_input.instruction,
             planner_input.intrinsic,
             planner_input.look_down,
+        )
+        raw_output = _public_raw_output(output)
+        action = getattr(output, "output_action", None)
+        pixel = getattr(output, "output_pixel", None)
+        print(  # noqa: T201
+            f"[VLN-Executor] instruction={planner_input.instruction!r} "
+            f"look_down={planner_input.look_down} "
+            f"output_action={action} pixel={pixel} raw_output={raw_output}",
+            flush=True,
         )
         return self._planner_result_from_s2_output(
             output,
@@ -308,6 +327,25 @@ class InternVLAN1System2Executor:
         if session_id:
             self._current_policy_session_id = session_id
         return session_id
+
+    def _apply_prompt_override(self, model: Any) -> None:
+        """Override the VLN prompt template without modifying third-party InternNav.
+
+        The conversation template is a list of [{"from": "human", "value": prompt}, ...]
+        set by InternNav's ``init_prompts()``.  We replace the human prompt so Hey Robot
+        controls the instruction format while still respecting the ``<instruction>.``
+        placeholder that ``s2_step()`` substitutes at call time.
+        """
+        settings = self.spec.settings
+        custom_prompt = str(
+            settings.get("vln_prompt_template") or _DEFAULT_VLN_PROMPT_TEMPLATE
+        )
+        if not hasattr(model, "conversation") or not isinstance(
+            model.conversation, list
+        ):
+            return
+        if len(model.conversation) > 0 and isinstance(model.conversation[0], dict):
+            model.conversation[0]["value"] = custom_prompt
 
     def _load_model(self) -> Any:
         if self._model is not None:

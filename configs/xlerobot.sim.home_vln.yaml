@@ -1,0 +1,181 @@
+# XLeRobot MuJoCo HOME scene simulation with VLN model service.
+# VLN service process is shared (already running on grpc://127.0.0.1:9091).
+# Usage:
+#   Start main runtime: hey-robot run --config configs/xlerobot.sim.home_vln.yaml
+
+deployment:
+  id: xlerobot.sim.home_vln
+  bus:
+    type: nats
+    url: nats://127.0.0.1:4222
+    options:
+      robot_publish_hz: 2.0
+      robot_status_log_every_frames: 5
+
+logging:
+  level: INFO
+  theme: dark
+  json_format: false
+  file_path: logs/xlerobot.sim.home_vln/app.log
+  json_file_path: logs/xlerobot.sim.home_vln/app.jsonl
+  throttle_sec: 0.0
+
+resources:
+  runtime_dir: runtime/xlerobot.sim.home_vln
+  media:
+    root: runtime/xlerobot.sim.home_vln/media
+    max_items: 128
+    image_save_every_n: 1
+  episodes:
+    root: runtime/xlerobot.sim.home_vln/episodes
+  events:
+    retain: 2000
+
+skills:
+  modules:
+    - hey_robot.skill_os.builtins
+  mode: bringup
+  enabled:
+    - inspect_scene
+    - look_around
+    - detect_marker
+    - move_base
+    - turn_base
+    - base_velocity_step
+    - navigate_to
+    - approach_object
+    - stop_motion
+    - reset_posture
+
+notifications:
+  defaults:
+    channels: [web]
+  channels:
+    web: {}
+    voice:
+      chat_id: sim-voice
+      sender_id: voice-user
+  kinds:
+    task_watchdog:
+      severity: critical
+      channels: [web]
+
+identity:
+  enabled: true
+  unified_user_episodes: true
+  bindings:
+    "cli:sender:local-user": owner
+    "web:sender:web-user": owner
+
+channels:
+  cli:
+    type: cli
+    enabled: true
+    account_id: sim-dev
+    prompt: "home-sim> "
+    sender_id: local-user
+    chat_id: sim-dev-local
+  web:
+    type: web
+    enabled: true
+    account_id: sim-web
+    sender_id: web-user
+    host: 0.0.0.0
+    port: 8080
+    access_log: false
+    uvicorn_log_level: warning
+
+robots:
+  sim_robot:
+    type: xlerobot_sim
+    family: xlerobot
+    environment: sim
+    driver: mujoco
+    embodiment_profile: xlerobot_sim
+    enabled: true
+    settings:
+      mjcf_path: assets/scenes/home_scene.xml
+      render_width: 640
+      render_height: 480
+      control_hz: 2.0
+      linear_speed: 0.2
+      angular_speed: 0.45
+      viewer:
+        enabled: false
+
+model_services:
+  vln_home:
+    type: vln_planner
+    robot_id: sim_robot
+    enabled: true
+    target: grpc://127.0.0.1:9091
+    provides:
+      - navigate_to
+      - approach_object
+    timeout_sec: 60.0
+    settings:
+      host: 127.0.0.1
+      port: 9091
+      backend: internvla_n1_system2
+      control_mode: planner_only
+      execute_low_level_control: false
+      mock_mode: false
+      model_path: models/InternVLA-N1-System2
+      device: cuda:1
+      dtype: bf16
+      attn_implementation: sdpa
+      media_root: runtime/xlerobot.sim.home_vln/media
+      internnav_repo: third_party/InternNav
+      camera: front
+      image_width: 640
+      image_height: 480
+      resize_w: 384
+      resize_h: 384
+      num_history: 8
+      max_new_tokens: 128
+      hfov: 90
+
+policies:
+  embodied_skills:
+    enabled: true
+    robot_id: sim_robot
+    freq_hz: 1.0
+
+agents:
+  main:
+    enabled: true
+    robot_id: sim_robot
+    policy_id: embodied_skills
+    settings:
+      mode: autonomous
+      max_iterations: 12
+      providers:
+        planner:
+          type: deepseek
+          model_env: DEEPSEEK_MODEL
+          api_key_env: DEEPSEEK_API_KEY
+          base_url_env: DEEPSEEK_BASE_URL
+          temperature: 0.0
+          max_tokens: 1024
+        scene_captioner:
+          type: dashscope
+          model_env: DASHSCOPE_MODEL
+          api_key_env: DASHSCOPE_API_KEY
+          temperature: 0.0
+          max_tokens: 512
+      execution_feedback:
+        backend: status
+        media_root: runtime/xlerobot.sim.home_vln/media
+      task_supervisor:
+        status_stale_sec: 90.0
+        observation_stale_sec: 90.0
+      task_safety:
+        enabled: true
+        voice_motion_requires_confirmation: true
+      perception:
+        scene_captioner:
+          enabled: true
+          purpose: scene_captioner
+      autonomy:
+        enabled: true
+        max_events: 100

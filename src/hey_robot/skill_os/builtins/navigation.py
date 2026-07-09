@@ -113,12 +113,13 @@ class _VLNNavigationSkill(BaseSkill):
                 failure_mode="model_service_unavailable",
                 error="model service port is unavailable",
             )
-        max_steps = max(1, int(arguments.get("max_steps") or 1))
+        max_steps = max(1, int(arguments.get("max_steps") or 30))
         execute_primitives = bool(arguments.get("execute_primitives", True))
         steps: list[dict[str, Any]] = []
         planner_data: dict[str, Any] = {}
         result = None
         look_down_requested = bool(arguments.get("look_down", False))
+        stopped_by_model = False
 
         for step_index in range(max_steps):
             payload = _vln_payload(ctx, arguments)
@@ -228,6 +229,7 @@ class _VLNNavigationSkill(BaseSkill):
                     data={"vln": planner_data, "steps": steps},
                 )
             if command.primitive == "stop_motion":
+                stopped_by_model = True
                 break
             if step_index + 1 < max_steps and ctx.invoke is not None:
                 await ctx.invoke(
@@ -239,10 +241,17 @@ class _VLNNavigationSkill(BaseSkill):
             if result is not None
             else "VLN navigation completed"
         )
+        if stopped_by_model:
+            return SkillResult(
+                success=True,
+                summary="VLN planner signalled STOP: arrived at destination",
+                data={"vln": planner_data, "steps": steps, "stop_reason": "model_stop"},
+            )
         return SkillResult(
-            success=True,
-            summary=summary,
-            data={"vln": planner_data, "steps": steps},
+            success=False,
+            status="in_progress",
+            summary=f"VLN navigation made {len(steps)} step(s), not yet at target: {summary}",
+            data={"vln": planner_data, "steps": steps, "stop_reason": "max_steps"},
         )
 
 
@@ -268,7 +277,7 @@ class NavigateToSkill(_VLNNavigationSkill):
         driver_primitives=("move_base", "turn_base", "stop_motion"),
         required_model_service="navigate_to",
         safety_level="motion",
-        timeout_sec=60.0,
+        timeout_sec=180.0,
         agent_visible=True,
         feedback_mode="vision",
         goal_effects=("approaches_named_place",),
@@ -299,7 +308,7 @@ class ApproachObjectSkill(_VLNNavigationSkill):
         driver_primitives=("move_base", "turn_base", "stop_motion"),
         required_model_service="approach_object",
         safety_level="motion",
-        timeout_sec=60.0,
+        timeout_sec=180.0,
         agent_visible=True,
         feedback_mode="vision",
         goal_effects=("approaches_object",),
@@ -455,14 +464,6 @@ def _vln_payload(_ctx: Any, arguments: dict[str, Any]) -> dict[str, Any]:
         for key, value in dict(arguments).items()
         if key not in {"execute_primitives", "max_steps"}
     }
-    if "observation" not in payload and "image_path" not in payload:
-        observation = _ctx.current_observation() if _ctx.current_observation else None
-        observation_payload = _observation_payload(
-            observation,
-            camera=payload.get("camera"),
-        )
-        if observation_payload is not None:
-            payload["observation"] = observation_payload
     skill_id = getattr(_ctx, "skill_id", None)
     if skill_id and not payload.get("policy_session_id"):
         payload["policy_session_id"] = skill_id
