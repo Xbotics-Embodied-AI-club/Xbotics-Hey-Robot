@@ -222,8 +222,8 @@ model_services:
       port: 9090
       backend: action_chunk_policy
       backend_mode: action_chunk_policy
-      model_path: "models/so101-act-pick-place_ACT"
-      policy_type: "act"
+      model_path: "models/smolvla-so101-pick-orange"
+      policy_type: "smolvla"
       arm_port: ""
       task: ""
       camera_config: {}

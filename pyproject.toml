@@ -95,7 +95,7 @@ exclude = [
 sim = ["mujoco>=3.3.0"]
 
 vla = [
-    "lerobot>=0.4.4",
+    "lerobot>=0.6.0",
     "safetensors>=0.7.0",
 ]
 

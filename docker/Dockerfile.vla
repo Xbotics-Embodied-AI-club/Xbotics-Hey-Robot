@@ -1,0 +1,45 @@
+# VLA manipulation service image
+# LeRobot Policy (lerobot >= 0.6.0) requires transformers >= 5.4, huggingface-hub >= 1.0.
+# Shares dependency versions with the main runtime, so they can use the same base image,
+# but VLA runs as an independent gRPC service for separation of concerns.
+
+ARG CUDA_VERSION=12.6.2
+ARG PYTHON_VERSION=3.12
+FROM nvidia/cuda:${CUDA_VERSION}-cudnn-runtime-ubuntu24.04
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3.12 \
+        python3.12-venv \
+        python3-pip \
+        git \
+        build-essential \
+        libglib2.0-0 \
+        libgl1 \
+        libsm6 \
+        libxext6 \
+        libegl1 \
+    && ln -sf /usr/bin/python3.12 /usr/bin/python \
+    && ln -sf /usr/bin/python3.12 /usr/bin/python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# PyTorch with CUDA
+RUN pip install --break-system-packages \
+    torch torchvision --index-url https://download.pytorch.org/whl/cu126
+
+# Install project with VLA deps only (no MuJoCo, no dev tools)
+COPY pyproject.toml README.md ./
+COPY src ./src
+COPY configs ./configs
+RUN pip install uv --break-system-packages \
+    && uv sync --group vla --python /usr/bin/python
+
+ENTRYPOINT ["python", "-m", "hey_robot.cli.model_service"]
+CMD ["--config", "configs/xlerobot.sim.vla_vln.yaml", "--service-id", "manipulate"]

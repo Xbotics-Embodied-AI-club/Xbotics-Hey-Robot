@@ -16,6 +16,40 @@ services:
     command: ["-js", "-m", "8222"]
     restart: unless-stopped
 
+  vla:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.vla
+      args:
+        CUDA_VERSION: ${HEY_ROBOT_CUDA_VERSION:-12.6.2}
+        PYTHON_VERSION: ${HEY_ROBOT_PYTHON_VERSION:-3.12}
+    image: ${HEY_ROBOT_VLA_IMAGE:-hey-robot-vla:latest}
+    environment: *common-env
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./models:/app/models:ro
+    depends_on:
+      - nats
+    ports:
+      - "${HEY_ROBOT_VLA_PORT:-9090}:9090"
+    command:
+      - --config
+      - ${HEY_ROBOT_VLA_CONFIG:-/app/configs/xlerobot.sim.vla_vln.yaml}
+      - --service-id
+      - ${HEY_ROBOT_VLA_SERVICE_ID:-manipulate}
+      - --host
+      - "0.0.0.0"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ${HEY_ROBOT_VLA_GPU:-0}
+              capabilities: [gpu]
+    restart: unless-stopped
+    profiles:
+      - gpu
+
   vln:
     build:
       context: .

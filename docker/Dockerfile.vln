@@ -66,5 +66,5 @@ RUN pip install --no-deps --break-system-packages -e . \
 
 # Default entrypoint: start the VLN capability service.
 # Override --config at runtime to switch between sim / real / mock configs.
-ENTRYPOINT ["python", "-m", "hey_robot.cli.capability_service"]
+ENTRYPOINT ["python", "-m", "hey_robot.cli.model_service"]
 CMD ["--config", "configs/xlerobot.sim.ubuntu.yaml", "--service-id", "vln_nav"]

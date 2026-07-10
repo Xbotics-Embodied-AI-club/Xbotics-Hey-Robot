@@ -28,25 +28,24 @@ Windows/Ubuntu 主配置只运行 11 个 native/sim skill，不包含 ModelServi
 ## 系统执行架构
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  主进程 (.venv)    →  gateway / agent / Skill OS / robot  │
-│  端口 8080 (web)   →  DeepSeek / DashScope               │
-│  端口 4222 (nats)  →  NATS 消息总线                       │
-│  端口 9090 (grpc)  →  VLA 服务（ACT 模型，进程内加载）     │
-└──────────────────┬──────────────────────────────────────┘
-                   │ gRPC :9091
-┌──────────────────▼──────────────────────┐
-│ VLN 服务                                 │
-│ (.vln-venv)                             │
-│ InternVLA-N1-System2                    │
-│ GPU 1                                   │
-└──────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│  主进程 (.venv)  →  gateway / agent / Skill OS / robot │
+│  端口 8080 (web)  →  DeepSeek / DashScope             │
+│  端口 4222 (nats) →  NATS 消息总线                     │
+└────────┬──────────────────────────┬─────────────────┘
+         │ gRPC :9090               │ gRPC :9091
+         ▼                          ▼
+┌─────────────────────┐  ┌─────────────────────────┐
+│ VLA 操作服务         │  │ VLN 导航服务              │
+│ LeRobot Policy       │  │ InternVLA-N1-System2    │
+│ (lerobot >= 0.6.0)  │  │ (transformers 4.x)      │
+│ GPU 0               │  │ GPU 1                   │
+└─────────────────────┘  └─────────────────────────┘
 ```
 
-该图只适用于 `xlerobot.sim.vla_vln.yaml`。普通 sim 配置没有模型服务。VLA 服务现在直接在
-主进程中加载 ACT 模型（不再需要独立 `.vla-venv`），通过 gRPC 端口 9090 暴露。
-VLN 仍使用独立 venv（huggingface-hub 版本冲突），通过 gRPC 端口 9091 暴露。
-Skill OS 调用模型服务并把输出转换为 Robot Runtime primitive；Agent 不直接加载模型。
+该图只适用于 `xlerobot.sim.vla_vln.yaml`。普通 sim 配置没有模型服务。
+VLA 和 VLN 都是独立的 gRPC 模型服务，主进程通过 Skill OS 调用它们。
+VLA 负责操作（manipulate），VLN 负责导航（navigate_to / approach_object）。
 
 ## 依赖分组
 
@@ -55,32 +54,60 @@ Skill OS 调用模型服务并把输出转换为 Robot Runtime primitive；Agent
 
 | 命令 | 用途 |
 |------|------|
-| `uv sync` | 主运行时（Agent / Skill OS / Robot Runtime / VLA ACT policy） |
-| `uv sync --group sim` | 主运行时 + MuJoCo 仿真 |
-| `uv sync --group vln` | VLN 模型服务（InternVLA-N1 planner） |
-| `uv sync --group dev` | 开发工具链（lint / type-check / test） |
+| `uv sync --group sim --group vla --group dev` | 主运行时 + VLA + MuJoCo 仿真 + 开发工具（完整环境） |
+| `uv sync --group sim --group dev` | 主运行时 + MuJoCo 仿真（不含 VLA） |
+| `uv sync --group vln` | VLN 模型服务 — **必须使用独立 venv** |
 
-VLA（ACT policy）的依赖（torch、PIL、safetensors、lerobot）已纳入主依赖组，
-不再需要独立 `.vla-venv`。VLN 仍需独立 venv（huggingface-hub 版本冲突）。
+**版本约束（Python 3.12）：**
 
-### 创建主环境 (.venv)
+| 包 | 主环境 (.venv) | VLN 环境 (.vln-venv) | 冲突原因 |
+|---|---|---|---|
+| lerobot | >= 0.6.0 | — | 0.4.x/0.5.x dataclass bug 在 3.12 上无法 import |
+| transformers | >= 5.4.0, < 5.6.0 | == 4.51.0 | lerobot 0.6.0 要求 5.x，InternNav 要求 4.x |
+| huggingface-hub | >= 1.0.0 | == 0.33.4 | lerobot >= 0.5 要求 >= 1.0，transformers 4.x 要求 < 1.0 |
+
+> **关键约束**：lerobot 0.6.0 要求 `transformers >= 5.4.0, < 5.6.0`。
+> 不要使用 transformers 5.13.0+（`create_causal_mask` API 不兼容）。
+
+VLA（LeRobot Policy）直接在主进程中加载，依赖纳入 `--group vla`。
+VLN 使用独立 venv（transformers / huggingface-hub 版本冲突）。
+
+## 环境创建
+
+### 主环境（.venv）：运行时 + VLA + 仿真
+
+```bash
+uv sync --group sim --group vla --group dev
+```
+
+之后所有主进程命令（`hey-robot run`、`model_service`、测试脚本）都使用 `.venv/bin/python`。
+
+如果只需要仿真 skill 调试（不需要 VLA 操作），可以省略 `--group vla`：
 
 ```bash
 uv sync --group sim --group dev
 ```
 
-### 创建 VLN 环境 (.vln-venv)
+### VLN 环境（.vln-venv）：导航模型服务
 
-```bash
-uv sync --group vln
-```
-
-如果需要把环境安装到独立路径（而非当前 `.venv`），先创建 venv 再指定路径：
+由于 VLN（InternVLA-N1）依赖 `transformers==4.51.0` + `huggingface-hub==0.33.4`，
+与主环境的 `transformers>=5.4` + `huggingface-hub>=1.0` 不兼容，必须创建独立 venv：
 
 ```bash
 python3.12 -m venv .vln-venv
 uv sync --group vln --python .vln-venv/bin/python
 ```
+
+### VLA 开发环境（.vla-venv，可选）
+
+如需隔离测试 VLA 模型（不影响主环境），可创建独立 VLA 环境：
+
+```bash
+python3.12 -m venv .vla-venv
+uv sync --group vla --python .vla-venv/bin/python
+```
+
+日常使用不需要此环境 — VLA 推理已集成在主环境中。
 
 ## 生成仿真模型
 
@@ -129,9 +156,9 @@ test -d models/InternVLA-N1-System2
 日志输出 `listening on grpc://127.0.0.1:9091` 只表示 gRPC server 已启动。还应通过
 `GetHealth` 确认 `online=true`、`loaded=true`，不能依赖固定加载时间或显存数字判断。
 
-### 实验 VLA：3. 启动 VLA 服务（可选）
+### 实验 VLA：3. 启动 VLA 服务
 
-VLA 服务直接在主进程中加载 ACT 模型，通过 gRPC 暴露：
+VLA 操作服务是独立的 gRPC 进程，负责 LeRobot Policy 推理：
 
 ```bash
 .venv/bin/python -m hey_robot.cli.model_service \
@@ -139,9 +166,7 @@ VLA 服务直接在主进程中加载 ACT 模型，通过 gRPC 暴露：
   --service-id manipulate
 ```
 
-日志输出 `listening on grpc://127.0.0.1:9090` 表示 gRPC server 已启动。模型通过
-配置中的 `model_path` 自动延迟加载，无需单独启动 HTTP 推理服务器。
-如果只验证 VLN，可以不启动这个服务。
+日志输出 `listening on grpc://127.0.0.1:9090` 表示 gRPC server 已启动。
 
 ### 实验：4. 启动主进程
 
@@ -251,12 +276,136 @@ model_services:
 |---|---|---|
 | 导航 | `navigate_to` | 需要 `vln_nav` gRPC 服务 |
 | 导航 | `approach_object` | 需要 `vln_nav` gRPC 服务 |
-| 操作 | `manipulate` | 需要 `manipulate` gRPC 服务，ACT 模型直接加载 |
+| 操作 | `manipulate` | 需要 `manipulate` gRPC 服务，LeRobot Policy 直接加载 |
 | 操作 | `human_follow` | 基于视觉的人体跟随（使用 YOLO 检测器） |
 
-VLA 操作已合并为单一 `manipulate` skill，由 ACT policy 直接推理，模型在进程中加载
+VLA 操作已合并为单一 `manipulate` skill，由 LeRobot Policy 直接推理，模型在进程中加载
 （不再需要独立 HTTP 推理服务器或 `.vla-venv`）。已通过 MuJoCo 仿真端到端验证：
-Skill OS → gRPC → ACT 推理 → 解析原语 → 仿真执行，全部链路正常。
+Skill OS → gRPC → LeRobot Policy 推理 → 解析原语 → 仿真执行，全部链路正常。
+
+## VLA 模型注册
+
+当前 VLA 环境使用 **lerobot >= 0.6.0**（Python 3.12 兼容性要求）。旧版 lerobot（0.4.x/0.5.x）与
+Python 3.12 的 dataclass 严格检查不兼容。
+
+可用模型一览，通过 `configs/xlerobot.sim.vla_vln.yaml` 中 `manipulate.settings.model_path` + `policy_type` 切换。
+
+下载模型时建议使用 hf-mirror.com 镜像加速：
+
+```bash
+export HF_ENDPOINT=https://hf-mirror.com
+huggingface-cli download <repo_id> --local-dir models/<local_name>
+```
+
+| Policy 类型 | 仓库/路径 | 说明 |
+|---|---|---|
+| ACT | `models/so101-act-pick-place_ACT` | 本地训练，pick-place 任务，100K 步，摄像头 front+handeye，重构前原可用模型 |
+| ACT | `models/so101-act-pick-place_ACT_migrated` | 上述 ACT 的迁移版本，含 preprocessor/postprocessor safetensors |
+| smolvla | `edge-inference/smolvla-so101-pick-orange` | 单任务 pick orange，500M VLM，已通过仿真端到端验证 |
+| pi0.5 | `sorel/pi05-so101-record-0121` | SO101 遥操作录制数据微调，4B 参数，50K 步训练，摄像头 front+wrist |
+| pi0.5 | `L7-Robotics/pi05_so101_v5.1` | SO101 多任务微调（红积木/黑笔对比），4K 步，3 摄像头 |
+| pi0.5 | `lerobot/pi05_base` | Physical Intelligence 预训练基座，需在 SO101 数据上微调后使用 |
+| pi0.5 | `lerobot/pi05_libero_finetuned` | LIBERO benchmark 微调（Franka 手臂），**不适配 SO101** |
+
+### 切换到 sorel/pi05
+
+```bash
+export HF_ENDPOINT=https://hf-mirror.com
+huggingface-cli download sorel/pi05-so101-record-0121 --local-dir models/pi05-so101-record-0121
+```
+
+然后在 `configs/xlerobot.sim.vla_vln.yaml` 中修改：
+
+```yaml
+manipulate:
+  settings:
+    model_path: "models/pi05-so101-record-0121"
+    policy_type: "pi05"
+```
+
+`sorel/pi05-so101-record-0121` 摄像头 key 为 `observation.images.front` + `observation.images.wrist`，
+与当前仿真摄像头名称兼容，无需额外映射。
+
+## Docker 部署
+
+项目提供 `docker-compose.yml` + 两个 Dockerfile，支持容器化部署。
+
+### 服务架构（Docker）
+
+```
+┌───────────────────────────────────────┐
+│  nats:2.10-alpine                     │  消息总线
+│  端口 4222 (client) 8222 (monitor)     │
+└──────────────┬────────────────────────┘
+               │
+     ┌─────────┼─────────┐
+     ▼         ▼         ▼
+┌─────────┐ ┌─────────┐ ┌──────────────────────────┐
+│ vla     │ │ vln     │ │ runtime                  │
+│ GPU 0   │ │ GPU 1   │ │ Agent / Skill OS / Robot │
+│ :9090   │ │ :9091   │ │ :8080 (web)              │
+└─────────┘ └─────────┘ └──────────────────────────┘
+```
+
+三个应用容器，VLA 和 VLN 各自独立 gRPC 模型服务。VLN 独立部署以隔离依赖冲突。
+
+### 构建镜像
+
+```bash
+# 主运行时镜像
+docker build -f docker/Dockerfile -t hey-robot:latest .
+
+# VLA 操作服务镜像（LeRobot Policy，GPU 0）
+docker build -f docker/Dockerfile.vla -t hey-robot-vla:latest .
+
+# VLN 导航服务镜像（InternVLA-N1，GPU 1）
+docker build -f docker/Dockerfile.vln -t hey-robot-vln:latest .
+```
+
+### 启动
+
+```bash
+# 仅消息总线 + 运行时（无 GPU，无模型服务）
+docker compose up -d nats runtime
+
+# 完整服务（含 VLA + VLN，需要 2 GPU）
+docker compose --profile gpu up -d
+```
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `HEY_ROBOT_NATS_PORT` | 4222 | NATS 客户端端口 |
+| `HEY_ROBOT_VLA_PORT` | 9090 | VLA gRPC 端口 |
+| `HEY_ROBOT_VLA_GPU` | 0 | VLA 使用的 GPU 编号 |
+| `HEY_ROBOT_VLA_CONFIG` | `configs/xlerobot.sim.vla_vln.yaml` | VLA 配置文件 |
+| `HEY_ROBOT_VLA_SERVICE_ID` | `manipulate` | VLA 服务 ID |
+| `HEY_ROBOT_VLN_PORT` | 9091 | VLN gRPC 端口 |
+| `HEY_ROBOT_VLN_GPU` | 1 | VLN 使用的 GPU 编号 |
+| `HEY_ROBOT_VLN_CONFIG` | `configs/xlerobot.sim.ubuntu.yaml` | VLN 配置文件 |
+| `HEY_ROBOT_VLN_SERVICE_ID` | `vln_nav` | VLN 服务 ID |
+| `HEY_ROBOT_GATEWAY_PORT` | 8080 | Web gateway 端口 |
+| `HEY_ROBOT_MONITOR_PORT` | 8081 | 监控端口 |
+
+### Dockerfile 说明
+
+**`docker/Dockerfile`** — 主运行时镜像：
+- 基础镜像：`python:3.12-slim`
+- 依赖：`uv sync --group sim --group vla --group dev`
+- 入口：`hey-robot run --config <config>`
+
+**`docker/Dockerfile.vla`** — VLA 操作服务：
+- 基础镜像：`nvidia/cuda:12.6.2-cudnn-runtime-ubuntu24.04`
+- 依赖：`uv sync --group vla`（仅 lerobot + torch，不需要 MuJoCo）
+- 入口：`python -m hey_robot.cli.model_service --service-id manipulate`
+- GPU 0，gRPC :9090
+
+**`docker/Dockerfile.vln`** — VLN 导航服务：
+- 基础镜像：`nvidia/cuda:12.6.2-cudnn-runtime-ubuntu24.04`
+- 分步安装保证版本链：先装 `huggingface-hub<1.0`，再装 `transformers==4.51.0`，最后 `--no-deps` 装项目
+- 入口：`python -m hey_robot.cli.model_service --service-id vln_nav`
+- GPU 1，gRPC :9091
 
 ## 常见问题
 

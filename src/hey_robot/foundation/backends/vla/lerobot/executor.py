@@ -28,33 +28,32 @@ from hey_robot.foundation.clients.models import PolicyStepResult
 
 DEFAULT_ARM_CALIBRATION_DIR = "~/.cache/hey_robot/calibrations/robots/so_follower/"
 
-# ── ACT model utilities ────────────────────────────────────────────────────
-
-_IMAGENET_MEAN = (0.485, 0.456, 0.406)
-_IMAGENET_STD = (0.229, 0.224, 0.225)
-
-# Fallback action normalization stats for XLeRobot single-arm joint space.
-# Joint order: shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper
-_ACT_JOINT_NAMES = [
-    "shoulder_pan",
-    "shoulder_lift",
-    "elbow_flex",
-    "wrist_flex",
-    "wrist_roll",
-    "gripper",
-]
-_DEFAULT_ACTION_MEAN = (0.2808, -51.1163, 45.7853, 77.6119, 1.6111, 8.2912)
-_DEFAULT_ACTION_STD = (9.3055, 53.7685, 52.8102, 9.1411, 5.3389, 10.5236)
+# ── Shared policy utilities ─────────────────────────────────────────────────
 
 _RAD_TO_DEG = 180.0 / 3.141592653589793
 _DEG_TO_RAD = 3.141592653589793 / 180.0
 
-_CAMERA_KEY_MAP = {
+_CAMERA_KEY_MAP: dict[str, str] = {
     "front": "observation.images.front",
     "handeye": "observation.images.handeye",
     "right_wrist": "observation.images.handeye",
     "left_wrist": "observation.images.handeye",
 }
+
+# Camera names that should follow whatever wrist key the policy declares.
+_WRIST_CAMERA_NAMES = {"handeye", "right_wrist", "left_wrist", "wrist"}
+
+
+_DEFAULT_IMAGE_SIZE = (256, 256)  # smolvla / pi0 standard input
+
+# Joint order used by SO101 arm; policies may use a subset.
+_SO101_JOINT_NAMES = (
+    "shoulder_pan",
+    "shoulder_lift",
+    "elbow_flex",
+    "wrist_flex",
+    "wrist_roll",
+)
 
 
 @dataclass
@@ -378,11 +377,14 @@ class LeRobotVLAPolicyExecutor:
         self.service_id = service_id
         self.spec = spec
         self._policy: Any = None
-        self._policy_stats: dict[str, _NormalizationStats] = {}
-        self._state_stat: _NormalizationStats | None = None
-        self._action_stat: _NormalizationStats | None = None
-        self._imagenet_mean: torch.Tensor | None = None
-        self._imagenet_std: torch.Tensor | None = None
+        self._policy_type: str = ""
+        self._dataset_stats: dict[str, Any] = {}
+        self._action_mean: torch.Tensor | None = None
+        self._action_std: torch.Tensor | None = None
+        self._image_size: tuple[int, int] = _DEFAULT_IMAGE_SIZE
+        self._tokenizer: Any = None
+        self._state_mean: torch.Tensor | None = None
+        self._state_std: torch.Tensor | None = None
 
     def health(self) -> dict[str, Any]:
         mock_mode = self._mock_mode()
@@ -560,9 +562,10 @@ class LeRobotVLAPolicyExecutor:
 
         model_path = self.spec.settings.get("model_path")
         if model_path:
-            return self._direct_act_inference(
+            return self._direct_policy_inference(
                 str(model_path),
                 observation=observation,
+                payload=payload,
             )
 
         endpoint = self.spec.settings.get("action_chunk_endpoint")
@@ -669,55 +672,195 @@ class LeRobotVLAPolicyExecutor:
             }
         return _action_chunk_policy_result(decoded, observation=observation)
 
-    # -- direct ACT model inference -------------------------------------------
+    # -- direct LeRobot policy inference --------------------------------------
 
-    def _load_act_policy(self, model_path: str) -> None:
-        """Lazy-load the ACT policy model and normalization stats."""
+    def _load_policy(self, model_path: str) -> None:
+        """Lazy-load any LeRobot policy and extract action normalization stats.
+
+        All LeRobot policies output normalized actions from
+        ``predict_action_chunk`` — we always denormalize manually.
+        Stats are extracted from ``normalize_inputs`` buffers (old format)
+        or from the preprocessor safetensors file (new format).
+        """
         if self._policy is not None:
             return
 
         from lerobot.policies.factory import get_policy_class
-        from safetensors.torch import load_file as load_safetensors
 
         device = str(self.spec.settings.get("policy_device") or "cuda")
         model_dir = Path(model_path)
 
-        state_dict = load_safetensors(str(model_dir / "model.safetensors"))
         config = json.loads((model_dir / "config.json").read_text())
 
-        stats = _extract_input_stats(state_dict)
-        self._state_stat = stats.get("observation.state")
-        self._action_stat = _NormalizationStats(
-            mean=torch.tensor(_DEFAULT_ACTION_MEAN, device=device),
-            std=torch.tensor(_DEFAULT_ACTION_STD, device=device),
+        policy_type = str(
+            config.get("type") or self.spec.settings.get("policy_type", "act")
         )
-        for s in (self._state_stat, self._action_stat):
-            if s is not None:
-                s.mean = s.mean.to(device)
-                s.std = s.std.to(device)
+        self._policy_type = policy_type
 
-        self._imagenet_mean = torch.tensor(_IMAGENET_MEAN, device=device).view(3, 1, 1)
-        self._imagenet_std = torch.tensor(_IMAGENET_STD, device=device).view(3, 1, 1)
+        # Resolve image size: pi05 declares image_resolution, others use settings or input_features.
+        if (
+            isinstance(config.get("image_resolution"), list)
+            and len(config["image_resolution"]) == 2
+        ):
+            h, w = config["image_resolution"]
+            self._image_size = (int(w), int(h))
+        else:
+            image_size_raw = self.spec.settings.get("image_size")
+            if isinstance(image_size_raw, (list, tuple)) and len(image_size_raw) == 2:
+                self._image_size = (int(image_size_raw[0]), int(image_size_raw[1]))
+            elif isinstance(image_size_raw, str) and "x" in image_size_raw.lower():
+                w, h = image_size_raw.lower().split("x", 1)
+                self._image_size = (int(w), int(h))
+            elif isinstance(config.get("input_features"), dict):
+                sizes: list[tuple[int, int]] = []
+                for v in config["input_features"].values():
+                    shape = v.get("shape", [])
+                    if isinstance(shape, list) and len(shape) >= 3:
+                        sizes.append((int(shape[2]), int(shape[1])))
+                if sizes:
+                    self._image_size = sizes[0]
 
-        policy_class = get_policy_class(config["type"])
-        self._policy = policy_class.from_pretrained(str(model_dir))
+        # Extract action stats before loading policy weights (may need
+        # separate safetensors files depending on format).
+        self._extract_action_stats(model_dir, config, device)
+        # Pi05 needs state stats for the discretised-text tokenisation pipeline.
+        if policy_type == "pi05":
+            self._extract_state_stats(model_dir, device)
+
+        policy_cls = get_policy_class(policy_type)
+        self._policy = policy_cls.from_pretrained(str(model_dir))
         self._policy.to(device)
         self._policy.eval()
 
-    def _direct_act_inference(
+        # Build dynamic camera key map from policy input features.
+        self._build_camera_key_map(config)
+
+    def _extract_action_stats(
+        self, model_dir: Path, config: dict[str, Any], device: str
+    ) -> None:
+        """Extract action mean/std for denormalization.
+
+        Tries the new-format preprocessor safetensors first (smolvla, pi0
+        etc.), then falls back to old-format normalize_inputs buffers.
+        """
+        from safetensors.torch import load_file as load_safetensors
+
+        logger = __import__("logging").getLogger(__name__)
+
+        # New format: preprocessor safetensors in model directory.
+        preprocessor_stats: dict[str, torch.Tensor] | None = None
+        for fname in sorted(
+            model_dir.glob(
+                "policy_preprocessor_step_*_normalizer_processor.safetensors"
+            )
+        ):
+            try:
+                preprocessor_stats = load_safetensors(str(fname))
+                break
+            except Exception as exc:
+                logger.debug(f"Failed to load preprocessor stats from {fname}: {exc}")
+
+        if preprocessor_stats is not None and "action.mean" in preprocessor_stats:
+            self._action_mean = preprocessor_stats["action.mean"].to(device)
+            self._action_std = (
+                preprocessor_stats["action.std"].to(device).clamp(min=1e-8)
+            )
+            logger.debug(
+                f"Extracted action stats from preprocessor: "
+                f"mean={self._action_mean.tolist()}, std={self._action_std.tolist()}"
+            )
+            return
+
+        # Old format: normalize_inputs buffers in model.safetensors.
+        model_file = model_dir / "model.safetensors"
+        if model_file.exists():
+            try:
+                state_dict = load_safetensors(str(model_file))
+                stats = _extract_input_stats(state_dict)
+                action_stat = stats.get("action")
+                if action_stat is not None:
+                    self._action_mean = action_stat.mean.to(device)
+                    self._action_std = action_stat.std.to(device).clamp(min=1e-8)
+                    logger.debug(
+                        f"Extracted action stats from normalize_inputs: "
+                        f"mean={self._action_mean.tolist()}, std={self._action_std.tolist()}"
+                    )
+                    return
+            except Exception as exc:
+                logger.debug(f"Failed to extract normalize_inputs stats: {exc}")
+
+        # Fallback: identity (no denormalization).
+        logger.debug(f"No action stats found for {config.get('type')}, using identity")
+        self._action_mean = torch.zeros(6, device=device)
+        self._action_std = torch.ones(6, device=device)
+
+    def _extract_state_stats(self, model_dir: Path, device: str) -> None:
+        """Extract observation.state normalisation stats from preprocessor safetensors."""
+        from safetensors.torch import load_file as load_safetensors
+
+        logger = __import__("logging").getLogger(__name__)
+        for fname in sorted(
+            model_dir.glob(
+                "policy_preprocessor_step_*_normalizer_processor.safetensors"
+            )
+        ):
+            try:
+                preprocessor_stats = load_safetensors(str(fname))
+            except Exception as exc:
+                logger.debug(f"Failed to load preprocessor stats from {fname}: {exc}")
+                continue
+            if "observation.state.mean" in preprocessor_stats:
+                self._state_mean = preprocessor_stats["observation.state.mean"].to(
+                    device
+                )
+                self._state_std = (
+                    preprocessor_stats["observation.state.std"]
+                    .to(device)
+                    .clamp(min=1e-8)
+                )
+                return
+        logger.debug("No state stats found, using identity")
+        self._state_mean = torch.zeros(6, device=device)
+        self._state_std = torch.ones(6, device=device)
+
+    def _build_camera_key_map(self, config: dict[str, Any]) -> None:
+        """Override default camera key mappings based on policy config input features.
+
+        When a policy declares e.g. ``observation.images.wrist`` instead of the
+        default ``observation.images.handeye``, all wrist-like camera names
+        (handeye, right_wrist, left_wrist, wrist) are remapped to that key.
+        """
+        input_features = config.get("input_features")
+        if not isinstance(input_features, dict):
+            return
+        policy_image_keys = {
+            k for k in input_features if k.startswith("observation.images.")
+        }
+        for policy_key in policy_image_keys:
+            suffix = policy_key.rsplit(".", 1)[-1]
+            if suffix in _WRIST_CAMERA_NAMES:
+                for cam_name in _WRIST_CAMERA_NAMES:
+                    if cam_name in _CAMERA_KEY_MAP:
+                        _CAMERA_KEY_MAP[cam_name] = policy_key
+                _CAMERA_KEY_MAP[suffix] = policy_key
+            elif suffix and suffix not in _CAMERA_KEY_MAP:
+                _CAMERA_KEY_MAP[suffix] = policy_key
+
+    def _direct_policy_inference(
         self,
         model_path: str,
         *,
         observation: dict[str, Any],
+        payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         try:
-            self._load_act_policy(model_path)
+            self._load_policy(model_path)
         except ImportError as exc:
             return {
                 "success": False,
                 "status": "failed",
                 "failure_mode": "missing_dependency",
-                "summary": f"ACT model dependencies unavailable: {exc}",
+                "summary": f"Policy dependencies unavailable: {exc}",
                 "error": str(exc),
             }
         except Exception as exc:
@@ -725,33 +868,34 @@ class LeRobotVLAPolicyExecutor:
                 "success": False,
                 "status": "failed",
                 "failure_mode": "model_load_failed",
-                "summary": f"Failed to load ACT model from {model_path}: {exc}",
+                "summary": f"Failed to load policy from {model_path}: {exc}",
                 "error": str(exc),
             }
 
         try:
-            obs_tensors = self._preprocess_act_observation(observation)
+            batch = self._preprocess_observation(observation, payload or {})
         except Exception as exc:
             return {
                 "success": False,
                 "status": "failed",
                 "failure_mode": "preprocessing_failed",
-                "summary": f"ACT preprocessing failed: {exc}",
+                "summary": f"Preprocessing failed: {exc}",
                 "error": str(exc),
             }
 
         try:
-            raw = self._run_act_inference(obs_tensors)
+            raw = self._run_policy_inference(batch)
         except Exception as exc:
             return {
                 "success": False,
                 "status": "failed",
                 "failure_mode": "inference_failed",
-                "summary": f"ACT inference failed: {type(exc).__name__}: {exc}",
+                "summary": f"Policy inference failed: {type(exc).__name__}: {exc}",
                 "error": str(exc),
                 "metrics": {
                     "vla": {
                         "backend_mode": "action_chunk_policy",
+                        "policy_type": self._policy_type,
                         "frame_id": observation.get("frame_id"),
                         "hardware_ownership": "none",
                     }
@@ -761,7 +905,7 @@ class LeRobotVLAPolicyExecutor:
         return {
             "success": True,
             "status": "completed",
-            "summary": "ACT inference completed",
+            "summary": f"{self._policy_type} inference completed",
             "metrics": {
                 "policy_result": {
                     "kind": "action_chunk",
@@ -786,17 +930,24 @@ class LeRobotVLAPolicyExecutor:
                     "gripper_action": actions_out[0]["gripper"] if actions_out else 0.0,
                     "task_done": False,
                     "backend_mode": "action_chunk_policy",
+                    "policy_type": self._policy_type,
                     "frame_id": observation.get("frame_id"),
                     "hardware_ownership": "none",
                 },
             },
         }
 
-    def _preprocess_act_observation(
-        self, observation: dict[str, Any]
-    ) -> dict[str, torch.Tensor]:
+    def _preprocess_observation(
+        self, observation: dict[str, Any], payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Convert observation dict into a LeRobot policy batch (no manual normalization).
+
+        Policy-internal ``normalize_inputs`` handles mean/std scaling, so this method
+        only converts images to tensors (BCHW, [0,1]) and state to degree tensors.
+        """
         device = str(self.spec.settings.get("policy_device") or "cuda")
-        result: dict[str, torch.Tensor] = {}
+        w, h = self._image_size
+        batch: dict[str, Any] = {}
 
         images = observation.get("images")
         if isinstance(images, list):
@@ -809,15 +960,15 @@ class LeRobotVLAPolicyExecutor:
                 try:
                     raw = base64.b64decode(data)
                     img = Image.open(io.BytesIO(raw)).convert("RGB")
-                    img = img.resize((640, 480), Resampling.BILINEAR)
+                    img = img.resize((w, h), Resampling.BILINEAR)
                     arr = np.array(img, dtype=np.float32) / 255.0
-                    tensor = torch.from_numpy(arr).permute(2, 0, 1).to(device)
-                    result[target_key] = tensor
+                    tensor = (
+                        torch.from_numpy(arr).permute(2, 0, 1).unsqueeze(0).to(device)
+                    )
+                    batch[target_key] = tensor
                 except Exception as exc:
                     logger = __import__("logging").getLogger(__name__)
-                    logger.debug(
-                        "Failed to decode ACT image from camera %s: %s", camera, exc
-                    )
+                    logger.debug(f"Failed to decode image from camera {camera}: {exc}")
                     continue
 
         state = observation.get("proprioception")
@@ -826,44 +977,154 @@ class LeRobotVLAPolicyExecutor:
                 float(v) * _RAD_TO_DEG
                 for v in np.asarray(state[:6], dtype=np.float32).flat
             ]
-            result["observation.state"] = torch.tensor(
+            batch["observation.state"] = torch.tensor(
                 state_deg, dtype=torch.float32, device=device
-            )
+            ).unsqueeze(0)
         elif isinstance(state, (int, float)):
-            result["observation.state"] = torch.tensor(
-                [float(state)], dtype=torch.float32, device=device
+            batch["observation.state"] = torch.tensor(
+                [[float(state)]], dtype=torch.float32, device=device
             )
 
-        return result
+        # Language-conditioned policies (smolvla, pi0, pi0.5) need a task prompt.
+        task = (
+            payload.get("task")
+            or payload.get("task_prompt")
+            or payload.get("objective")
+            or "manipulate"
+        )
+        batch["task"] = [str(task)]
 
-    def _run_act_inference(self, obs: dict[str, torch.Tensor]) -> dict[str, Any]:
-        assert self._action_stat is not None, "ACT model not loaded"
-        assert self._imagenet_mean is not None, "ACT model not loaded"
-        assert self._imagenet_std is not None, "ACT model not loaded"
-        batch: dict[str, torch.Tensor] = {}
-        for key, value in obs.items():
-            if "state" in key and self._state_stat is not None:
-                value = self._state_stat.normalize(value)
-            elif "image" in key:
-                value = (value - self._imagenet_mean) / self._imagenet_std
-            batch[key] = value.unsqueeze(0)
+        # Tokenize task for policies that expect language tokens directly.
+        self._tokenize_task(batch, device)
+
+        return batch
+
+    def _tokenize_task(self, batch: dict[str, Any], device: str) -> None:
+        """Tokenize the task prompt for language-conditioned policies.
+
+        Supports two paths:
+        - smolvla: internal vlm_with_expert.processor.tokenizer
+        - pi05: PaliGemma tokenizer with state discretisation embedded in prompt
+        """
+        if self._policy is None:
+            return
+
+        if self._policy_type == "pi05":
+            self._tokenize_pi05_task(batch, device)
+            return
+
+        processor = getattr(
+            getattr(getattr(self._policy, "model", None), "vlm_with_expert", None),
+            "processor",
+            None,
+        )
+        if processor is None or not hasattr(processor, "tokenizer"):
+            return
+        tokenizer = processor.tokenizer
+        task_list: list[str] = batch.get("task", [])
+        if not task_list:
+            return
+        tokens = tokenizer(
+            task_list,
+            return_tensors="pt",
+            padding="max_length",
+            max_length=48,
+            truncation=True,
+        )
+        batch["observation.language.tokens"] = tokens["input_ids"].to(device)
+        batch["observation.language.attention_mask"] = (
+            tokens["attention_mask"].bool().to(device)
+        )
+
+    def _tokenize_pi05_task(self, batch: dict[str, Any], device: str) -> None:
+        """Pi05-specific tokenisation: discretise state, embed in text prompt.
+
+        Pi05 embeds robot state into the language prompt rather than as a
+        separate ``observation.state`` tensor. The pipeline is:
+        1. Normalise state to [-1, 1] with dataset stats
+        2. Discretise into 256 bins (0–255)
+        3. Build prompt: "Task: {task}, State: {bins};\\nAction: "
+        4. Tokenise with PaliGemma tokenizer (max_length=200)
+        """
+        if self._tokenizer is None:
+            from transformers import AutoTokenizer
+
+            tokenizer_path = Path("models/paligemma-tokenizer")
+            if tokenizer_path.exists():
+                self._tokenizer = AutoTokenizer.from_pretrained(str(tokenizer_path))
+            else:
+                self._tokenizer = AutoTokenizer.from_pretrained(
+                    "google/paligemma-3b-pt-224"
+                )
+
+        task_list: list[str] = batch.get("task", [])
+        state = batch.get("observation.state")
+        if state is not None:
+            batch.pop("observation.state", None)
+
+        bsz = state.shape[0] if state is not None else 1
+        prompts: list[str] = []
+        for i in range(bsz):
+            task = (task_list[i] if i < len(task_list) else "manipulate").strip()
+            cleaned = task.replace("_", " ").replace("\n", " ")
+            state_str = ""
+            if state is not None:
+                state_row = state[i].to(device, dtype=torch.float32)
+                # Normalise to [-1, 1]
+                if self._state_mean is not None and self._state_std is not None:
+                    s_mean = self._state_mean.to(device)
+                    s_std = self._state_std.to(device).clamp(min=1e-8)
+                    state_row = (state_row - s_mean) / s_std
+                state_row = state_row.clamp(-1, 1)
+                # Discretise into 256 bins
+                bins = np.linspace(-1, 1, 257)[:-1]
+                discretised = np.digitize(state_row.cpu().numpy(), bins=bins) - 1
+                # Pad to max_state_dim (32) with zeros
+                max_dim = 32
+                padded = np.zeros(max_dim, dtype=np.int64)
+                padded[: len(discretised)] = discretised[:max_dim]
+                state_str = " ".join(map(str, padded))
+            prompts.append(f"Task: {cleaned}, State: {state_str};\nAction: ")
+
+        tokens = self._tokenizer(
+            prompts,
+            return_tensors="pt",
+            padding="max_length",
+            max_length=200,
+            truncation=True,
+        )
+        batch["observation.language.tokens"] = tokens["input_ids"].to(device)
+        batch["observation.language.attention_mask"] = (
+            tokens["attention_mask"].bool().to(device)
+        )
+
+    def _run_policy_inference(self, batch: dict[str, Any]) -> dict[str, Any]:
+        """Run a generic LeRobot policy and convert output to joint/gripper dicts."""
+        assert self._policy is not None, "Policy not loaded"
+        assert self._action_mean is not None, "Action stats not loaded"
+        assert self._action_std is not None, "Action stats not loaded"
 
         with torch.no_grad():
             action_chunk = self._policy.predict_action_chunk(batch)
             if action_chunk.ndim == 3:
                 action_chunk = action_chunk.squeeze(0)
 
-        action_chunk = self._action_stat.unnormalize(action_chunk)
+        # All LeRobot policies output normalized actions — denormalize.
+        num_actions = action_chunk.shape[-1]
+        action_mean = self._action_mean[:num_actions]
+        action_std = self._action_std[:num_actions].clamp(min=1e-8)
+        action_chunk = action_chunk * action_std + action_mean
+
         actions_raw = action_chunk.cpu().tolist()
 
         actions_out: list[dict[str, Any]] = []
         for action_vec in actions_raw:
             joints: dict[str, float] = {}
-            for i, name in enumerate(_ACT_JOINT_NAMES):
+            for i, name in enumerate(_SO101_JOINT_NAMES):
                 if i < len(action_vec):
                     joints[name] = round(float(action_vec[i]) * _DEG_TO_RAD, 6)
-            gripper_rad = joints.pop("gripper", 0.0)
-            gripper_pct = max(0.0, min(1.0, (gripper_rad + 0.1) / 1.3))
+            gripper_idx = min(5, len(action_vec) - 1)
+            gripper_pct = max(0.0, min(1.0, float(action_vec[gripper_idx]) / 100.0))
             actions_out.append({"joints": joints, "gripper": gripper_pct})
 
         return {"actions": actions_out, "horizon": len(actions_out)}

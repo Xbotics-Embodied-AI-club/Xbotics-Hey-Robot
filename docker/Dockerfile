@@ -32,8 +32,8 @@ RUN apt-get update \
 COPY pyproject.toml README.md ./
 COPY src ./src
 COPY configs ./configs
-RUN python -m pip install --upgrade pip \
-    && python -m pip install -e ".[all]"
+RUN pip install uv \
+    && uv sync --group sim --group vla --group dev
 
 LABEL org.opencontainers.image.title="hey-robot" \
       org.opencontainers.image.description="Embodied-native Agent Harness with an asynchronous fast/slow architecture" \
