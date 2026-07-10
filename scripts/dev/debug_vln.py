@@ -274,8 +274,8 @@ async def phase3_check_frames(nats_url: str, duration: float = 15.0):
                     "ts": time.time(),
                 }
             )
-        except Exception:  # noqa: S110
-            pass
+        except Exception as exc:
+            print(f"[phase3] frame parse warning: {exc}")
 
     await nc.subscribe("robot.camera.frame.>", cb=on_frame)
 
@@ -325,6 +325,16 @@ async def phase3_check_frames(nats_url: str, duration: float = 15.0):
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+def _write_pending_frames(pending_frames: list[tuple[str, int, bytes]]) -> None:
+    """Write collected frame images to disk synchronously."""
+    out_dir = Path("diag_frames")
+    out_dir.mkdir(exist_ok=True)
+    for camera, fid, img_bytes in pending_frames:
+        fname = out_dir / f"frame_{camera}_{fid:06d}.jpg"
+        fname.write_bytes(img_bytes)
+    print(f"    Saved {len(pending_frames)} frames to diag_frames/")
+
+
 async def phase4_full_test(
     task: str,
     web_url: str,
@@ -344,6 +354,7 @@ async def phase4_full_test(
     agent_replies: list[dict] = []
     robot_statuses: list[dict] = []
     frame_hashes: list[tuple[float, str, int]] = []  # (ts, hash, frame_id)
+    pending_frames: list[tuple[str, int, bytes]] = []  # deferred sync I/O
 
     async def on_event(msg):
         skill_events.append(json.loads(msg.data.decode()))
@@ -365,13 +376,15 @@ async def phase4_full_test(
             h = hashlib.sha256(image_bytes).hexdigest()[:8]
             frame_hashes.append((time.time(), h, metadata.get("frame_id", 0)))
             if save_frames:
-                camera = metadata.get("camera", "unknown")
-                fid = metadata.get("frame_id", 0)
-                Path("diag_frames").mkdir(exist_ok=True)  # noqa: ASYNC240
-                fname = f"diag_frames/frame_{camera}_{fid:06d}.jpg"
-                Path(fname).write_bytes(image_bytes)  # noqa: ASYNC240
-        except Exception:  # noqa: S110
-            pass
+                pending_frames.append(
+                    (
+                        metadata.get("camera", "unknown"),
+                        metadata.get("frame_id", 0),
+                        image_bytes,
+                    )
+                )
+        except Exception as exc:
+            print(f"[phase4] frame parse warning: {exc}")
 
     await nc.subscribe(topics.skill_event, cb=on_event)
     await nc.subscribe(topics.skill_result, cb=on_result)
@@ -411,6 +424,9 @@ async def phase4_full_test(
     # Post-turn frame hashes
     post_hashes = {h for _, h, _ in frame_hashes}
     new_hashes = post_hashes - pre_hashes
+
+    if save_frames and pending_frames:
+        _write_pending_frames(pending_frames)
 
     # ── Analysis ──
 

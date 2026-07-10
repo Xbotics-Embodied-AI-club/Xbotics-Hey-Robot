@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import io
+import logging
 import re
 import sys
 import threading
@@ -17,6 +18,8 @@ from PIL import Image
 from hey_robot.config import ModelServiceSpec
 from hey_robot.foundation.clients.models import PolicyStepResult
 from hey_robot.robot_runtime.media import LocalMediaStore
+
+logger = logging.getLogger(__name__)
 
 
 class VLNPlanningError(RuntimeError):
@@ -298,11 +301,10 @@ class InternVLAN1System2Executor:
         raw_output = _public_raw_output(output)
         action = getattr(output, "output_action", None)
         pixel = getattr(output, "output_pixel", None)
-        print(  # noqa: T201
-            f"[VLN-Executor] instruction={planner_input.instruction!r} "
+        logger.debug(
+            f"instruction={planner_input.instruction!r} "
             f"look_down={planner_input.look_down} "
-            f"output_action={action} pixel={pixel} raw_output={raw_output}",
-            flush=True,
+            f"output_action={action} pixel={pixel} raw_output={raw_output}"
         )
         return self._planner_result_from_s2_output(
             output,

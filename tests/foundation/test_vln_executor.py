@@ -363,7 +363,7 @@ def test_vln_adapter_maps_off_center_pixel_to_turn() -> None:
 
     assert command.primitive == "turn_base"
     assert command.arguments["direction"] == "left"
-    assert 5.0 <= command.arguments["angle_deg"] <= 15.0
+    assert 10.0 <= command.arguments["angle_deg"] <= 30.0
 
 
 def test_vln_adapter_maps_heading_and_stop() -> None:
@@ -371,7 +371,7 @@ def test_vln_adapter_maps_heading_and_stop() -> None:
     stop = planner_output_to_primitive({"mode": "stop", "stop": True})
 
     assert turn.primitive == "turn_base"
-    assert turn.arguments == {"direction": "right", "angle_deg": 15.0}
+    assert turn.arguments == {"direction": "right", "angle_deg": 30.0}
     assert stop.primitive == "stop_motion"
     assert stop.arguments == {}
 

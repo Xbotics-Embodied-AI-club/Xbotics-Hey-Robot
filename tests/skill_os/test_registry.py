@@ -651,15 +651,28 @@ def test_navigate_to_skill_respects_execute_primitives_false() -> None:
 
 def test_navigate_to_skill_executes_center_pixel_as_forward_step() -> None:
     class ModelServiceAPI:
+        def __init__(self) -> None:
+            self._call_count = 0
+
         async def call(self, name: str, arguments: dict):
             del name, arguments
+            self._call_count += 1
+            if self._call_count == 1:
+                return SimpleNamespace(
+                    success=True,
+                    summary="VLN planner produced pixel_goal",
+                    status="completed",
+                    failure_mode=None,
+                    error=None,
+                    metrics={"vln": {"mode": "pixel_goal", "pixel_goal": [240, 320]}},
+                )
             return SimpleNamespace(
                 success=True,
-                summary="VLN planner produced pixel_goal",
+                summary="VLN planner requested stop",
                 status="completed",
                 failure_mode=None,
                 error=None,
-                metrics={"vln": {"mode": "pixel_goal", "pixel_goal": [240, 320]}},
+                metrics={"vln": {"mode": "stop", "stop": True}},
             )
 
     robot = _RobotAPI()
@@ -679,7 +692,10 @@ def test_navigate_to_skill_executes_center_pixel_as_forward_step() -> None:
     )
 
     assert result.success is True
-    assert robot.calls == [("move_base", {"direction": "forward", "distance_cm": 15.0})]
+    assert robot.calls[0] == (
+        "move_base",
+        {"direction": "forward", "distance_cm": 15.0},
+    )
     assert result.data["steps"][0]["primitive"] == "move_base"
     assert result.data["steps"][0]["success"] is True
     assert result.data["steps"][0]["primitive_result"] == {
@@ -690,15 +706,28 @@ def test_navigate_to_skill_executes_center_pixel_as_forward_step() -> None:
 
 def test_navigate_to_skill_executes_off_center_pixel_as_turn() -> None:
     class ModelServiceAPI:
+        def __init__(self) -> None:
+            self._call_count = 0
+
         async def call(self, name: str, arguments: dict):
             del name, arguments
+            self._call_count += 1
+            if self._call_count == 1:
+                return SimpleNamespace(
+                    success=True,
+                    summary="VLN planner produced pixel_goal",
+                    status="completed",
+                    failure_mode=None,
+                    error=None,
+                    metrics={"vln": {"mode": "pixel_goal", "pixel_goal": [240, 32]}},
+                )
             return SimpleNamespace(
                 success=True,
-                summary="VLN planner produced pixel_goal",
+                summary="VLN planner requested stop",
                 status="completed",
                 failure_mode=None,
                 error=None,
-                metrics={"vln": {"mode": "pixel_goal", "pixel_goal": [240, 32]}},
+                metrics={"vln": {"mode": "stop", "stop": True}},
             )
 
     robot = _RobotAPI()
@@ -897,16 +926,17 @@ def test_navigate_to_skill_handles_look_down_secondary_observation() -> None:
 
         async def call(self, name: str, arguments: dict):
             self.calls.append((name, dict(arguments)))
-            metrics = (
-                {
+            if len(self.calls) == 1:
+                metrics: dict = {
                     "vln": {
                         "mode": "look_down_required",
                         "requires_secondary_observation": True,
                     }
                 }
-                if len(self.calls) == 1
-                else {"vln": {"mode": "pixel_goal", "pixel_goal": [240, 320]}}
-            )
+            elif len(self.calls) == 2:
+                metrics = {"vln": {"mode": "pixel_goal", "pixel_goal": [240, 320]}}
+            else:
+                metrics = {"vln": {"mode": "stop", "stop": True}}
             return SimpleNamespace(
                 success=True,
                 summary="VLN planner step",
@@ -936,7 +966,7 @@ def test_navigate_to_skill_handles_look_down_secondary_observation() -> None:
                 "target": "desk",
                 "camera": "front",
                 "execute_primitives": True,
-                "max_steps": 2,
+                "max_steps": 3,
             },
             context_factory=lambda _invoke: SkillContext(
                 robot=robot,
@@ -951,8 +981,11 @@ def test_navigate_to_skill_handles_look_down_secondary_observation() -> None:
     assert model_services.calls[0][1]["reset_policy"] is True
     assert model_services.calls[1][1]["reset_policy"] is False
     assert model_services.calls[1][1]["look_down"] is True
-    assert invocations == [("inspect_scene", {"camera": "front", "look_down": True})]
-    assert robot.calls == [("move_base", {"direction": "forward", "distance_cm": 15.0})]
+    assert invocations[0] == ("inspect_scene", {"camera": "front", "look_down": True})
+    assert robot.calls[0] == (
+        "move_base",
+        {"direction": "forward", "distance_cm": 15.0},
+    )
     assert "secondary_observation" in [event["step"] for event in progress_events]
 
 

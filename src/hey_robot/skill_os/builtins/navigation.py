@@ -457,14 +457,19 @@ class HumanFollowSkill(BaseSkill):
         )
 
 
-def _vln_payload(_ctx: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+def _vln_payload(ctx: Any, arguments: dict[str, Any]) -> dict[str, Any]:
     """Build a stable VLN policy payload from explicit args and current observation."""
     payload = {
         key: value
         for key, value in dict(arguments).items()
         if key not in {"execute_primitives", "max_steps"}
     }
-    skill_id = getattr(_ctx, "skill_id", None)
+    if "observation" not in payload and "image_path" not in payload:
+        observation = ctx.current_observation() if ctx.current_observation else None
+        obs = _observation_payload(observation, camera=payload.get("camera"))
+        if obs is not None:
+            payload["observation"] = obs
+    skill_id = getattr(ctx, "skill_id", None)
     if skill_id and not payload.get("policy_session_id"):
         payload["policy_session_id"] = skill_id
     payload.setdefault("reset_policy", True)

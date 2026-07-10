@@ -123,7 +123,7 @@ class NATSMonitor:
         await self.nc.subscribe(self.topics.robot_status, cb=self._on_robot_status)
         return self
 
-    async def __aexit__(self, *args):  # noqa: ANN002
+    async def __aexit__(self, *args: object) -> None:
         if self.nc:
             await self.nc.close()
 
@@ -191,8 +191,8 @@ async def check_frame_uniqueness(
             metadata = json.loads(msg.data[4 : 4 + header_size].decode("utf-8"))
             img_hash = hashlib.sha256(image_bytes).hexdigest()[:8]
             frames.append((metadata.get("frame_id", 0), img_hash))
-        except Exception:  # noqa: S110
-            pass
+        except Exception as exc:
+            print(f"[diag] frame parse warning: {exc}")
 
     await nc.subscribe("robot.camera.frame.>", cb=on_frame)
     print(f"\n  Collecting camera frames for {duration}s...")
