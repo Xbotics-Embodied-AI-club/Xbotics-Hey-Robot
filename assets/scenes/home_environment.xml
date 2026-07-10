@@ -282,7 +282,7 @@
 
     <!-- ==================== LIVING ROOM (x=0..6, y=0..5) ==================== -->
 
-    <body name="sofa_main" pos="1.8 1.0 0">
+    <body name="sofa_main" pos="1.63 1.08 0">
       <geom type="mesh" mesh="m_loungeSofa_carpet" euler="1.5708 0 0" pos="1.08 0.45 0" rgba="0.94 0.37 0.34 1" contype="0" conaffinity="0"/>
       <geom type="mesh" mesh="m_loungeSofa_wood" euler="1.5708 0 0" pos="1.08 0.45 0" material="mat_walnut" contype="0" conaffinity="0"/>
       <geom type="box" pos="0 0 0.45" size="1.1 0.45 0.45" rgba="0 0 0 0" group="3"/>
@@ -293,12 +293,12 @@
       <geom type="box" pos="0 0 0.20" size="0.6 0.35 0.20" rgba="0 0 0 0" group="3"/>
     </body>
 
-    <body name="tv_console" pos="0.5 3.5 0">
+    <body name="tv_console" pos="0.85 3.5 0">
       <geom type="mesh" mesh="m_tv_console" euler="1.5708 0 0" pos="0.80 0.25 0" rgba="0.90 0.60 0.39 1" contype="0" conaffinity="0"/>
       <geom type="box" pos="0 0 0.30" size="0.8 0.25 0.30" rgba="0 0 0 0" group="3"/>
     </body>
 
-    <body name="tv_screen" pos="0.5 3.5 0.62">
+    <body name="tv_screen" pos="0.85 3.5 0.62">
       <geom type="mesh" mesh="m_televisionModern_metalDark" euler="1.5708 0 0" rgba="0.31 0.39 0.39 1" contype="0" conaffinity="0"/>
       <geom type="mesh" mesh="m_televisionModern_metal" euler="1.5708 0 0" rgba="0.74 0.82 0.84 1" contype="0" conaffinity="0"/>
     </body>
@@ -309,9 +309,9 @@
       <geom type="cylinder" pos="0 0 0.7" size="0.12 0.7" rgba="0 0 0 0" group="3"/>
     </body>
 
-    <geom name="rug_living_carpet" type="mesh" mesh="m_rugRectangle_carpet" euler="1.5708 0 0" pos="2.0 2.0 0.005"
+    <geom name="rug_living_carpet" type="mesh" mesh="m_rugRectangle_carpet" euler="1.5708 0 0" pos="3.2 2.0 0.005"
           rgba="0.94 0.37 0.34 1" contype="0" conaffinity="0"/>
-    <geom name="rug_living_darker" type="mesh" mesh="m_rugRectangle_carpetDarker" euler="1.5708 0 0" pos="2.0 2.0 0.005"
+    <geom name="rug_living_darker" type="mesh" mesh="m_rugRectangle_carpetDarker" euler="1.5708 0 0" pos="3.2 2.0 0.005"
           rgba="0.61 0.30 0.29 1" contype="0" conaffinity="0"/>
 
     <geom name="art_living" type="box" pos="0.02 2.5 1.5" size="0.02 0.4 0.3"
@@ -325,20 +325,20 @@
       <geom type="box" pos="0 0 0.33" size="0.84 0.45 0.33" rgba="0 0 0 0" group="3"/>
     </body>
 
-    <body name="dchair1" pos="2.0 7.5 0">
+    <body name="dchair1" pos="2.0 7.5 0" euler="0 0 -1.5708">
       <geom type="mesh" mesh="m_chair" euler="1.5708 0 0" pos="0.21 0.21 0" material="mat_oak" contype="0" conaffinity="0"/>
       <geom type="box" pos="0 0 0.45" size="0.21 0.21 0.45" rgba="0 0 0 0" group="3"/>
     </body>
-    <body name="dchair2" pos="4.0 7.5 0">
-      <geom type="mesh" mesh="m_chair" euler="1.5708 0 3.1416" pos="-0.21 -0.21 0" material="mat_oak" contype="0" conaffinity="0"/>
+    <body name="dchair2" pos="4.0 7.5 0" euler="0 0 1.5708">
+      <geom type="mesh" mesh="m_chair" euler="1.5708 0 0" pos="0.21 0.21 0" material="mat_oak" contype="0" conaffinity="0"/>
       <geom type="box" pos="0 0 0.45" size="0.21 0.21 0.45" rgba="0 0 0 0" group="3"/>
     </body>
     <body name="dchair3" pos="3.0 6.7 0">
-      <geom type="mesh" mesh="m_chair" euler="1.5708 0 1.5708" pos="0.21 -0.21 0" material="mat_oak" contype="0" conaffinity="0"/>
+      <geom type="mesh" mesh="m_chair" euler="1.5708 0 0" pos="0.21 0.21 0" material="mat_oak" contype="0" conaffinity="0"/>
       <geom type="box" pos="0 0 0.45" size="0.21 0.21 0.45" rgba="0 0 0 0" group="3"/>
     </body>
-    <body name="dchair4" pos="3.0 8.3 0">
-      <geom type="mesh" mesh="m_chair" euler="1.5708 0 -1.5708" pos="-0.21 0.21 0" material="mat_oak" contype="0" conaffinity="0"/>
+    <body name="dchair4" pos="3.0 8.3 0" euler="0 0 3.1416">
+      <geom type="mesh" mesh="m_chair" euler="1.5708 0 0" pos="0.21 0.21 0" material="mat_oak" contype="0" conaffinity="0"/>
       <geom type="box" pos="0 0 0.45" size="0.21 0.21 0.45" rgba="0 0 0 0" group="3"/>
     </body>
 
@@ -389,10 +389,10 @@
       <geom type="box" pos="0 0 0.45" size="0.43 0.45 0.45" rgba="0 0 0 0" group="3"/>
     </body>
 
-    <body name="island" pos="17 2.8 0">
-      <geom type="mesh" mesh="m_kitchenCabinetDrawer_metal" euler="1.5708 0 1.5708" pos="0.45 -0.43 0" material="mat_chrome" contype="0" conaffinity="0"/>
-      <geom type="mesh" mesh="m_kitchenCabinetDrawer_wood" euler="1.5708 0 1.5708" pos="0.45 -0.43 0" material="mat_cherry" contype="0" conaffinity="0"/>
-      <geom type="mesh" mesh="m_kitchenCabinetDrawer_woodDark" euler="1.5708 0 1.5708" pos="0.45 -0.43 0" material="mat_walnut" contype="0" conaffinity="0"/>
+    <body name="island" pos="17 2.8 0" euler="0 0 1.5708">
+      <geom type="mesh" mesh="m_kitchenCabinetDrawer_metal" euler="1.5708 0 0" pos="0.43 0.45 0" material="mat_chrome" contype="0" conaffinity="0"/>
+      <geom type="mesh" mesh="m_kitchenCabinetDrawer_wood" euler="1.5708 0 0" pos="0.43 0.45 0" material="mat_cherry" contype="0" conaffinity="0"/>
+      <geom type="mesh" mesh="m_kitchenCabinetDrawer_woodDark" euler="1.5708 0 0" pos="0.43 0.45 0" material="mat_walnut" contype="0" conaffinity="0"/>
       <geom type="box" pos="0 0 0.45" size="0.43 0.45 0.45" rgba="0 0 0 0" group="3"/>
     </body>
 
@@ -438,9 +438,9 @@
       <geom type="box" pos="0 0 0.88" size="0.40 0.25 0.88" rgba="0 0 0 0" group="3"/>
     </body>
 
-    <geom name="rug_study_carpet" type="mesh" mesh="m_rugRectangle_carpet" euler="1.5708 0 0" pos="17.5 7.5 0.005"
+    <geom name="rug_study_carpet" type="mesh" mesh="m_rugRectangle_carpet" euler="1.5708 0 0" pos="18.87 8.42 0.005"
           rgba="0.94 0.37 0.34 1" contype="0" conaffinity="0"/>
-    <geom name="rug_study_darker" type="mesh" mesh="m_rugRectangle_carpetDarker" euler="1.5708 0 0" pos="17.5 7.5 0.005"
+    <geom name="rug_study_darker" type="mesh" mesh="m_rugRectangle_carpetDarker" euler="1.5708 0 0" pos="18.87 8.42 0.005"
           rgba="0.61 0.30 0.29 1" contype="0" conaffinity="0"/>
 
     <!-- plant_study REMOVED — collision cylinder traps Go2 -->
@@ -474,9 +474,9 @@
       <geom type="box" pos="0 0 0.88" size="0.40 0.30 0.88" rgba="0 0 0 0" group="3"/>
     </body>
 
-    <geom name="rug_master_carpet" type="mesh" mesh="m_rugRectangle_carpet" euler="1.5708 0 0" pos="3 12 0.005"
+    <geom name="rug_master_carpet" type="mesh" mesh="m_rugRectangle_carpet" euler="1.5708 0 0" pos="4.57 12.92 0.005"
           rgba="0.94 0.37 0.34 1" contype="0" conaffinity="0"/>
-    <geom name="rug_master_darker" type="mesh" mesh="m_rugRectangle_carpetDarker" euler="1.5708 0 0" pos="3 12 0.005"
+    <geom name="rug_master_darker" type="mesh" mesh="m_rugRectangle_carpetDarker" euler="1.5708 0 0" pos="4.57 12.92 0.005"
           rgba="0.61 0.30 0.29 1" contype="0" conaffinity="0"/>
 
 
@@ -515,9 +515,9 @@
     </body>
 
     <body name="vanity" pos="7.5 11 0">
-      <geom type="mesh" mesh="m_bathroomSink_defaultMat" euler="1.5708 0 0" pos="0.26 0.22 0" material="mat_ceramic" contype="0" conaffinity="0"/>
-      <geom type="mesh" mesh="m_bathroomSink_metalLight" euler="1.5708 0 0" pos="0.26 0.22 0" material="mat_chrome" contype="0" conaffinity="0"/>
-      <geom type="mesh" mesh="m_bathroomSink_carpetWhite" euler="1.5708 0 0" pos="0.26 0.22 0" material="mat_ceramic" contype="0" conaffinity="0"/>
+      <geom type="mesh" mesh="m_bathroomSink_defaultMat" euler="1.5708 0 0" pos="0.26 0.22 0.6" material="mat_ceramic" contype="0" conaffinity="0"/>
+      <geom type="mesh" mesh="m_bathroomSink_metalLight" euler="1.5708 0 0" pos="0.26 0.22 0.6" material="mat_chrome" contype="0" conaffinity="0"/>
+      <geom type="mesh" mesh="m_bathroomSink_carpetWhite" euler="1.5708 0 0" pos="0.26 0.22 0.6" material="mat_ceramic" contype="0" conaffinity="0"/>
       <geom type="box" pos="0 0 0.42" size="0.26 0.22 0.42" rgba="0 0 0 0" group="3"/>
     </body>
 
@@ -551,9 +551,9 @@
 
     <!-- plant_entry REMOVED — collision cylinder in hallway traps Go2 -->
 
-    <geom name="rug_hall_carpet" type="mesh" mesh="m_rugRectangle_carpet" euler="1.5708 0 1.5708" pos="10 5 0.005"
+    <geom name="rug_hall_carpet" type="mesh" mesh="m_rugRectangle_carpet" euler="1.5708 0 0" pos="11.57 5.92 0.005"
           rgba="0.94 0.37 0.34 1" contype="0" conaffinity="0"/>
-    <geom name="rug_hall_darker" type="mesh" mesh="m_rugRectangle_carpetDarker" euler="1.5708 0 1.5708" pos="10 5 0.005"
+    <geom name="rug_hall_darker" type="mesh" mesh="m_rugRectangle_carpetDarker" euler="1.5708 0 0" pos="11.57 5.92 0.005"
           rgba="0.61 0.30 0.29 1" contype="0" conaffinity="0"/>
 
     <!-- plant_hall REMOVED — collision cylinder in hallway traps Go2 -->

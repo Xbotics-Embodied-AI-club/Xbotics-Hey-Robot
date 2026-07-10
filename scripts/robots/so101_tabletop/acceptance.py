@@ -5,6 +5,9 @@ import asyncio
 from collections import Counter
 from typing import Any, cast
 
+from hey_robot.robot_runtime.simulation.so101_tabletop import (
+    So101TabletopSimDriver,
+)
 from hey_robot.robot_runtime.simulation.so101_tabletop.scenario import (
     TABLETOP_OBJECTS,
 )
@@ -13,9 +16,6 @@ from hey_robot.config import RobotSpec
 from hey_robot.protocol import Envelope, RobotSkillAction, SkillIntent
 from hey_robot.robot_runtime.base import RobotDriverContext
 from hey_robot.robot_runtime.embodiments import get_embodiment_profile
-from hey_robot.robot_runtime.simulation.so101_tabletop import (
-    So101TabletopSimDriver,
-)
 from hey_robot.skill_os.apis import RobotSkillAPI
 from hey_robot.skill_os.builtins.tabletop_manipulation import PickSkill
 from hey_robot.skill_os.context import SkillContext

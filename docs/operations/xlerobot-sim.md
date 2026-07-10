@@ -117,6 +117,21 @@ uv sync --group vla --python .vla-venv/bin/python
 python scripts/robots/xlerobot/generate_mjcf.py
 ```
 
+## 场景布局俯视图
+
+当前 XLeRobot home 仿真配置加载 `assets/scenes/home_scene.xml`，该文件组合了
+`home_environment.xml` 中的 20m x 14m 家庭环境和 XLeRobot 本体。下图是从当前
+MJCF 渲染得到的正俯视图，用于人工检查房间、地毯、家具和机器人出生点的相对位置。
+
+![XLeRobot home scene top-down layout](../images/xlerobot-home-scene-topdown.png)
+
+布局维护时注意：
+
+- 家具 mesh 的原点不一定在中心，移动物体后应以编译后的 MuJoCo 世界边界为准。
+- 地毯应保持在对应房间边界内；大厅地毯中心应接近 `(10, 5)`。
+- 餐厅四把椅子应朝向餐桌，椅背朝外。
+- 可见资产不应低于地面；相关回归测试在 `tests/assets/test_xlerobot_home_scene.py`。
+
 ## 快速验证
 
 运行仿真测试：
@@ -236,7 +251,7 @@ model_services:
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `mjcf_path` | `assets/robots/xlerobot/home_scene.xml` | MuJoCo 场景文件 |
+| `mjcf_path` | `assets/scenes/home_scene.xml` | MuJoCo 场景文件 |
 | `render_width` | `640` | 渲染宽度 |
 | `render_height` | `480` | 渲染高度 |
 | `control_hz` | `2.0` | 控制频率 |
