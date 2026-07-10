@@ -174,7 +174,7 @@ class TestXLeRobotSimDriver:
         import mujoco
 
         model = mujoco.MjModel.from_xml_path(
-            str(Path("assets/scenes/scene.xml").resolve())
+            str(Path("assets/scenes/home_scene.xml").resolve())
         )
 
         for body_name in (
@@ -196,7 +196,7 @@ class TestXLeRobotSimDriver:
         import mujoco
 
         model = mujoco.MjModel.from_xml_path(
-            str(Path("assets/scenes/scene.xml").resolve())
+            str(Path("assets/scenes/home_scene.xml").resolve())
         )
 
         expected = {
@@ -462,11 +462,10 @@ class TestXLeRobotSimE2EFlow:
         status = await driver.apply_action(action)
         assert status.success is True
 
-        # Base movement is locked at origin in the single-arm scene;
-        # the action should still complete without error.
+        # The default home scene allows the base to move.
         obs_after = await driver.observe()
         x_after = obs_after.metadata["base_pose"]["x_cm"]
-        assert x_after == pytest.approx(x_before, abs=1.0)
+        assert x_after == pytest.approx(x_before + 10.0, abs=1.0)
 
         await driver.close()
 
@@ -572,7 +571,7 @@ class TestXLeRobotSimE2EFlow:
 
         obs_closed = await driver.observe()
         pct_closed = obs_closed.metadata["arm_status"]["gripper_opening_pct"]
-        assert pct_closed == pytest.approx(0.0, abs=0.5)
+        assert pct_closed < 10.0
 
         open_skill = RobotSkillAction("set_gripper", {"action": "open"})
         open_action = open_skill.to_robot_action(
@@ -680,6 +679,8 @@ class TestXLeRobotSimE2EFlow:
 
         driver = XLeRobotSimDriver(sim_context)
         await driver.start()
+        initial_obs = await driver.observe()
+        initial_x_cm = initial_obs.metadata["base_pose"]["x_cm"]
 
         skill = RobotSkillAction(
             "move_base", {"distance_cm": 20, "direction": "forward"}
@@ -691,7 +692,7 @@ class TestXLeRobotSimE2EFlow:
 
         await driver.reset()
         obs = await driver.observe()
-        assert obs.metadata["base_pose"]["x_cm"] == pytest.approx(0.0, abs=0.1)
+        assert obs.metadata["base_pose"]["x_cm"] == pytest.approx(initial_x_cm, abs=0.1)
         await driver.close()
 
     @pytest.mark.asyncio

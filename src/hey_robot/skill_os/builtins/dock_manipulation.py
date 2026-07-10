@@ -73,7 +73,7 @@ def _ik_args(
 
 
 class PickWandSkill(BaseSkill):
-    """Pick the cat wand from the dock.
+    """Pick the wand from the dock.
 
     Mode "oracle" (default): uses sim_locate_object (MuJoCo ground truth).
     Mode "perception": camera → bbox → ray-plane intersection → 3D.
@@ -81,7 +81,7 @@ class PickWandSkill(BaseSkill):
 
     spec = spec(
         "pick_wand_from_dock",
-        "Pick the cat wand from the dock using the left arm.",
+        "Pick the wand from the dock using the arm.",
         category="arm",
         input_schema={
             "type": "object",
@@ -303,8 +303,8 @@ class PickWandSkill(BaseSkill):
         state = await _primitive(ctx, "sim_get_object_state", {})
         held = state.get("held_object")
         welds = state.get("welds", {})
-        wand_weld = welds.get("cat_wand", False)
-        if not wand_weld or held != "cat_wand":
+        wand_weld = welds.get("wand", False)
+        if not wand_weld or held != "wand":
             return _failure("grasp not confirmed", "grasp_not_confirmed", held=held)
 
         return SkillResult(
@@ -322,11 +322,11 @@ class PickWandSkill(BaseSkill):
 
 
 class PlaceWandSkill(BaseSkill):
-    """Place the cat wand back into the dock."""
+    """Place the wand back into the dock."""
 
     spec = spec(
         "place_wand_to_dock",
-        "Place the cat wand back into the dock.",
+        "Place the wand back into the dock.",
         category="arm",
         input_schema={
             "type": "object",
@@ -361,12 +361,12 @@ class PlaceWandSkill(BaseSkill):
         # 1. Verify holding wand
         state = await _primitive(ctx, "sim_get_object_state", {})
         held = state.get("held_object")
-        if held != "cat_wand":
+        if held != "wand":
             return _failure("gripper is empty", "gripper_empty")
 
         # 2. Get wand current position and dock position
         object_positions = state.get("objects", {})
-        wand_pos = object_positions.get("cat_wand")
+        wand_pos = object_positions.get("wand")
         if wand_pos is None:
             return _failure("wand position unknown", "place_not_confirmed")
 
@@ -440,7 +440,7 @@ class PlaceWandSkill(BaseSkill):
         # 10. Verify release
         state2 = await _primitive(ctx, "sim_get_object_state", {})
         welds = state2.get("welds", {})
-        wand_weld = welds.get("cat_wand", False)
+        wand_weld = welds.get("wand", False)
         if wand_weld:
             return _failure("wand not released", "place_not_confirmed")
 

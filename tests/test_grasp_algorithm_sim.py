@@ -5,8 +5,8 @@
 
 """Validate grasp_point against MuJoCo ground truth.
 
-Loads the dock manipulation scene, reads camera parameters, uses the oracle
-to get the true 3D position of the cat wand, back-projects that position to
+Loads the home scene, reads camera parameters, uses the oracle
+to get the true 3D position of the wand, back-projects that position to
 2D (simulating a perfect detector), then recovers 3D via ray-plane intersection
 and measures the reconstruction error.
 
@@ -46,7 +46,7 @@ import numpy as np
 # Validation parameters
 # ---------------------------------------------------------------------------
 
-SCENE_PATH = PROJECT_ROOT / "assets" / "scenes" / "dock_scene.xml"
+SCENE_PATH = PROJECT_ROOT / "assets" / "scenes" / "home_scene.xml"
 
 PASS_THRESHOLD_M = 0.025  # 2.5 cm — generous for first-pass table-plane recovery
 RENDER_WIDTH = 640
@@ -113,10 +113,10 @@ def project_3d_to_2d(world_point, intrinsic, cam_pos, cam_rot):
 
 
 def get_wand_position(model, data):
-    """Return ground-truth 3D position of the cat_wand body."""
+    """Return ground-truth 3D position of the wand body."""
     import mujoco
 
-    body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "cat_wand")
+    body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "wand")
     return data.xpos[body_id].copy()
 
 
@@ -219,7 +219,7 @@ def validate(plane_z: float | None = None):
     wand_body = get_wand_position(model, data)
     wand_grasp = get_wand_grasp_position(model, data)
     _emit(
-        f"  cat_wand body  = [{wand_body[0]:.4f}, {wand_body[1]:.4f}, "
+        f"  wand body      = [{wand_body[0]:.4f}, {wand_body[1]:.4f}, "
         f"{wand_body[2]:.4f}]"
     )
     _emit(

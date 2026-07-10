@@ -171,8 +171,8 @@ robots:
     embodiment_profile: xlerobot_sim
     enabled: true
     settings:
-      # XLeRobot home scene with the cart-mounted cat wand.
-      mjcf_path: assets/scenes/cat_play_home_scene.xml
+      # XLeRobot home scene with the cart-mounted wand.
+      mjcf_path: assets/scenes/home_scene.xml
       render_width: 640
       render_height: 480
       control_hz: 2.0

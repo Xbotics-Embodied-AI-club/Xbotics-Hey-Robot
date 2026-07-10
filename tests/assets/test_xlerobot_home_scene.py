@@ -12,10 +12,7 @@ from hey_robot.robot_runtime.embodiments import get_embodiment_profile
 from hey_robot.robot_runtime.simulation.xlerobot_sim_driver import XLeRobotSimDriver
 
 SCENE_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "assets"
-    / "scenes"
-    / "cat_play_home_scene.xml"
+    Path(__file__).resolve().parents[2] / "assets" / "scenes" / "home_scene.xml"
 )
 
 
@@ -37,16 +34,16 @@ def _site_position(model, data, name: str) -> np.ndarray:
     return np.array(data.site_xpos[site_id], dtype=float)
 
 
-def test_cat_play_home_scene_mounts_wand_dock_to_robot_body() -> None:
-    driver = _cat_play_driver()
+def test_home_scene_mounts_wand_dock_to_robot_body() -> None:
+    driver = _home_scene_driver()
 
     dock0 = _body_position(driver.model, driver.data, "wand_dock")
-    wand0 = _body_position(driver.model, driver.data, "cat_wand")
+    wand0 = _body_position(driver.model, driver.data, "wand")
 
     driver._step_velocity(50, 0.0, 0.2, 0.0)
 
     dock1 = _body_position(driver.model, driver.data, "wand_dock")
-    wand1 = _body_position(driver.model, driver.data, "cat_wand")
+    wand1 = _body_position(driver.model, driver.data, "wand")
     dock_delta = dock1 - dock0
     wand_delta = wand1 - wand0
 
@@ -59,8 +56,8 @@ def test_cat_play_home_scene_mounts_wand_dock_to_robot_body() -> None:
     )
 
 
-def test_cat_play_home_scene_can_pick_wand_from_dock_with_oracle_path() -> None:
-    driver = _cat_play_driver()
+def test_home_scene_can_pick_wand_from_dock_with_oracle_path() -> None:
+    driver = _home_scene_driver()
     assert driver._dock_arm_side == "right"
     assert driver._dock_arm.joint_names == (
         "Rotation_2",
@@ -70,7 +67,7 @@ def test_cat_play_home_scene_can_pick_wand_from_dock_with_oracle_path() -> None:
         "Wrist_Roll_2",
     )
 
-    locate = _primitive(driver, "sim_locate_object", {"query": "cat_wand"})
+    locate = _primitive(driver, "sim_locate_object", {"query": "wand"})
     grasp_point = locate.data["samples"][0]
     grasp_axis = locate.data["grasp_axis"]
     assert grasp_point == pytest.approx([0.135, 0.0, 0.8377], abs=1e-3)
@@ -94,16 +91,16 @@ def test_cat_play_home_scene_can_pick_wand_from_dock_with_oracle_path() -> None:
     _primitive(driver, "move_arm_joints", {"joints": _joint_payload(pre_grasp)})
     _primitive(driver, "move_arm_joints", {"joints": _joint_payload(grasp)})
     close = _primitive(driver, "set_gripper", {"action": "close"})
-    closed_position = _body_position(driver.model, driver.data, "cat_wand")
+    closed_position = _body_position(driver.model, driver.data, "wand")
     _primitive(driver, "move_arm_joints", {"joints": _joint_payload(pre_grasp)})
-    lifted_position = _body_position(driver.model, driver.data, "cat_wand")
+    lifted_position = _body_position(driver.model, driver.data, "wand")
 
-    assert close.data["held_object"] == "cat_wand"
-    assert close.data["welds"]["cat_wand"] is True
+    assert close.data["held_object"] == "wand"
+    assert close.data["welds"]["wand"] is True
     assert lifted_position[2] > closed_position[2] + 0.03
 
 
-def _cat_play_driver() -> XLeRobotSimDriver:
+def _home_scene_driver() -> XLeRobotSimDriver:
     spec = RobotSpec(
         type="xlerobot_sim",
         family="xlerobot",

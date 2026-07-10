@@ -33,7 +33,7 @@ def main():
     # Set up renderer for recording
     renderer = mujoco.Renderer(session.model, height=480, width=640)
 
-    wand_id = mujoco.mj_name2id(session.model, mujoco.mjtObj.mjOBJ_BODY, "cat_wand")
+    wand_id = mujoco.mj_name2id(session.model, mujoco.mjtObj.mjOBJ_BODY, "wand")
     frames: list[np.ndarray] = []
 
     def record_steps(total_steps: int, sync_interval: int = 3):

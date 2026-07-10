@@ -173,7 +173,7 @@ def _resolve_mjcf_path(settings: dict[str, Any]) -> Path:
         if p.is_absolute():
             return p
         return Path.cwd() / p
-    return Path.cwd() / "assets" / "scenes" / "scene.xml"
+    return Path.cwd() / "assets" / "scenes" / "home_scene.xml"
 
 
 class XLeRobotSimDriver:
@@ -234,6 +234,7 @@ class XLeRobotSimDriver:
         self._dock_arm: Any = None
         self._dock_gripper: Any = None
         self._dock_arm_side = "left"
+        self._dock_manipulation_active = False
 
     # RobotDriver protocol
 
@@ -736,11 +737,11 @@ class XLeRobotSimDriver:
     # ---- internal simulation helpers ----
 
     def _initialize_dock_manipulation(self) -> None:
-        """Bind the left-arm dock kernels when the active scene contains a wand."""
+        """Bind the dock kernels when the active scene contains a wand."""
         import mujoco
 
         if (
-            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "cat_wand") < 0
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "wand") < 0
             or mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_EQUALITY, "grip_weld")
             < 0
         ):
@@ -793,7 +794,7 @@ class XLeRobotSimDriver:
     def _execute_dock_primitive(
         self, skill: RobotSkillAction
     ) -> RobotSkillResult | None:
-        """Execute left-arm manipulation primitives in cat-wand scenes."""
+        """Execute dock manipulation primitives in home scenes."""
         if self._dock_session is None:
             return None
         name = skill.name
@@ -802,7 +803,6 @@ class XLeRobotSimDriver:
             "arm_solve_position_ik",
             "sim_locate_object",
             "sim_get_object_state",
-            "reset_posture",
         }:
             if name == "move_arm_joints":
                 joints = skill.arguments.get("joints")
@@ -822,6 +822,7 @@ class XLeRobotSimDriver:
                 {"joint_positions": self._dock_arm.get_joint_positions()},
             )
         if name == "arm_solve_position_ik":
+            self._dock_manipulation_active = True
             target_local = self._xyz(skill.arguments.get("target_xyz"))
             target_world = self._base_to_world(target_local)
             target_axis_local = None
@@ -857,6 +858,7 @@ class XLeRobotSimDriver:
                 },
             )
         if name == "move_arm_joints":
+            self._dock_manipulation_active = True
             joints = dict(skill.arguments.get("joints") or {})
             positions = [
                 float(joints[joint_name])
@@ -877,6 +879,8 @@ class XLeRobotSimDriver:
                 {"joint_positions": self._dock_arm.get_joint_positions()},
             )
         if name == "set_gripper":
+            if not self._dock_manipulation_active:
+                return None
             command = str(skill.arguments.get("action") or "").lower()
             if command == "open":
                 self._set_dock_left_gripper(opened=True)
@@ -893,17 +897,9 @@ class XLeRobotSimDriver:
                     "welds": self._dock_gripper.weld_states(),
                 },
             )
-        if name == "reset_posture":
-            left_indices = self.adapter.arm_actuator_indices(self._dock_arm_side)
-            rest = self.adapter.arm_rest_positions()
-            self._move_dock_left_arm(
-                [float(rest[index]) for index in left_indices[:5]], 1.0
-            )
-            self._hold_head_camera()
-            return RobotSkillResult(True, "left arm returned home")
         if name == "sim_locate_object":
             query = str(skill.arguments.get("query") or "").strip().lower()
-            if query not in {"wand", "cat_wand", "逗猫棒", "棒", "玩具棒", "toy"}:
+            if query not in {"wand", "棒", "玩具棒", "toy"}:
                 return RobotSkillResult(
                     True,
                     f"object not found: {query}",
@@ -917,10 +913,10 @@ class XLeRobotSimDriver:
             count = max(1, int(skill.arguments.get("sample_count", 1)))
             return RobotSkillResult(
                 True,
-                "located cat_wand",
+                "located wand",
                 {
                     "operation_success": True,
-                    "object_name": "cat_wand",
+                    "object_name": "wand",
                     "samples": [list(point) for _ in range(count)],
                     "grasp_axis": list(axis),
                     "source": "mujoco_oracle_base_frame",
@@ -928,7 +924,7 @@ class XLeRobotSimDriver:
             )
         if name == "sim_get_object_state":
             objects = {
-                "cat_wand": list(self._body_position_base("cat_wand")),
+                "wand": list(self._body_position_base("wand")),
                 "wand_dock": list(self._body_position_base("wand_dock")),
             }
             return RobotSkillResult(
@@ -1005,6 +1001,7 @@ class XLeRobotSimDriver:
         self._dock_gripper._is_open = opened
         if opened:
             self._dock_gripper._held_object = None
+            self._dock_manipulation_active = False
             self._sync_active_dock_welds()
         else:
             self._activate_dock_grip_weld()
@@ -1045,7 +1042,7 @@ class XLeRobotSimDriver:
         self.model.eq_data[grip_id, :3] = 0.0
         self.model.eq_data[grip_id, 3:6] = relative_position
         self.model.eq_data[grip_id, 6:10] = relative_quaternion
-        self._dock_gripper._held_object = "cat_wand"
+        self._dock_gripper._held_object = "wand"
         self._sync_active_dock_welds()
 
     def _sync_active_dock_welds(self) -> None:

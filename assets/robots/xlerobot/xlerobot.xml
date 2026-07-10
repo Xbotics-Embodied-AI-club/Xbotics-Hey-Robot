@@ -34,7 +34,7 @@
   <mesh name="drive_motor_mount-v4-3" content_type="model/stl" file="meshes/drive_motor_mount-v4-3.stl" scale="0.001 0.001 0.001" /><mesh name="base_plate_layer1-v5-1" content_type="model/stl" file="meshes/base_plate_layer1-v5-1.stl" scale="0.001 0.001 0.001" /><mesh name="ST3215_Servo_Motor-v1-2" content_type="model/stl" file="meshes/ST3215_Servo_Motor-v1-2.stl" scale="0.001 0.001 0.001" /><mesh name="3_8-Hex-Bore-Plastic-VersaHub-217-5828-v2-2" content_type="model/stl" file="meshes/3_8-Hex-Bore-Plastic-VersaHub-217-5828-v2-2.stl" scale="0.001 0.001 0.001" /><mesh name="4-Omni-Directional-Wheel_Single_Body-v1-2" content_type="model/stl" file="meshes/simplify_4-Omni-Directional-Wheel_Single_Body-v1-2.stl" scale="0.001 0.001 0.001" /><mesh name="drive_motor_mount-v4-2" content_type="model/stl" file="meshes/drive_motor_mount-v4-2.stl" scale="0.001 0.001 0.001" /><mesh name="ST3215_Servo_Motor-v1-1" content_type="model/stl" file="meshes/ST3215_Servo_Motor-v1-1.stl" scale="0.001 0.001 0.001" /><mesh name="3_8-Hex-Bore-Plastic-VersaHub-217-5828-v2-1" content_type="model/stl" file="meshes/3_8-Hex-Bore-Plastic-VersaHub-217-5828-v2-1.stl" scale="0.001 0.001 0.001" /><mesh name="4-Omni-Directional-Wheel_Single_Body-v1-1" content_type="model/stl" file="meshes/simplify_4-Omni-Directional-Wheel_Single_Body-v1-1.stl" scale="0.001 0.001 0.001" /><mesh name="drive_motor_mount-v4-1" content_type="model/stl" file="meshes/drive_motor_mount-v4-1.stl" scale="0.001 0.001 0.001" /><mesh name="ST3215_Servo_Motor-v1" content_type="model/stl" file="meshes/ST3215_Servo_Motor-v1.stl" scale="0.001 0.001 0.001" /><mesh name="3_8-Hex-Bore-Plastic-VersaHub-217-5828-v2" content_type="model/stl" file="meshes/3_8-Hex-Bore-Plastic-VersaHub-217-5828-v2.stl" scale="0.001 0.001 0.001" /><mesh name="4-Omni-Directional-Wheel_Single_Body-v1" content_type="model/stl" file="meshes/simplify_4-Omni-Directional-Wheel_Single_Body-v1.stl" scale="0.001 0.001 0.001" /><mesh name="servo_controller_mount-v1" content_type="model/stl" file="meshes/servo_controller_mount-v1.stl" scale="0.001 0.001 0.001" /><mesh name="lipo_battery_mount-v1" content_type="model/stl" file="meshes/lipo_battery_mount-v1.stl" scale="0.001 0.001 0.001" /><mesh name="Battery---Battery-5.2-Ah-DC5521-Plug-v2" content_type="model/stl" file="meshes/Battery---Battery-5.2-Ah-DC5521-Plug-v2.stl" scale="0.001 0.001 0.001" /><mesh name="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff" content_type="model/stl" file="meshes/94868A713_NO-THREADS_Female-Threaded-Hex-Standoff.stl" scale="0.001 0.001 0.001" /><mesh name="base_plate_layer2-v1" content_type="model/stl" file="meshes/base_plate_layer2-v1.stl" scale="0.001 0.001 0.001" /></asset>
 
   <worldbody>
-    <body name="root">
+    <body name="root" pos="10 3 0">
       <inertial pos="0 0 0" mass="0.001" diaginertia="1e-06 1e-06 1e-06" />
       <body name="root_arm_1_link_1">
         <inertial pos="0 0 0" mass="0.001" diaginertia="1e-06 1e-06 1e-06" />
@@ -177,6 +177,86 @@
                 </body>
               </body>
             </body>
+            <body name="Base_2" pos="0.04 0.133 0.76" quat="0.707105 0 0 0.707108">
+              <inertial pos="-2.45961e-07 0.0311418 0.0175747" quat="0.681339 0.189731 -0.188766 0.681283" mass="0.193184" diaginertia="0.000182725 0.000137031 0.000131462" />
+              <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.3 0.3 0.3 1" mesh="Base" />
+              <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.02 0.02 0.02 1" mesh="Base_Motor" />
+              <geom type="mesh" rgba="0 0 0 0" mesh="Base" group="3" />
+              <geom type="mesh" rgba="0 0 0 0" mesh="Base_Motor" group="3" />
+              <body name="Rotation_Pitch_2" pos="0 -0.0452 0.0165" quat="0.707105 0.707108 0 0">
+                <inertial pos="-9.07886e-05 0.0590972 0.031089" quat="0.363978 0.441169 -0.623108 0.533504" mass="0.119226" diaginertia="5.94278e-05 5.89975e-05 3.13712e-05" />
+                <joint name="Rotation_2" pos="0 0 0" axis="0 -1 0" range="-2.1 2.1" />
+                <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.3 0.3 0.3 1" mesh="Rotation_Pitch" />
+                <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.02 0.02 0.02 1" mesh="Rotation_Pitch_Motor" />
+                <geom type="mesh" rgba="0 0 0 0" mesh="Rotation_Pitch" group="3" />
+                <geom type="mesh" rgba="0 0 0 0" mesh="Rotation_Pitch_Motor" group="3" />
+                <body name="Upper_Arm_2" pos="0 0.1025 0.0306" quat="0.707105 0.707108 0 0">
+                  <inertial pos="-1.72052e-05 0.0701802 0.00310545" quat="0.50104 0.498994 -0.493562 0.50632" mass="0.162409" diaginertia="0.000213312 0.000167164 7.01522e-05" />
+                  <joint name="Pitch_2" pos="0 0 0" axis="-1 0 0" range="-0.1 3.45" />
+                  <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.3 0.3 0.3 1" mesh="Upper_Arm" />
+                  <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.02 0.02 0.02 1" mesh="Upper_Arm_Motor" />
+                  <geom type="mesh" rgba="0 0 0 0" mesh="Upper_Arm" group="3" />
+                  <geom type="mesh" rgba="0 0 0 0" mesh="Upper_Arm_Motor" group="3" />
+                  <body name="Lower_Arm_2" pos="0 0.11257 0.028" quat="0.707105 -0.707108 0 0">
+                    <inertial pos="-0.00339604 0.00137796 0.0768007" quat="0.701995 0.0787996 0.0645626 0.704859" mass="0.147968" diaginertia="0.000138803 0.000107748 4.84242e-05" />
+                    <joint name="Elbow_2" pos="0 0 0" axis="1 0 0" range="-0.2 3.14159" />
+                    <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.3 0.3 0.3 1" mesh="Lower_Arm" />
+                    <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.02 0.02 0.02 1" mesh="Lower_Arm_Motor" />
+                    <geom type="mesh" rgba="0 0 0 0" mesh="Lower_Arm" group="3" />
+                    <geom type="mesh" rgba="0 0 0 0" mesh="Lower_Arm_Motor" group="3" />
+                    <body name="Wrist_Pitch_Roll_2" pos="0 0.0052 0.1349" quat="0.707105 -0.707108 0 0">
+                      <inertial pos="-0.00852653 -0.0352279 -2.34622e-05" quat="-0.0522806 0.705235 0.0549524 0.704905" mass="0.0661321" diaginertia="3.45403e-05 2.39041e-05 1.94704e-05" />
+                      <joint name="Wrist_Pitch_2" pos="0 0 0" axis="1 0 0" range="-1.8 1.8" />
+                      <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.3 0.3 0.3 1" mesh="Wrist_Pitch_Roll" />
+                      <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.02 0.02 0.02 1" mesh="Wrist_Pitch_Roll_Motor" />
+                      <geom type="mesh" rgba="0 0 0 0" mesh="Wrist_Pitch_Roll" group="3" />
+                      <geom type="mesh" rgba="0 0 0 0" mesh="Wrist_Pitch_Roll_Motor" group="3" />
+                      <body name="Fixed_Jaw_2" pos="0 -0.0601 0" quat="0.707105 0 0.707108 0">
+                        <inertial pos="0.00552377 -0.0280167 0.000483583" quat="0.41836 0.620891 -0.350644 0.562599" mass="0.0929859" diaginertia="5.03136e-05 4.64098e-05 2.72961e-05" />
+                        <joint name="Wrist_Roll_2" pos="0 0 0" axis="0 -1 0" range="-3.14159 3.14159" />
+                        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.3 0.3 0.3 1" mesh="Fixed_Jaw" />
+                        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.02 0.02 0.02 1" mesh="Fixed_Jaw_Motor" />
+                        <geom type="mesh" rgba="0 0 0 0" mesh="Fixed_Jaw_part1.ply" group="3" />
+                        <geom type="mesh" rgba="0 0 0 0" mesh="Fixed_Jaw_part2.ply" group="3" />
+                        <body name="Moving_Jaw_2" pos="-0.0202 -0.0244 0" quat="3.45518e-07 -0.0940644 0.995566 -3.65692e-06">
+                          <inertial pos="-0.00161745 -0.0303473 0.000449646" quat="0.696562 0.716737 -0.0239844 -0.0227026" mass="0.0202444" diaginertia="1.11265e-05 8.99651e-06 2.99548e-06" />
+                          <joint name="Jaw_2" pos="0 0 0" axis="0 0 1" range="0 1.7" />
+                          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.3 0.3 0.3 1" mesh="Moving_Jaw" />
+                          <geom type="mesh" rgba="0 0 0 0" mesh="Moving_Jaw_part1.ply" group="3" />
+                          <geom type="mesh" rgba="0 0 0 0" mesh="Moving_Jaw_part2.ply" group="3" />
+                          <geom type="mesh" rgba="0 0 0 0" mesh="Moving_Jaw_part3.ply" group="3" />
+                          <body name="Moving_Jaw_tip_2" pos="-0.01 -0.073 0">
+                            <inertial pos="0 0 0" mass="0.001" diaginertia="1e-06 1e-06 1e-06" />
+                          </body>
+                        </body>
+                        <body name="Fixed_Jaw_tip_2" pos="0.01 -0.097 0">
+                          <inertial pos="0 0 0" mass="0.001" diaginertia="1e-06 1e-06 1e-06" />
+                        </body>
+                        <body name="Left_Arm_Camera" pos="0 -0.02 0.05" quat="0.499998 0.5 -0.500002 -0.5">
+                          <inertial pos="0 0 0" mass="0.001" diaginertia="1e-06 1e-06 1e-06" />
+                          <geom name="Left_Arm_Camera_visual" pos="-0.015 -0.026 0" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.3 0.3 0.3 1" mesh="XLeRobot_camera1" />
+                          <geom name="Left_Arm_Camera_visual_2" pos="-0.015 -0.026 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.02 0.02 0.02 1" mesh="XLeRobot_camera2" />
+                        <camera name="left_wrist" pos="0 0.04 0" quat="0.7071068 0.7071068 0 0" fovy="74.485" /></body>
+                      </body>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+            <body name="wand_dock" pos="0.10 0 0.72">
+              <geom name="dock_base" type="cylinder" size="0.04 0.015"
+                    rgba="0.4 0.4 0.5 1" mass="0.1"/>
+              <geom name="pillar_1" type="cylinder" size="0.005 0.06"
+                    pos="0.015 0.015 0.065" rgba="0.35 0.35 0.45 1" mass="0.01"/>
+              <geom name="pillar_2" type="cylinder" size="0.005 0.06"
+                    pos="-0.015 0.015 0.065" rgba="0.35 0.35 0.45 1" mass="0.01"/>
+              <geom name="pillar_3" type="cylinder" size="0.005 0.06"
+                    pos="0.015 -0.015 0.065" rgba="0.35 0.35 0.45 1" mass="0.01"/>
+              <geom name="pillar_4" type="cylinder" size="0.005 0.06"
+                    pos="-0.015 -0.015 0.065" rgba="0.35 0.35 0.45 1" mass="0.01"/>
+              <site name="dock_insertion" pos="0 0 0.10"
+                    size="0.005" rgba="0 1 0 0.5"/>
+            </body>
             <body name="top_base_link" pos="0.07 0 0.73">
               <inertial pos="0 0 0" quat="0.707107 0 0 0.707107" mass="4.3542" diaginertia="0.005 0.0045 0.0045" />
               <geom name="top_base_link_visual1" pos="0.016 -0.006 -0.727" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.3 0.3 0.3 1" mesh="topbase1" />
@@ -214,4 +294,4 @@
       </body>
     </body>
   </worldbody>
-<actuator><velocity name="base_x" joint="root_x_axis_joint" kv="10" /><velocity name="base_y" joint="root_y_axis_joint" kv="10" /><velocity name="base_yaw" joint="root_z_rotation_joint" kv="10" /><position name="Rotation_L" joint="Rotation" kp="50" dampratio="1" forcerange="-35 35" ctrlrange="-3.14158 3.14158" /><position name="Pitch_L" joint="Pitch" kp="50" dampratio="1" forcerange="-35 35" ctrlrange="-3.14158 3.14158" /><position name="Elbow_L" joint="Elbow" kp="50" dampratio="1" forcerange="-35 35" ctrlrange="-3.14158 3.14158" /><position name="Wrist_Pitch_L" joint="Wrist_Pitch" kp="50" dampratio="1" forcerange="-35 35" ctrlrange="-3.14158 3.14158" /><position name="Wrist_Roll_L" joint="Wrist_Roll" kp="50" dampratio="1" forcerange="-35 35" ctrlrange="-3.14158 3.14158" /><position name="Jaw_L" joint="Jaw" kp="50" dampratio="1" forcerange="-35 35" ctrlrange="-3.14158 3.14158" /><general name="wheel1" joint="root_x_axis_joint" gainprm="0" biasprm="0" /><general name="wheel2" joint="root_y_axis_joint" gainprm="0" biasprm="0" /><general name="wheel3" joint="root_z_rotation_joint" gainprm="0" biasprm="0" /><position name="head_pan_hold" joint="head_pan_joint" kp="25" dampratio="1" forcerange="-3 3" ctrlrange="-1.57 1.57" /><position name="head_tilt_hold" joint="head_tilt_joint" kp="25" dampratio="1" forcerange="-3 3" ctrlrange="-1.57 1.57" /></actuator></mujoco>
+<actuator><velocity name="base_x" joint="root_x_axis_joint" kv="10" /><velocity name="base_y" joint="root_y_axis_joint" kv="10" /><velocity name="base_yaw" joint="root_z_rotation_joint" kv="10" /><position name="Rotation_R" joint="Rotation_2" kp="50" dampratio="1" forcerange="-35 35" ctrlrange="-3.14158 3.14158" /><position name="Pitch_R" joint="Pitch_2" kp="50" dampratio="1" forcerange="-35 35" ctrlrange="-3.14158 3.14158" /><position name="Elbow_R" joint="Elbow_2" kp="50" dampratio="1" forcerange="-35 35" ctrlrange="-3.14158 3.14158" /><position name="Wrist_Pitch_R" joint="Wrist_Pitch_2" kp="50" dampratio="1" forcerange="-35 35" ctrlrange="-3.14158 3.14158" /><position name="Wrist_Roll_R" joint="Wrist_Roll_2" kp="50" dampratio="1" forcerange="-35 35" ctrlrange="-3.14158 3.14158" /><position name="Jaw_R" joint="Jaw_2" kp="50" dampratio="1" forcerange="-35 35" ctrlrange="-3.14158 3.14158" /><position name="Rotation_L" joint="Rotation" kp="50" dampratio="1" forcerange="-35 35" ctrlrange="-3.14158 3.14158" /><position name="Pitch_L" joint="Pitch" kp="50" dampratio="1" forcerange="-35 35" ctrlrange="-3.14158 3.14158" /><position name="Elbow_L" joint="Elbow" kp="50" dampratio="1" forcerange="-35 35" ctrlrange="-3.14158 3.14158" /><position name="Wrist_Pitch_L" joint="Wrist_Pitch" kp="50" dampratio="1" forcerange="-35 35" ctrlrange="-3.14158 3.14158" /><position name="Wrist_Roll_L" joint="Wrist_Roll" kp="50" dampratio="1" forcerange="-35 35" ctrlrange="-3.14158 3.14158" /><position name="Jaw_L" joint="Jaw" kp="50" dampratio="1" forcerange="-35 35" ctrlrange="-3.14158 3.14158" /><general name="wheel1" joint="root_x_axis_joint" gainprm="0" biasprm="0" /><general name="wheel2" joint="root_y_axis_joint" gainprm="0" biasprm="0" /><general name="wheel3" joint="root_z_rotation_joint" gainprm="0" biasprm="0" /><position name="head_pan_hold" joint="head_pan_joint" kp="25" dampratio="1" forcerange="-3 3" ctrlrange="-1.57 1.57" /><position name="head_tilt_hold" joint="head_tilt_joint" kp="25" dampratio="1" forcerange="-3 3" ctrlrange="-1.57 1.57" /></actuator></mujoco>
