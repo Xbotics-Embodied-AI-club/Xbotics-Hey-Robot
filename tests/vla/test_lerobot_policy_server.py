@@ -12,6 +12,8 @@ import pytest
 import torch
 from PIL import Image
 
+pytest.importorskip("starlette", reason="VLA HTTP server dependency is not installed")
+
 
 def _load_server_module() -> Any:
     path = Path("scripts/vla/serve_lerobot_policy.py")

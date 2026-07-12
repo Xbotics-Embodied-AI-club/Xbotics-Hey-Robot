@@ -9,8 +9,18 @@ from __future__ import annotations
 
 import time
 import uuid
-from dataclasses import asdict, dataclass, field, fields
-from typing import TYPE_CHECKING, Any, get_args, get_origin, get_type_hints
+from dataclasses import MISSING, asdict, dataclass, field, fields, is_dataclass
+from types import UnionType
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    TypeVar,
+    Union,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 if TYPE_CHECKING:
     from _typeshed import DataclassInstance
@@ -115,7 +125,10 @@ class RobotObservation:
 class RobotStatus:
     envelope: Envelope
     frame_id: int | None = None
-    state: str = "unknown"
+    state: Literal["idle", "executing", "error", "offline", "unknown"] = "unknown"
+    location_id: str | None = None
+    motion_state: Literal["idle", "moving", "stopped", "unknown"] = "unknown"
+    battery_percentage: float | None = None
     task: str | None = None
     skill_id: str | None = None
     success: bool | None = None
@@ -126,15 +139,17 @@ class RobotStatus:
 @dataclass(frozen=True)
 class SkillIntent:
     envelope: Envelope
-    skill_id: str = field(default_factory=lambda: _new_id("skill"))
-    name: str = ""
-    arguments: dict[str, Any] = field(default_factory=dict)
-    objective: str = ""
+    skill_id: str
+    goal_id: str
+    task_id: str
+    deliberation_id: str
+    intent_kind: Literal["skill", "observation"]
+    name: str
+    arguments: dict[str, Any]
+    objective: str
     priority: int = 0
-    interrupt: bool = False
     timeout_sec: float | None = None
     feedback_mode: str = "status"
-    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -161,8 +176,131 @@ class RobotAction:
     values: list[float]
     action_id: str = field(default_factory=lambda: _new_id("act"))
     skill_id: str = ""
+    goal_id: str = ""
+    task_id: str = ""
+    deliberation_id: str = ""
+    intent_kind: Literal["skill", "observation"] = "skill"
     timestamp: float = field(default_factory=time.time)
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+CriterionType = Literal["robot_state", "object_relation", "evidence_present"]
+CriterionPredicate = Literal["equals", "at", "near", "inside", "held_by", "observed"]
+
+
+@dataclass(frozen=True)
+class GoalBudgets:
+    max_wall_time_sec: float = 1800.0
+    max_deliberations: int = 20
+    max_skills: int = 12
+    min_battery_percentage: float = 20.0
+
+
+@dataclass(frozen=True)
+class SuccessCriterion:
+    criterion_id: str
+    criterion_type: CriterionType
+    subject_id: str
+    predicate: CriterionPredicate
+    object_id: str
+    max_age_sec: float
+
+
+@dataclass(frozen=True)
+class EvidenceFact:
+    evidence_id: str
+    goal_id: str
+    source_kind: Literal["robot_status", "skill_result"]
+    source_id: str
+    observed_at: float
+    frame_id: int | None
+    subject_id: str
+    predicate: CriterionPredicate
+    object_id: str
+    artifacts: tuple[ArtifactRef | ImageRef, ...] = ()
+
+
+@dataclass(frozen=True)
+class GoalCommand:
+    envelope: Envelope
+    command_id: str
+    action: Literal["create", "cancel"]
+    goal_id: str | None = None
+    objective: str = ""
+    contract_template_id: str | None = None
+    success_criteria: tuple[SuccessCriterion, ...] = ()
+    budgets: GoalBudgets = field(default_factory=GoalBudgets)
+
+
+@dataclass(frozen=True)
+class GoalSnapshot:
+    goal_id: str
+    version: int
+    task_id: str
+    contract_id: str
+    contract_hash: str
+    objective: str
+    success_criteria: tuple[SuccessCriterion, ...]
+    status: Literal[
+        "pending", "active", "waiting", "blocked", "completed", "failed", "cancelled"
+    ]
+    termination_reason: Literal["cancel", "budget", "emergency"] | None = None
+
+
+@dataclass(frozen=True)
+class ActionSnapshot:
+    skill_id: str
+    deliberation_id: str
+    intent_kind: Literal["skill", "observation"]
+    name: str
+    objective: str
+    arguments: dict[str, Any]
+    status: Literal[
+        "persisted",
+        "publishing",
+        "published",
+        "accepted",
+        "running",
+        "completed",
+        "failed",
+        "interrupted",
+        "cancelled",
+        "unknown",
+        "reconciled_idle",
+    ]
+
+
+@dataclass(frozen=True)
+class BudgetState:
+    elapsed_wall_time_sec: float
+    deliberations_used: int
+    skills_used: int
+    battery_percentage: float | None
+
+
+@dataclass(frozen=True)
+class ActionProposal:
+    intent_kind: Literal["skill", "observation"]
+    skill_name: str
+    objective: str
+    arguments: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class FailurePayload:
+    stage: str
+    code: str
+    component: str
+    message: str
+    details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class TaskEvaluationPayload:
+    outcome: Literal["satisfied", "inconclusive"]
+    reason: str
+    evidence_ids: tuple[str, ...] = ()
+    missing_criteria_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -170,7 +308,7 @@ class SkillResult:
     envelope: Envelope
     skill_id: str
     name: str = ""
-    status: str = "unknown"
+    status: Literal["completed", "failed", "interrupted", "unknown"] = "unknown"
     success: bool | None = None
     steps_executed: int = 0
     progress: float = 0.0
@@ -179,33 +317,227 @@ class SkillResult:
     frame_id: int | None = None
     error: str | None = None
     observations: list[ImageRef] = field(default_factory=list)
+    evidence: tuple[EvidenceFact, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class DeliberationRequest:
+    envelope: Envelope
+    deliberation_id: str
+    trigger_event_id: str
+    goal: GoalSnapshot
+    robot_status: RobotStatus | None
+    robot_observation: RobotObservation | None
+    actions: tuple[ActionSnapshot, ...]
+    evidence: tuple[EvidenceFact, ...]
+    latest_skill_result: SkillResult | None
+    budget_state: BudgetState
+
+
+@dataclass(frozen=True)
+class DeliberationResult:
+    envelope: Envelope
+    deliberation_id: str
+    request_hash: str
+    goal_id: str
+    task_id: str
+    status: Literal["completed", "action_proposed", "failed"]
+    proposal: ActionProposal | None = None
+    failure: FailurePayload | None = None
+    evaluation: TaskEvaluationPayload | None = None
+
+
+@dataclass(frozen=True)
+class GoalEvent:
+    envelope: Envelope
+    event_id: str
+    goal_id: str
+    task_id: str
+    status: Literal[
+        "pending", "active", "waiting", "blocked", "completed", "failed", "cancelled"
+    ]
+    active_skill_id: str | None = None
+    active_control_id: str | None = None
+    termination_reason: Literal["cancel", "budget", "emergency"] | None = None
+    evaluation: TaskEvaluationPayload | None = None
+    failure: FailurePayload | None = None
+
+
+@dataclass(frozen=True)
+class SkillControl:
+    envelope: Envelope
+    control_id: str
+    action: Literal["interrupt", "emergency_stop"]
+    target_skill_id: str | None
+    goal_id: str | None
+    reason: str
+
+
+@dataclass(frozen=True)
+class SkillControlResult:
+    envelope: Envelope
+    control_id: str
+    action: Literal["interrupt", "emergency_stop"]
+    target_skill_id: str | None
+    status: Literal["completed", "failed", "unknown"]
+    robot_idle_confirmed: bool
+    error: str | None = None
 
 
 def to_payload(message: DataclassInstance) -> dict[str, Any]:
     return asdict(message)
 
 
-def from_payload[T: DataclassInstance](cls: type[T], payload: dict[str, Any]) -> T:
-    kwargs: dict[str, Any] = {}
+T = TypeVar("T")
+
+
+def from_payload(cls: type[T], payload: dict[str, Any]) -> T:
+    """Decode a protocol message without accepting unknown or malformed fields."""
+    if not isinstance(payload, dict):
+        raise TypeError(f"{cls.__name__} payload must be an object")
+    known = {item.name for item in fields(cls)}
+    unknown = set(payload) - known
+    if unknown:
+        raise ValueError(f"{cls.__name__} has unknown fields: {sorted(unknown)}")
     hints = get_type_hints(cls)
+    kwargs: dict[str, Any] = {}
     for item in fields(cls):
-        value = payload.get(item.name)
-        if value is None:
+        if item.name not in payload:
+            if item.default is MISSING and item.default_factory is MISSING:
+                raise ValueError(f"{cls.__name__} missing required field: {item.name}")
             continue
-        target = hints.get(item.name, item.type)
-        if item.name == "envelope" and isinstance(value, dict):
-            kwargs[item.name] = Envelope(**value)
-            continue
-        origin = get_origin(target)
-        args = get_args(target)
-        if origin is list and args and isinstance(value, list):
-            subtype = args[0]
-            if subtype in {MediaRef, ImageRef, ArtifactRef}:
-                kwargs[item.name] = [
-                    subtype(**entry) if isinstance(entry, dict) else entry
-                    for entry in value
-                ]
+        kwargs[item.name] = _decode_value(
+            payload[item.name], hints.get(item.name, item.type)
+        )
+    result = cls(**kwargs)
+    _validate_message(result)
+    return result
+
+
+def _decode_value(value: Any, target: Any) -> Any:
+    if value is None:
+        if type(None) in get_args(target):
+            return None
+        raise TypeError(f"expected {target!r}, got null")
+    origin = get_origin(target)
+    args = get_args(target)
+    if origin in (Union, UnionType):
+        errors: list[str] = []
+        for subtype in args:
+            if subtype is type(None):
                 continue
-        kwargs[item.name] = value
-    return cls(**kwargs)  # type: ignore[arg-type]
+            try:
+                return _decode_value(value, subtype)
+            except (TypeError, ValueError) as exc:
+                errors.append(str(exc))
+        raise TypeError(" | ".join(errors) or f"invalid union value {value!r}")
+    if origin is Literal:
+        if value not in args:
+            raise ValueError(f"invalid enum {value!r}; expected one of {args!r}")
+        return value
+    if origin in (list, tuple):
+        if not isinstance(value, (list, tuple)):
+            raise TypeError(f"expected array for {target!r}")
+        subtype = args[0] if args else Any
+        decoded = [_decode_value(entry, subtype) for entry in value]
+        return tuple(decoded) if origin is tuple else decoded
+    if origin is dict:
+        if not isinstance(value, dict):
+            raise TypeError(f"expected object for {target!r}")
+        return dict(value)
+    if target is Any:
+        return value
+    if isinstance(target, type) and is_dataclass(target):
+        if isinstance(value, target):
+            return value
+        if not isinstance(value, dict):
+            raise TypeError(f"expected object for {target.__name__}")
+        return from_payload(target, value)
+    if (
+        target is float
+        and isinstance(value, (int, float))
+        and not isinstance(value, bool)
+    ):
+        return float(value)
+    if target is int and isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if target is bool and isinstance(value, bool):
+        return value
+    if target is str and isinstance(value, str):
+        return value
+    if isinstance(target, type) and isinstance(value, target):
+        return value
+    raise TypeError(f"expected {target!r}, got {type(value).__name__}")
+
+
+def _validate_message(message: Any) -> None:
+    if isinstance(message, SuccessCriterion):
+        allowed = {
+            "robot_state": {"equals"},
+            "object_relation": {"at", "near", "inside", "held_by"},
+            "evidence_present": {"observed"},
+        }
+        if message.predicate not in allowed[message.criterion_type]:
+            raise ValueError(
+                f"criterion predicate {message.predicate!r} is invalid for {message.criterion_type!r}"
+            )
+        if not message.criterion_id or not message.subject_id or not message.object_id:
+            raise ValueError("SuccessCriterion ids must be non-empty")
+        if message.max_age_sec <= 0:
+            raise ValueError("SuccessCriterion max_age_sec must be positive")
+    if isinstance(message, EvidenceFact):
+        if not message.evidence_id or not message.goal_id or not message.source_id:
+            raise ValueError("EvidenceFact identity fields must be non-empty")
+        if message.source_kind == "robot_status":
+            if message.frame_id is None:
+                raise ValueError("robot_status evidence requires frame_id")
+            expected = f"status:{message.source_id.split(':')[1] if message.source_id.startswith('status:') else ''}:{message.frame_id}"
+            if message.source_id != expected:
+                raise ValueError(
+                    "robot_status evidence source_id must match status:<robot_id>:<frame_id>"
+                )
+    if isinstance(message, GoalCommand):
+        if not message.command_id:
+            raise ValueError("GoalCommand command_id must be non-empty")
+        if message.action == "create":
+            if message.goal_id is not None or not message.envelope.robot_id:
+                raise ValueError("create GoalCommand requires robot_id and no goal_id")
+            if not message.objective or not message.success_criteria:
+                raise ValueError(
+                    "create GoalCommand requires objective and success_criteria"
+                )
+        elif message.action == "cancel" and not message.goal_id:
+            raise ValueError("cancel GoalCommand requires goal_id")
+    if isinstance(message, SkillResult):
+        if message.status == "completed" and message.success is not True:
+            raise ValueError("completed SkillResult requires success=True")
+        if message.status in {"failed", "interrupted"} and message.success is not False:
+            raise ValueError(f"{message.status} SkillResult requires success=False")
+        if message.status == "unknown" and message.success is not None:
+            raise ValueError("unknown SkillResult requires success=None")
+        for fact in message.evidence:
+            if fact.source_kind != "skill_result" or fact.source_id != message.skill_id:
+                raise ValueError(
+                    "SkillResult evidence must be sourced by the result skill_id"
+                )
+    if isinstance(message, DeliberationResult):
+        if message.status == "action_proposed" and message.proposal is None:
+            raise ValueError("action_proposed DeliberationResult requires proposal")
+        if message.status != "action_proposed" and message.proposal is not None:
+            raise ValueError(
+                "only action_proposed DeliberationResult may contain proposal"
+            )
+        if message.status == "completed" and (
+            message.evaluation is None or message.evaluation.outcome != "satisfied"
+        ):
+            raise ValueError(
+                "completed DeliberationResult requires satisfied evaluation"
+            )
+        if message.status == "failed" and message.failure is None:
+            raise ValueError("failed DeliberationResult requires failure")
+    if isinstance(message, SkillControlResult):
+        if message.status == "completed" and not message.robot_idle_confirmed:
+            raise ValueError("completed SkillControlResult requires idle confirmation")
+        if message.status != "completed" and message.robot_idle_confirmed:
+            raise ValueError("non-completed SkillControlResult cannot confirm idle")

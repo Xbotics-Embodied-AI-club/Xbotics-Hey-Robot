@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from hey_robot.cognition.autonomous.store import AutonomyStore
 from hey_robot.config import DeploymentConfig
 from hey_robot.config.validation import validate_deployment
 from hey_robot.skill_os.registry import registry_from_config
@@ -42,7 +43,12 @@ class HealthReportService:
         live: bool = False,
     ) -> None:
         self.config = config
-        self.task_runs = _task_run_store(episode_dir or config.resources.episodes_root)
+        del episode_dir
+        self.autonomy_store = AutonomyStore(
+            Path(config.resources.runtime_dir)
+            / config.deployment.id
+            / "autonomy.sqlite3"
+        )
         self.config_path = Path(config_path) if config_path is not None else None
         self.live = live
 
@@ -138,29 +144,31 @@ class HealthReportService:
 
     def _recent_task_reports(self, *, robot_id: str | None) -> list[HealthReport]:
         reports: list[HealthReport] = []
-        for task in self.task_runs.list_recent(50):
-            if robot_id and task.robot_id != robot_id:
+        for goal in self.autonomy_store.goals_recent(50):
+            if robot_id and goal["robot_id"] != robot_id:
                 continue
-            if task.status not in {"failed", "recovering"} and not task.failure_reason:
+            if goal["status"] not in {"failed", "blocked"}:
                 continue
+            snapshot = dict(goal.get("snapshot") or {})
+            reason = goal.get("termination_reason") or goal["status"]
             reports.append(
                 HealthReport(
-                    component=f"task.{task.task_id}",
-                    status="failed" if task.status == "failed" else "degraded",
-                    severity="error" if task.status == "failed" else "warning",
-                    evidence=task.failure_reason
-                    or (task.recovery or {}).get("summary")
-                    or f"Task {task.root_task} is {task.status}.",
+                    component=f"goal.{goal['goal_id']}",
+                    status="failed" if goal["status"] == "failed" else "degraded",
+                    severity="error" if goal["status"] == "failed" else "warning",
+                    evidence=f"Goal {snapshot.get('objective') or goal['goal_id']} is {goal['status']}: {reason}",
                     impacted_skills=tuple(
-                        skill_id for skill_id in task.skill_ids if skill_id
+                        action["skill_id"]
+                        for action in self.autonomy_store.actions_for_goal(
+                            goal["goal_id"]
+                        )
                     ),
-                    fix_hint=_task_fix_hint(task.failure_reason),
-                    source="task_run",
+                    fix_hint=_task_fix_hint(str(reason)),
+                    source="autonomy_store",
                     metadata={
-                        "episode_id": task.episode_id,
-                        "root_task": task.root_task,
-                        "status": task.status,
-                        "recovery": dict(task.recovery or {}),
+                        "goal_id": goal["goal_id"],
+                        "objective": snapshot.get("objective"),
+                        "status": goal["status"],
                     },
                 )
             )
@@ -453,12 +461,6 @@ def _skill_matches_robot(
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
-
-
-def _task_run_store(root: str | Path):
-    from hey_robot.cognition.task_run import TaskRunStore
-
-    return TaskRunStore(root)
 
 
 def _load_function(path: Path, name: str):

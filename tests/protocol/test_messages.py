@@ -211,26 +211,31 @@ class TestRobotStatus:
     def test_from_payload_round_trip(self) -> None:
         env = Envelope(trace_id="tr1")
         status = RobotStatus(
-            envelope=env, frame_id=10, state="running", skill_id="sk1", success=True
+            envelope=env, frame_id=10, state="executing", skill_id="sk1", success=True
         )
         payload = to_payload(status)
         restored = from_payload(RobotStatus, payload)
         assert restored.frame_id == 10
-        assert restored.state == "running"
+        assert restored.state == "executing"
         assert restored.skill_id == "sk1"
         assert restored.success is True
 
 
 class TestSkillIntent:
-    def test_default_skill_id(self) -> None:
-        env = Envelope()
-        intent = SkillIntent(envelope=env, name="move_arm")
-        assert intent.skill_id.startswith("skill_")
-
     def test_from_payload_round_trip(self) -> None:
         env = Envelope(trace_id="tr1")
         intent = SkillIntent(
-            envelope=env, name="move", arguments={"x": 1}, priority=5, timeout_sec=30.0
+            envelope=env,
+            skill_id="skill1",
+            goal_id="goal1",
+            task_id="task1",
+            deliberation_id="deliberation1",
+            intent_kind="skill",
+            name="move",
+            objective="move",
+            arguments={"x": 1},
+            priority=5,
+            timeout_sec=30.0,
         )
         payload = to_payload(intent)
         restored = from_payload(SkillIntent, payload)

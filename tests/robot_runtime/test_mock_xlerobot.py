@@ -69,7 +69,15 @@ def _action(
     name: str, arguments: dict | None = None, *, skill_id: str = "cmd1"
 ) -> RobotAction:
     intent = SkillIntent(
-        envelope=Envelope(robot_id="mock0"), skill_id=skill_id, objective=name
+        envelope=Envelope(robot_id="mock0"),
+        skill_id=skill_id,
+        goal_id="goal-test",
+        task_id="task-test",
+        deliberation_id="deliberation-test",
+        intent_kind="skill",
+        name=name,
+        arguments=dict(arguments or {}),
+        objective=name,
     )
     return RobotSkillAction(name, arguments or {}).to_robot_action(intent)
 

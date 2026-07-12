@@ -23,6 +23,20 @@ def _action(**metadata) -> RobotAction:
     )
 
 
+def _intent() -> SkillIntent:
+    return SkillIntent(
+        envelope=Envelope(trace_id="tr1", robot_id="mock0"),
+        skill_id="skill1",
+        goal_id="goal1",
+        task_id="task1",
+        deliberation_id="deliberation1",
+        intent_kind="skill",
+        name="policy_action",
+        arguments={},
+        objective="test policy action",
+    )
+
+
 @pytest.mark.asyncio
 async def test_control_plane_buffers_action_and_records_watchdog() -> None:
     plane = RobotControlPlane(max_buffer_size=4)
@@ -91,7 +105,7 @@ async def test_control_plane_preemption_runs_stop_motion_first() -> None:
 
 def test_control_plane_maps_action_chunk_to_runtime_skill_actions() -> None:
     plane = RobotControlPlane()
-    intent = SkillIntent(envelope=Envelope(trace_id="tr1"), skill_id="skill1")
+    intent = _intent()
 
     actions = plane.map_policy_result(
         {
@@ -122,7 +136,7 @@ def test_control_plane_maps_action_chunk_to_runtime_skill_actions() -> None:
 
 def test_control_plane_maps_local_goal_pixel_as_row_col() -> None:
     plane = RobotControlPlane()
-    intent = SkillIntent(envelope=Envelope(trace_id="tr1"), skill_id="skill1")
+    intent = _intent()
 
     actions = plane.map_policy_result(
         {
@@ -145,7 +159,7 @@ def test_control_plane_maps_local_goal_pixel_as_row_col() -> None:
 @pytest.mark.asyncio
 async def test_control_plane_applies_policy_result_sequence() -> None:
     plane = RobotControlPlane()
-    intent = SkillIntent(envelope=Envelope(trace_id="tr1"), skill_id="skill1")
+    intent = _intent()
     calls: list[str] = []
 
     async def apply(action: RobotAction) -> RobotStatus:

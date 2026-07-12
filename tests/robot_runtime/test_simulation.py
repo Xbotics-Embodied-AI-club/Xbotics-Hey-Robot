@@ -27,8 +27,20 @@ def sim_context() -> RobotDriverContext:
 
 
 def _skill_action(name: str, arguments: dict[str, object]) -> object:
-    return RobotSkillAction(name, arguments).to_robot_action(
-        SkillIntent(envelope=Envelope(), name=name)
+    return RobotSkillAction(name, arguments).to_robot_action(_intent(name))
+
+
+def _intent(name: str) -> SkillIntent:
+    return SkillIntent(
+        envelope=Envelope(robot_id="test_sim_robot"),
+        skill_id=f"test-{name}",
+        goal_id="goal-test",
+        task_id="task-test",
+        deliberation_id="deliberation-test",
+        intent_kind="skill",
+        name=name,
+        arguments={},
+        objective=f"test {name}",
     )
 
 
@@ -315,13 +327,11 @@ class TestXLeRobotSimDriver:
         skill = RobotSkillAction(
             "move_base", {"distance_cm": 10, "direction": "forward"}
         )
-        action = skill.to_robot_action(
-            SkillIntent(envelope=Envelope(), name="move_base")
-        )
+        action = skill.to_robot_action(_intent("move_base"))
 
         status = await driver.apply_action(action)
         assert status.success is True
-        assert status.state == "skill_completed"
+        assert status.state == "idle"
 
         await driver.close()
 
@@ -336,13 +346,13 @@ class TestXLeRobotSimDriver:
         driver = XLeRobotSimDriver(sim_context)
         await driver.start()
         action = RobotSkillAction("stop_motion", {}).to_robot_action(
-            SkillIntent(envelope=Envelope(), name="stop_motion")
+            _intent("stop_motion")
         )
 
         action_status = await driver.apply_action(action)
         heartbeat_status = await driver.status()
 
-        assert action_status.state == "skill_completed"
+        assert action_status.state == "idle"
         assert heartbeat_status.state == "idle"
         await driver.close()
 
@@ -357,7 +367,7 @@ class TestXLeRobotSimDriver:
         driver = XLeRobotSimDriver(sim_context)
         await driver.start()
         action = RobotSkillAction("stop_motion", {"emergency": True}).to_robot_action(
-            SkillIntent(envelope=Envelope(), name="stop_motion")
+            _intent("stop_motion")
         )
 
         status = await driver.apply_action(action)
@@ -456,9 +466,7 @@ class TestXLeRobotSimE2EFlow:
         skill = RobotSkillAction(
             "move_base", {"distance_cm": 10, "direction": "forward"}
         )
-        action = skill.to_robot_action(
-            SkillIntent(envelope=Envelope(), name="move_base")
-        )
+        action = skill.to_robot_action(_intent("move_base"))
         status = await driver.apply_action(action)
         assert status.success is True
 
@@ -481,9 +489,7 @@ class TestXLeRobotSimE2EFlow:
         await driver.start()
 
         skill = RobotSkillAction("turn_base", {"angle_deg": 45, "direction": "left"})
-        action = skill.to_robot_action(
-            SkillIntent(envelope=Envelope(), name="turn_base")
-        )
+        action = skill.to_robot_action(_intent("turn_base"))
         status = await driver.apply_action(action)
         assert status.success is True
 
@@ -504,9 +510,7 @@ class TestXLeRobotSimE2EFlow:
             "move_arm_joints",
             {"joints": {"shoulder_lift": 0.5, "elbow_flex": -0.3}, "mode": "absolute"},
         )
-        action = skill.to_robot_action(
-            SkillIntent(envelope=Envelope(), name="move_arm_joints")
-        )
+        action = skill.to_robot_action(_intent("move_arm_joints"))
         status = await driver.apply_action(action)
         assert status.success is True
 
@@ -532,16 +536,12 @@ class TestXLeRobotSimE2EFlow:
             "move_arm_joints",
             {"joints": {"shoulder_lift": 0.2}, "mode": "absolute"},
         )
-        action = skill.to_robot_action(
-            SkillIntent(envelope=Envelope(), name="move_arm_joints")
-        )
+        action = skill.to_robot_action(_intent("move_arm_joints"))
         await driver.apply_action(action)
 
         # Home
         home_skill = RobotSkillAction("reset_posture", {})
-        home_action = home_skill.to_robot_action(
-            SkillIntent(envelope=Envelope(), name="reset_posture")
-        )
+        home_action = home_skill.to_robot_action(_intent("reset_posture"))
         status = await driver.apply_action(home_action)
         assert status.success is True
 
@@ -564,9 +564,7 @@ class TestXLeRobotSimE2EFlow:
         await driver.start()
 
         close_skill = RobotSkillAction("set_gripper", {"action": "close"})
-        close_action = close_skill.to_robot_action(
-            SkillIntent(envelope=Envelope(), name="set_gripper")
-        )
+        close_action = close_skill.to_robot_action(_intent("set_gripper"))
         await driver.apply_action(close_action)
 
         obs_closed = await driver.observe()
@@ -574,9 +572,7 @@ class TestXLeRobotSimE2EFlow:
         assert pct_closed < 10.0
 
         open_skill = RobotSkillAction("set_gripper", {"action": "open"})
-        open_action = open_skill.to_robot_action(
-            SkillIntent(envelope=Envelope(), name="set_gripper")
-        )
+        open_action = open_skill.to_robot_action(_intent("set_gripper"))
         await driver.apply_action(open_action)
 
         obs_open = await driver.observe()
@@ -606,15 +602,11 @@ class TestXLeRobotSimE2EFlow:
         }
 
         open_skill = RobotSkillAction("set_gripper", {"action": "open"})
-        open_action = open_skill.to_robot_action(
-            SkillIntent(envelope=Envelope(), name="set_gripper")
-        )
+        open_action = open_skill.to_robot_action(_intent("set_gripper"))
         await driver.apply_action(open_action)
 
         close_skill = RobotSkillAction("set_gripper", {"action": "close"})
-        close_action = close_skill.to_robot_action(
-            SkillIntent(envelope=Envelope(), name="set_gripper")
-        )
+        close_action = close_skill.to_robot_action(_intent("set_gripper"))
         await driver.apply_action(close_action)
 
         after = {
@@ -663,7 +655,7 @@ class TestXLeRobotSimE2EFlow:
         ]
         for name, args in actions:
             skill = RobotSkillAction(name, args)
-            action = skill.to_robot_action(SkillIntent(envelope=Envelope(), name=name))
+            action = skill.to_robot_action(_intent(name))
             status = await driver.apply_action(action)
             assert status.success, f"skill {name} should succeed"
 
@@ -685,9 +677,7 @@ class TestXLeRobotSimE2EFlow:
         skill = RobotSkillAction(
             "move_base", {"distance_cm": 20, "direction": "forward"}
         )
-        action = skill.to_robot_action(
-            SkillIntent(envelope=Envelope(), name="move_base")
-        )
+        action = skill.to_robot_action(_intent("move_base"))
         await driver.apply_action(action)
 
         await driver.reset()

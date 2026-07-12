@@ -190,7 +190,12 @@ def test_mock_capability_client_records_execution_and_cancel() -> None:
     intent = SkillIntent(
         envelope=Envelope(robot_id="xlerobot"),
         skill_id="skill1",
+        goal_id="goal1",
+        task_id="task1",
+        deliberation_id="deliberation1",
+        intent_kind="skill",
         name="set_gripper",
+        arguments={},
         objective="close the gripper",
     )
     request = ServiceInvocationRequest(
@@ -273,10 +278,13 @@ def test_grpc_capability_client_maps_health_execute_and_cancel(
     intent = SkillIntent(
         envelope=Envelope(robot_id="xlerobot", trace_id="trace-1", episode_id="ep-1"),
         skill_id="skill1",
+        goal_id="goal1",
+        task_id="task1",
+        deliberation_id="deliberation1",
+        intent_kind="skill",
         name="set_gripper",
         objective="close the gripper",
         arguments={"action": "close"},
-        metadata={"source": "test"},
     )
 
     health = asyncio.run(client.health())
@@ -393,7 +401,12 @@ def test_grpc_capability_client_execute_reports_rpc_errors(
     intent = SkillIntent(
         envelope=Envelope(robot_id="xlerobot", trace_id="trace-1"),
         skill_id="skill1",
+        goal_id="goal1",
+        task_id="task1",
+        deliberation_id="deliberation1",
+        intent_kind="skill",
         name="set_gripper",
+        arguments={},
         objective="close the gripper",
     )
 

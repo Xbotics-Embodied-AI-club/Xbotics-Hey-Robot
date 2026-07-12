@@ -5,10 +5,6 @@ from typing import Any
 
 from hey_robot.config import DeploymentConfig
 from hey_robot.providers.base import GenerationSettings
-from hey_robot.providers.fallback_provider import (
-    FallbackCandidate,
-    FallbackReasoningProvider,
-)
 from hey_robot.providers.openai_compat_provider import OpenAICompatReasoningProvider
 from hey_robot.providers.registry import find_provider
 from hey_robot.providers.static_feedback import DeterministicExecutionFeedbackReasoner
@@ -21,18 +17,9 @@ def build_provider(
     agent = config.agents[agent_id]
     provider_config = _purpose_config(agent.settings, purpose)
     provider = _build_provider(provider_config, purpose=purpose)
-    fallback_configs = list(provider_config.get("fallback_models", []) or [])
-    if not fallback_configs:
-        return provider
-    fallbacks = []
-    for item in fallback_configs:
-        fallback_provider = _build_provider(item, purpose=purpose)
-        fallbacks.append(
-            FallbackCandidate(
-                provider=fallback_provider, model=fallback_provider.get_default_model()
-            )
-        )
-    return FallbackReasoningProvider(provider, fallbacks)
+    if provider_config.get("fallback_models"):
+        raise ValueError("provider fallback_models have been removed")
+    return provider
 
 
 def _purpose_config(settings: dict[str, Any], purpose: str) -> dict[str, Any]:

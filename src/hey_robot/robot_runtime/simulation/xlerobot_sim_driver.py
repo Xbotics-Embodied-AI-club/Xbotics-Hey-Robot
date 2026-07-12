@@ -245,8 +245,12 @@ class XLeRobotSimDriver:
 
         mjcf_path = str(_resolve_mjcf_path(self.settings))
         logger.info(f"{self.robot_id} loading MuJoCo model from {mjcf_path}")
-        self.model = await asyncio.to_thread(mujoco.MjModel.from_xml_path, mjcf_path)
-        self.data = await asyncio.to_thread(mujoco.MjData, self.model)
+        # MuJoCo model loading is not safe on an arbitrary executor thread in
+        # headless EGL deployments. The scene load is short and must share the
+        # driver's GL-owning thread with data and renderer initialization.
+        self.model = mujoco.MjModel.from_xml_path(mjcf_path)
+        logger.info(f"{self.robot_id} MuJoCo model loaded; creating simulation data")
+        self.data = mujoco.MjData(self.model)
 
         rest = self.adapter.arm_rest_positions()
         num_ctrl = len(self.data.ctrl)
@@ -256,18 +260,22 @@ class XLeRobotSimDriver:
                 self._set_actuator_joint_position(idx, pos)
         self._hold_head_camera()
 
-        await asyncio.to_thread(mujoco.mj_forward, self.model, self.data)
+        mujoco.mj_forward(self.model, self.data)
         self._initialize_dock_manipulation()
+        logger.info(f"{self.robot_id} simulation data initialized")
 
         # Linux headless rendering needs an EGL context before Renderer creation.
         # Windows uses WGL; importing mujoco.egl there fails if EGL.dll is absent.
         if _needs_egl_context():
+            logger.info(f"{self.robot_id} initializing EGL context")
             _ensure_egl_context(self._render_width, self._render_height)
 
         # Renderer must be created on the calling thread (owns the GL context).
+        logger.info(f"{self.robot_id} creating MuJoCo renderer")
         self.renderer = mujoco.Renderer(
             self.model, self._render_height, self._render_width
         )
+        logger.info(f"{self.robot_id} MuJoCo renderer ready")
 
         self._scene_cameras = {
             name: self._build_scene_camera(name) for name in self._camera_names
@@ -395,7 +403,9 @@ class XLeRobotSimDriver:
         return RobotStatus(
             envelope=self._envelope(),
             frame_id=self.frame_id,
-            state=self.state,
+            state=self._protocol_state(),
+            location_id=self._location_id(),
+            motion_state="moving" if self.state == "executing" else "idle",
             success=None,
             error=self.last_error,
             metrics={
@@ -1617,7 +1627,9 @@ class XLeRobotSimDriver:
         return RobotStatus(
             envelope=self._envelope(),
             frame_id=self.frame_id,
-            state=self.state,
+            state=self._protocol_state(),
+            location_id=self._location_id(),
+            motion_state="idle" if success else "unknown",
             skill_id=action.skill_id,
             success=success,
             error=None if success else self.last_error,
@@ -1635,6 +1647,27 @@ class XLeRobotSimDriver:
                 "readiness": self.readiness(),
             },
         )
+
+    def _protocol_state(self) -> str:
+        if self.state in {"idle", "executing", "offline", "unknown"}:
+            return self.state
+        if self.state in {"failed", "closed"}:
+            return "offline" if self.state == "closed" else "error"
+        # Internal lifecycle states such as created and skill_completed are not
+        # transport states. They never imply a still-running physical action.
+        return "idle"
+
+    def _location_id(self) -> str | None:
+        pose = self._base_pose()
+        x = pose["x_cm"] / 100.0
+        y = pose["y_cm"] / 100.0
+        if 0.0 <= x <= 6.0 and 0.0 <= y <= 5.0:
+            return "room:living_room"
+        if 0.0 <= x <= 6.0 and 5.0 < y <= 10.0:
+            return "room:dining_room"
+        if 14.0 <= x <= 20.0 and 0.0 <= y <= 5.0:
+            return "room:kitchen"
+        return None
 
     def _envelope(self) -> Envelope:
         return Envelope(

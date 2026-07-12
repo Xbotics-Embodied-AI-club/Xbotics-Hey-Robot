@@ -17,6 +17,22 @@ from hey_robot.robot_runtime.observations import DriverObservation, ObservationA
 from hey_robot.robot_runtime.service import RobotService
 
 
+def _intent(skill_id: str, name: str, objective: str) -> SkillIntent:
+    return SkillIntent(
+        envelope=Envelope(robot_id="mock0"),
+        skill_id=skill_id,
+        goal_id="goal-test",
+        task_id="task-test",
+        deliberation_id="deliberation-test",
+        intent_kind="observation"
+        if name in {"inspect_scene", "look_around", "detect_marker"}
+        else "skill",
+        name=name,
+        arguments={},
+        objective=objective,
+    )
+
+
 async def test_robot_runtime_observation_uses_pipeline(tmp_path) -> None:
     config = DeploymentConfig.from_dict({"robots": {"mock0": {"type": "mock"}}})
     runtime = RobotRuntime(
@@ -58,9 +74,7 @@ async def test_robot_runtime_handles_perception_skill_without_driver_action(
         RobotManager(config).require("mock0"), LocalMediaStore(tmp_path)
     )
     await runtime.start()
-    skill = SkillIntent(
-        envelope=Envelope(robot_id="mock0"), skill_id="cmd1", objective="look ahead"
-    )
+    skill = _intent("cmd1", "inspect_scene", "look ahead")
     action = RobotSkillAction("inspect_scene", safety_level="observe").to_robot_action(
         skill
     )
@@ -82,9 +96,7 @@ async def test_robot_runtime_routes_motion_through_control_plane(tmp_path) -> No
         RobotManager(config).require("mock0"), LocalMediaStore(tmp_path)
     )
     await runtime.start()
-    intent = SkillIntent(
-        envelope=Envelope(robot_id="mock0"), skill_id="move1", objective="move forward"
-    )
+    intent = _intent("move1", "move_base", "move forward")
     action = RobotSkillAction(
         "move_base", {"direction": "forward", "distance_cm": 10}
     ).to_robot_action(intent)
@@ -117,9 +129,7 @@ async def test_robot_runtime_perception_skill_refreshes_camera_directly(
     driver = _CountingCameraDriver("mock0")
     runtime = RobotRuntime(driver, LocalMediaStore(tmp_path / "media"))
     await runtime.start()
-    skill = SkillIntent(
-        envelope=Envelope(robot_id="mock0"), skill_id="scan1", objective="look"
-    )
+    skill = _intent("scan1", "inspect_scene", "look")
     action = RobotSkillAction("inspect_scene", safety_level="observe").to_robot_action(
         skill
     )
@@ -174,7 +184,7 @@ async def test_robot_runtime_detect_marker_with_square_fallback(tmp_path) -> Non
     )
     await runtime.start()
     action = RobotSkillAction("detect_marker").to_robot_action(
-        SkillIntent(envelope=Envelope(robot_id="mock0"), skill_id="marker1")
+        _intent("marker1", "detect_marker", "detect marker")
     )
 
     status = await runtime.apply_action(action)
@@ -190,7 +200,7 @@ async def test_robot_runtime_look_around_collects_multiple_observations(
     runtime = RobotRuntime(driver, LocalMediaStore(tmp_path))
     await runtime.start()
     action = RobotSkillAction("look_around").to_robot_action(
-        SkillIntent(envelope=Envelope(robot_id="mock0"), skill_id="look1")
+        _intent("look1", "look_around", "look around")
     )
 
     status = await runtime.apply_action(action)

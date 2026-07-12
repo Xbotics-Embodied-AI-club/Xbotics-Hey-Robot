@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from hey_robot.bus.client import BusClient
@@ -20,10 +21,27 @@ _BUS_CLIENT_KEYS = {
 }
 
 
-def create_bus_client(spec: BusSpec) -> BusClient:
+def create_bus_client(spec: BusSpec, *, role: str | None = None) -> BusClient:
     if spec.type != "nats":
         raise ValueError(f"unsupported bus type: {spec.type}")
     options: dict[str, Any] = {
         key: value for key, value in spec.options.items() if key in _BUS_CLIENT_KEYS
     }
+    credentials = spec.options.get("credentials")
+    if role is not None and isinstance(credentials, dict):
+        entry = credentials.get(role)
+        if not isinstance(entry, dict):
+            raise ValueError(f"NATS credentials missing role: {role}")
+        username = entry.get("username")
+        password = entry.get("password")
+        password_env = entry.get("password_env")
+        if password_env is not None:
+            password = os.environ.get(str(password_env))
+        if (
+            not isinstance(username, str)
+            or not isinstance(password, str)
+            or not password
+        ):
+            raise ValueError(f"NATS credentials for role {role} are incomplete")
+        options.update(username=username, password=password)
     return BusClient(url=spec.url, **options)

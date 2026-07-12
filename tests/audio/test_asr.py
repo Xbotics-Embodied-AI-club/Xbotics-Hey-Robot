@@ -10,6 +10,10 @@ from dataclasses import dataclass
 
 import pytest
 
+pytest.importorskip(
+    "websockets", reason="ASR websocket integration dependency is not installed"
+)
+
 from hey_robot.audio.asr import (
     ASRMessage,
     DoubaoASRClient,

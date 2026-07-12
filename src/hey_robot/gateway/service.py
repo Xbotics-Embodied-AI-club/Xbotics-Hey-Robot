@@ -16,34 +16,34 @@ from hey_robot.channels import (
     VoiceChannel,
     WebChannel,
 )
-from hey_robot.cognition.memory import SceneMemoryStore
-from hey_robot.cognition.task_run import TaskRunStore
-from hey_robot.cognition.tasks import TaskSessionQueryService
+from hey_robot.cognition.autonomous.store import AutonomyStore
 from hey_robot.config import DeploymentConfig
-from hey_robot.episode import (
-    JsonlEpisodeStore,
-    RobotEpisodeStateStore,
-    allocate_episode,
-)
+from hey_robot.episode import JsonlEpisodeStore, allocate_episode
 from hey_robot.episode.scope import DEFAULT_EPISODE_DIMENSIONS
 from hey_robot.events import EventKind, RuntimeEvent
 from hey_robot.events.bus import BusEventPublisher
 from hey_robot.events.store import RuntimeEventStore
 from hey_robot.gateway.identity import ClaimedBinding, IdentityResolver, PendingBinding
 from hey_robot.health import HealthReportService
-from hey_robot.interaction import InteractionStateStore
 from hey_robot.logging import HeyRobotLogger
 from hey_robot.protocol import (
     AgentReply,
     Envelope,
+    GoalCommand,
     RobotStatus,
     SkillEvent,
     SkillResult,
     Topics,
     UserTurn,
 )
-from hey_robot.protocol.messages import from_payload, to_payload
+from hey_robot.protocol.messages import (
+    GoalBudgets,
+    SuccessCriterion,
+    from_payload,
+    to_payload,
+)
 from hey_robot.skill_os import SkillStore
+from hey_robot.skill_os.command_store import SkillCommandStore
 
 logger = HeyRobotLogger(name="gateway")
 _BINDING_COMMAND = re.compile(
@@ -62,10 +62,8 @@ class GatewayService:
         self.topics = Topics()
         self.episode_root = Path(episode_dir or config.resources.episodes_root)
         self.episodes = JsonlEpisodeStore(self.episode_root)
-        self.task_runs = TaskRunStore(self.episode_root)
-        self.robot_states = RobotEpisodeStateStore(self.episode_root)
         self.channels = ChannelManager()
-        self.bus = create_bus_client(config.deployment.bus)
+        self.bus = create_bus_client(config.deployment.bus, role="gateway")
         self.events = BusEventPublisher(self.bus, self.topics)
         self.event_store = RuntimeEventStore(
             Path(config.resources.runtime_dir) / "events",
@@ -75,19 +73,16 @@ class GatewayService:
             Path(config.resources.runtime_dir) / "skills",
             max_items=config.resources.events_max_items,
         )
-        self.scene_memory = SceneMemoryStore(
-            Path(config.resources.runtime_dir) / "scene_memory",
-            max_items=config.resources.events_max_items,
+        autonomy_path = (
+            Path(config.resources.runtime_dir)
+            / config.deployment.id
+            / "autonomy.sqlite3"
         )
-        self.interaction_states = InteractionStateStore(
-            Path(config.resources.runtime_dir) / "interaction"
+        self.autonomy_store = AutonomyStore(autonomy_path)
+        self.skill_receipts = SkillCommandStore(
+            Path(config.resources.runtime_dir) / "skill_receipts.sqlite3"
         )
-        self.task_views = TaskSessionQueryService(
-            task_store=self.task_runs,
-            scene_memory=self.scene_memory,
-            skill_store=self.skill_store,
-            interaction_store=self.interaction_states,
-        )
+        self.latest_robot_status: dict[str, RobotStatus] = {}
         self.identity = IdentityResolver(
             config.identity,
             state_path=Path(config.resources.runtime_dir)
@@ -150,55 +145,122 @@ class GatewayService:
             agent_id=agent_id, robot_id=robot_id, user_id=identity.user_id
         )
         allocation = allocate_episode(
-            envelope, agent_id=agent_id, dimensions=self._episode_dimensions(envelope)
-        )
-        envelope = envelope.child(episode_id=allocation.episode_id)
-        forwarded = UserTurn(
-            envelope=envelope,
-            text=turn.text,
-            media=turn.media,
-            intent=turn.intent,
-            metadata=turn.metadata,
+            envelope,
+            agent_id=agent_id,
+            dimensions=self._episode_dimensions(envelope),
         )
         self.episodes.ensure(
             allocation.episode_id, allocation.scope, allocation.aliases
         )
-        self.robot_states.ensure(
-            allocation.episode_id, agent_id=agent_id, robot_id=robot_id
+        self.episodes.append_user_turn(
+            allocation.episode_id,
+            replace(turn, envelope=envelope.child(episode_id=allocation.episode_id)),
         )
-        self.episodes.append_user_turn(allocation.episode_id, forwarded)
-        active_task = self.task_runs.load_active(allocation.episode_id)
-        self.interaction_states.record_turn(
-            forwarded,
-            active_task_id=active_task.task_id if active_task is not None else None,
-            pending_confirmation=(
-                dict(active_task.pending_confirmation)
-                if active_task is not None
-                and isinstance(active_task.pending_confirmation, dict)
-                else None
-            ),
-            robot_busy=(
-                active_task is not None
-                and active_task.status not in {"completed", "failed", "cancelled"}
-            ),
+        if await self._handle_goal_command(turn.text, envelope):
+            return
+        await self._send_reply(
+            AgentReply(
+                envelope=envelope,
+                text="GOAL_REQUIRED: use /goal create with an explicit success contract.",
+            )
         )
-        event = RuntimeEvent.make(
-            EventKind.EPISODE_ALLOCATED,
-            source="gateway",
-            trace_id=envelope.trace_id,
-            episode_id=allocation.episode_id,
-            agent_id=agent_id,
-            robot_id=robot_id,
-            channel=envelope.channel,
-            payload={"aliases": allocation.aliases, "user_id": envelope.user_id},
-        )
-        await self.events.publish(event)
-        self.event_store.append(event)
-        await self.bus.publish(self.topics.user_turn, to_payload(forwarded))
-        logger.debug(
-            f"gateway forwarded turn trace={forwarded.envelope.trace_id} "
-            f"episode={allocation.episode_id} agent={agent_id} robot={robot_id}"
-        )
+        return
+
+    async def _handle_goal_command(self, text: str, envelope: Envelope) -> bool:
+        """The gateway accepts only explicit, structured autonomous commands."""
+        stripped = text.strip()
+        if not stripped.startswith("/goal "):
+            return False
+        parts = stripped.split(maxsplit=2)
+        if len(parts) < 2 or parts[1] not in {"create", "cancel", "reconcile"}:
+            await self._send_reply(
+                AgentReply(envelope=envelope, text="GOAL_CONTRACT_INVALID")
+            )
+            return True
+        import json
+        import uuid
+
+        if parts[1] == "reconcile":
+            if len(parts) != 3:
+                await self._send_reply(
+                    AgentReply(envelope=envelope, text="RECONCILE_CONTRACT_INVALID")
+                )
+                return True
+            try:
+                body = json.loads(parts[2])
+                skill_id = str(body["skill_id"])
+                robot_id = str(body.get("robot_id") or envelope.robot_id or "")
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                await self._send_reply(
+                    AgentReply(envelope=envelope, text="RECONCILE_CONTRACT_INVALID")
+                )
+                return True
+            status = self.latest_robot_status.get(robot_id)
+            if (
+                not robot_id
+                or status is None
+                or status.state != "idle"
+                or status.skill_id is not None
+                or self.skill_receipts.is_active(skill_id)
+            ):
+                await self._send_reply(
+                    AgentReply(envelope=envelope, text="RECONCILE_IDLE_PROOF_REQUIRED")
+                )
+                return True
+            reconciled = self.autonomy_store.reconcile_unknown_action(
+                reconcile_id=str(uuid.uuid4()),
+                robot_id=robot_id,
+                skill_id=skill_id,
+                operator_id=envelope.user_id or envelope.sender_id or "anonymous",
+                status_payload=to_payload(status),
+            )
+            await self._send_reply(
+                AgentReply(
+                    envelope=envelope,
+                    text="RECONCILE_COMPLETED" if reconciled else "RECONCILE_REJECTED",
+                )
+            )
+            return True
+        if parts[1] == "cancel":
+            if len(parts) != 3 or not parts[2].strip():
+                await self._send_reply(
+                    AgentReply(envelope=envelope, text="GOAL_CONTRACT_INVALID")
+                )
+                return True
+            command = GoalCommand(
+                envelope, str(uuid.uuid4()), "cancel", goal_id=parts[2].strip()
+            )
+        else:
+            if len(parts) != 3:
+                await self._send_reply(
+                    AgentReply(envelope=envelope, text="GOAL_CONTRACT_REQUIRED")
+                )
+                return True
+            try:
+                body = json.loads(parts[2])
+                criteria = tuple(
+                    SuccessCriterion(**item) for item in body["success_criteria"]
+                )
+                budgets = GoalBudgets(**dict(body.get("budgets") or {}))
+                command = GoalCommand(
+                    envelope,
+                    str(uuid.uuid4()),
+                    "create",
+                    objective=str(body["objective"]),
+                    contract_template_id=body.get("contract_template_id"),
+                    success_criteria=criteria,
+                    budgets=budgets,
+                )
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                await self._send_reply(
+                    AgentReply(envelope=envelope, text="GOAL_CONTRACT_INVALID")
+                )
+                return True
+        await self.bus.publish(self.topics.goal_command, to_payload(command))
+        return True
+
+    async def _send_reply(self, reply: AgentReply) -> None:
+        await self.bus.publish(self.topics.agent_reply, to_payload(reply))
 
     async def _on_agent_reply(self, _topic: str, payload: dict) -> None:
         reply = self._materialize_reply(from_payload(AgentReply, payload))
@@ -208,17 +270,6 @@ class GatewayService:
         )
         if reply.envelope.episode_id:
             self.episodes.append_agent_reply(reply.envelope.episode_id, reply)
-            active_task = self.task_runs.load_active(reply.envelope.episode_id)
-            self.interaction_states.set_pending_confirmation(
-                reply.envelope.episode_id,
-                (
-                    dict(active_task.pending_confirmation)
-                    if active_task is not None
-                    and isinstance(active_task.pending_confirmation, dict)
-                    else None
-                ),
-            )
-            self.interaction_states.record_reply(reply)
         await self.channels.send(reply)
 
     def _materialize_reply(self, reply: AgentReply) -> AgentReply:
@@ -240,9 +291,6 @@ class GatewayService:
             self.episodes.ensure(
                 allocation.episode_id, allocation.scope, allocation.aliases
             )
-            self.robot_states.ensure(
-                allocation.episode_id, agent_id=agent_id, robot_id=robot_id
-            )
             resolved_envelope = resolved_envelope.child(
                 episode_id=allocation.episode_id
             )
@@ -261,6 +309,8 @@ class GatewayService:
 
     async def _on_robot_status(self, _topic: str, payload: dict) -> None:
         status = from_payload(RobotStatus, payload)
+        if status.envelope.robot_id:
+            self.latest_robot_status[status.envelope.robot_id] = status
         event = RuntimeEvent.make(
             EventKind.ROBOT_STATUS,
             source="robot",
@@ -290,7 +340,6 @@ class GatewayService:
     async def _on_skill_event(self, _topic: str, payload: dict) -> None:
         event = from_payload(SkillEvent, payload)
         self.skill_store.append(event)
-        self.robot_states.apply_skill_event(event)
         ux_metadata = event.metadata.get("ux")
         ux_payload = dict(ux_metadata) if isinstance(ux_metadata, dict) else None
         await self.channels.publish_event(
@@ -317,8 +366,7 @@ class GatewayService:
         )
 
     async def _on_skill_result(self, _topic: str, payload: dict) -> None:
-        result = from_payload(SkillResult, payload)
-        self.robot_states.apply_skill_result(result)
+        from_payload(SkillResult, payload)
 
     async def _web_history(self, envelope: Envelope, limit: int) -> dict:
         agent_id = self._agent_id(envelope.agent_id)
@@ -331,9 +379,7 @@ class GatewayService:
         allocation = allocate_episode(
             scoped, agent_id=agent_id, dimensions=self._episode_dimensions(scoped)
         )
-        records = await asyncio.to_thread(
-            self.episodes.history, allocation.episode_id, limit=limit
-        )
+        records = self.episodes.history(allocation.episode_id, limit=limit)
         return {
             "episode_id": allocation.episode_id,
             "agent_id": agent_id,
@@ -352,72 +398,44 @@ class GatewayService:
         }
 
     async def _web_cockpit(self, episode_id: str) -> dict[str, Any] | None:
-        view = self.task_views.view_for_episode(episode_id)
-        if view is None:
+        del episode_id
+        goals = self.autonomy_store.goals_recent(limit=1)
+        if not goals:
             return None
         return {
-            "episode_id": episode_id,
-            "view": view.to_dict(),
-            "health": HealthReportService(
-                self.config,
-                episode_dir=self.episode_root,
-            ).payload(robot_id=view.robot_id),
+            "goal": _goal_payload(goals[0]),
+            "health": HealthReportService(self.config).payload(
+                robot_id=goals[0]["robot_id"]
+            ),
         }
 
     async def _web_tasks_list(self, limit: int) -> dict[str, Any]:
-        tasks = await asyncio.to_thread(self.task_runs.list_recent, limit=limit)
         return {
-            "tasks": [
-                {
-                    "task_id": t.task_id,
-                    "episode_id": t.episode_id,
-                    "robot_id": t.robot_id,
-                    "agent_id": t.agent_id,
-                    "root_task": t.root_task,
-                    "status": t.status,
-                    "task_success": t.task_success,
-                    "failure_reason": t.failure_reason,
-                    "retry_count": t.retry_count,
-                    "recovery_count": t.recovery_count,
-                    "skill_ids": t.skill_ids,
-                    "created_at": t.created_at,
-                    "updated_at": t.updated_at,
-                }
-                for t in tasks
+            "goals": [
+                _goal_payload(goal)
+                for goal in self.autonomy_store.goals_recent(limit=limit)
             ]
         }
 
     async def _web_runtime_summary(self, limit: int) -> dict[str, Any]:
-        tasks, robot_states, skills, events = await asyncio.gather(
-            asyncio.to_thread(self.task_runs.list_recent, limit=limit),
-            asyncio.to_thread(self.robot_states.list_states),
-            asyncio.to_thread(self.skill_store.recent, limit=limit),
-            asyncio.to_thread(self.event_store.recent, limit=limit),
-        )
+        goals = self.autonomy_store.goals_recent(limit)
+        skills = self.skill_store.recent(limit=limit)
+        events = self.event_store.recent(limit=limit)
         return {
-            "tasks": [
-                {
-                    "task_id": t.task_id,
-                    "episode_id": t.episode_id,
-                    "robot_id": t.robot_id,
-                    "root_task": t.root_task,
-                    "status": t.status,
-                    "task_success": t.task_success,
-                    "failure_reason": t.failure_reason,
-                    "updated_at": t.updated_at,
-                }
-                for t in tasks
-            ],
+            "goals": [_goal_payload(goal) for goal in goals],
             "robots": [
                 {
-                    "episode_id": rs.episode_id,
-                    "robot_id": rs.robot_id,
-                    "state": _robot_state_name(rs.last_status),
-                    "status": _robot_status_summary(rs.last_status),
-                    "active_task": rs.active_task,
-                    "updated_at": rs.updated_at,
+                    "robot_id": status.envelope.robot_id,
+                    "state": status.state,
+                    "status": {
+                        "frame_id": status.frame_id,
+                        "success": status.success,
+                        "error": status.error,
+                        "battery_percentage": status.battery_percentage,
+                    },
+                    "updated_at": status.envelope.timestamp,
                 }
-                for rs in (robot_states or [])
+                for status in self.latest_robot_status.values()
             ],
             "skills": list(skills),
             "events": [
@@ -437,45 +455,24 @@ class GatewayService:
                 )
             ],
             "stats": {
-                "task_count": len(tasks),
-                "robot_count": len(robot_states or []),
+                "goal_count": len(goals),
+                "robot_count": len(self.latest_robot_status),
                 "skill_count": len(skills),
                 "event_count": len(events or []),
             },
         }
 
     async def _web_episode_task(self, episode_id: str) -> dict[str, Any] | None:
-        tasks = await asyncio.to_thread(self.task_runs.list_for_episode, episode_id)
-        if not tasks:
-            return None
-        task = tasks[0]
-        robot_state = await asyncio.to_thread(self.robot_states.load, episode_id)
-        result: dict[str, Any] = {
-            "episode_id": episode_id,
-            "task": {
-                "task_id": task.task_id,
-                "episode_id": task.episode_id,
-                "robot_id": task.robot_id,
-                "agent_id": task.agent_id,
-                "root_task": task.root_task,
-                "status": task.status,
-                "task_success": task.task_success,
-                "failure_reason": task.failure_reason,
-                "retry_count": task.retry_count,
-                "recovery_count": task.recovery_count,
-                "skill_ids": task.skill_ids,
-                "created_at": task.created_at,
-                "updated_at": task.updated_at,
-                "attempts": [a.to_dict() for a in (task.attempts or [])],
-            },
-        }
-        if robot_state is not None:
-            result["robot"] = (
-                robot_state.to_dict()
-                if hasattr(robot_state, "to_dict")
-                else robot_state
-            )
-        return result
+        del episode_id
+        goals = self.autonomy_store.goals_recent(limit=1)
+        return (
+            None
+            if not goals
+            else {
+                "goal": _goal_payload(goals[0]),
+                "actions": self.autonomy_store.actions_for_goal(goals[0]["goal_id"]),
+            }
+        )
 
     async def create_identity_binding(
         self, envelope: Envelope, ttl_sec: float = 600.0
@@ -661,6 +658,19 @@ class GatewayService:
             "linked_target_count": len(linked_targets),
             "linked_targets": linked_targets,
         }
+
+
+def _goal_payload(goal: dict[str, Any]) -> dict[str, Any]:
+    snapshot = dict(goal.get("snapshot") or {})
+    return {
+        "goal_id": goal["goal_id"],
+        "task_id": snapshot.get("task_id"),
+        "robot_id": goal["robot_id"],
+        "objective": snapshot.get("objective"),
+        "status": goal["status"],
+        "termination_reason": goal.get("termination_reason"),
+        "created_at": goal.get("created_at"),
+    }
 
 
 def _compact_status_metrics(metrics: dict[str, Any]) -> dict[str, Any]:

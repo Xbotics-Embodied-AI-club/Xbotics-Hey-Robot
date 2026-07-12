@@ -3,11 +3,17 @@ deployment:
   bus:
     type: nats
     url: nats://127.0.0.1:4222
+
     options:
       robot_publish_hz: 2.0
       camera_stream_hz: 15.0
       human_follow_service_enabled: true
       robot_status_log_every_frames: 30
+
+autonomy:
+  enabled: true
+  robot_id: xlerobot
+  entity_catalog: [robot:xlerobot, scene]
 
 logging:
   level: INFO
@@ -283,7 +289,6 @@ agents:
     policy_id: embodied_skills
     settings:
       mode: autonomous
-      max_iterations: 6
       providers:
         planner:
           type: deepseek
@@ -302,19 +307,3 @@ agents:
           api_key_env: DASHSCOPE_API_KEY
           temperature: 0.0
           max_tokens: 512
-      execution_feedback:
-        backend: status
-        media_root: runtime/xlerobot.real.windows/media
-      task_supervisor:
-        status_stale_sec: 90.0
-        observation_stale_sec: 90.0
-      task_safety:
-        enabled: true
-        voice_motion_requires_confirmation: true
-      perception:
-        scene_captioner:
-          enabled: true
-          purpose: scene_captioner
-      autonomy:
-        enabled: true
-        max_events: 100

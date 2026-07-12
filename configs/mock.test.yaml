@@ -37,6 +37,14 @@ skills:
     - human_follow
     - stop_motion
 
+autonomy:
+  enabled: true
+  robot_id: mock0
+  entity_catalog:
+    - robot:mock0
+    - room:front_workspace
+    - scene
+
 notifications:
   defaults:
     channels: [web]
@@ -135,12 +143,9 @@ agents:
     policy_id: embodied_skills
     settings:
       mode: agent
-      max_iterations: 3
       providers:
         planner:
           type: openai_compat
           model: mock-planner
           api_key: test-key
           api_base: http://127.0.0.1:9/v1
-      execution_feedback:
-        backend: status

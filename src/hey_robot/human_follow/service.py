@@ -33,7 +33,7 @@ class HumanFollowService:
 
     def __init__(self, config: DeploymentConfig) -> None:
         self.config = config
-        self.bus = create_bus_client(config.deployment.bus)
+        self.bus = create_bus_client(config.deployment.bus, role="human_follow")
         self.topics = Topics()
         self._stop = asyncio.Event()
         self._frames: dict[str, tuple[dict[str, Any], Any]] = {}

@@ -245,7 +245,17 @@ class RobotRuntime:
         self, parent: RobotAction, name: str, arguments: dict[str, Any]
     ) -> RobotStatus:
         internal = RobotSkillAction(name, arguments).to_robot_action(
-            SkillIntent(envelope=parent.envelope, skill_id=parent.skill_id, name=name)
+            SkillIntent(
+                envelope=parent.envelope,
+                skill_id=parent.skill_id,
+                goal_id=parent.goal_id,
+                task_id=parent.task_id,
+                deliberation_id=parent.deliberation_id,
+                intent_kind=parent.intent_kind,
+                name=name,
+                arguments=dict(arguments),
+                objective=f"internal {name} for {parent.skill_id}",
+            )
         )
         decision = self.safety.evaluate_action(
             internal,

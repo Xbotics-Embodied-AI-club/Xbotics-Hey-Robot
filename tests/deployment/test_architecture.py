@@ -132,25 +132,26 @@ def test_skill_os_does_not_keep_contract_forwarding_modules() -> None:
     assert offenders == []
 
 
-def test_robot_agent_core_dependency_building_lives_in_builder() -> None:
-    from hey_robot.cognition.core import RobotAgentCore
-    from hey_robot.cognition.core_builder import RobotAgentCoreBuilder
+def test_autonomous_agent_service_replaces_removed_robot_agent_core() -> None:
+    import importlib.util
 
-    assert hasattr(RobotAgentCoreBuilder, "build_runtime")
-    assert hasattr(RobotAgentCoreBuilder, "build_provider")
-    assert hasattr(RobotAgentCoreBuilder, "build_feedback_evaluator")
-    assert not hasattr(RobotAgentCore, "_build_runtime")
-    assert not hasattr(RobotAgentCore, "_build_provider")
-    assert not hasattr(RobotAgentCore, "_build_feedback_evaluator")
-    assert not hasattr(RobotAgentCore, "_configured_skill_catalog")
+    from hey_robot.cognition.autonomous.agent_service import (
+        AutonomousRobotAgentService,
+    )
+
+    assert importlib.util.find_spec("hey_robot.cognition.core") is None
+    assert importlib.util.find_spec("hey_robot.cognition.core_builder") is None
+    assert hasattr(AutonomousRobotAgentService, "_on_request")
 
 
-def test_agent_runtime_provider_request_lives_in_model_loop() -> None:
-    from hey_robot.cognition.runtime.model_loop import ModelLoop
-    from hey_robot.cognition.runtime.runner import AgentRuntime
+def test_strict_runner_replaces_removed_model_loop() -> None:
+    import importlib.util
 
-    assert hasattr(ModelLoop, "request")
-    assert not hasattr(AgentRuntime, "_request_provider")
+    from hey_robot.cognition.runtime.strict_runner import StrictAgentRunner
+
+    assert importlib.util.find_spec("hey_robot.cognition.runtime.model_loop") is None
+    assert importlib.util.find_spec("hey_robot.cognition.runtime.runner") is None
+    assert hasattr(StrictAgentRunner, "run")
 
 
 def test_robot_runtime_does_not_depend_on_skill_os() -> None:

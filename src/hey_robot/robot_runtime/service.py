@@ -38,7 +38,7 @@ class RobotService:
         self.config = config
         self.topics = Topics()
         self.manager = RobotManager(config, skill_catalog=skill_catalog)
-        self.bus = create_bus_client(config.deployment.bus)
+        self.bus = create_bus_client(config.deployment.bus, role="robot")
         self.events = BusEventPublisher(self.bus, self.topics)
         self.media_store = LocalMediaStore(
             config.resources.media_root, max_items=config.resources.media_max_items

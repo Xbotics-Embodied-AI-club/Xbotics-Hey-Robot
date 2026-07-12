@@ -11,8 +11,15 @@ from hey_robot.bus.client import BusClient
 from hey_robot.contracts import SkillContract, SkillContractRuntime
 from hey_robot.events import RuntimeEvent
 from hey_robot.events.bus import EventPublisher
-from hey_robot.protocol import SkillEvent, SkillIntent, SkillResult, Topics
+from hey_robot.protocol import (
+    EvidenceFact,
+    SkillEvent,
+    SkillIntent,
+    SkillResult,
+    Topics,
+)
 from hey_robot.protocol.messages import to_payload
+from hey_robot.skill_os.command_store import SkillCommandStore
 from hey_robot.skill_os.composition import SkillExecutionPlan
 from hey_robot.skill_os.scheduler import SkillRun
 
@@ -35,6 +42,9 @@ class SkillEventSink:
         self.contracts = contracts
         self.scheduler_root = Path(runtime_dir) / "skill_scheduler"
         self.scheduler_root.mkdir(parents=True, exist_ok=True)
+        self.command_store = SkillCommandStore(
+            self.scheduler_root.parent / "skill_receipts.sqlite3"
+        )
 
     async def publish_event(
         self,
@@ -85,7 +95,7 @@ class SkillEventSink:
         self,
         intent: SkillIntent,
         status: str,
-        success: bool,
+        success: bool | None,
         summary: str,
         *,
         run: SkillRun | None = None,
@@ -94,26 +104,26 @@ class SkillEventSink:
         failure_mode: str | None = None,
         steps_executed: int = 0,
         contract: SkillContract | None = None,
+        evidence_data: object = None,
     ) -> None:
-        await self.bus.publish(
-            self.topics.skill_result,
-            to_payload(
-                SkillResult(
-                    envelope=intent.envelope,
-                    skill_id=intent.skill_id,
-                    name=intent.name or (contract.name if contract is not None else ""),
-                    status=status,
-                    success=success,
-                    steps_executed=steps_executed,
-                    progress=1.0 if success else 0.0,
-                    summary=summary,
-                    failure_mode=failure_mode,
-                    frame_id=frame_id,
-                    error=error,
-                    metadata=self._metadata(intent, contract=contract, run=run),
-                )
-            ),
+        result = SkillResult(
+            envelope=intent.envelope,
+            skill_id=intent.skill_id,
+            name=intent.name or (contract.name if contract is not None else ""),
+            status=status,
+            success=success,
+            steps_executed=steps_executed,
+            progress=1.0 if success else 0.0,
+            summary=summary,
+            failure_mode=failure_mode,
+            frame_id=frame_id,
+            error=error,
+            evidence=_evidence_from_data(intent, evidence_data, frame_id),
+            metadata=self._metadata(intent, contract=contract, run=run),
         )
+        encoded = to_payload(result)
+        self.command_store.terminal(intent.skill_id, encoded)
+        await self.bus.publish(self.topics.skill_result, encoded)
 
     async def publish_scheduler_state(
         self,
@@ -233,3 +243,39 @@ class SkillEventSink:
         with tmp.open("w", encoding="utf-8") as handle:
             json.dump(snapshot, handle, ensure_ascii=False, indent=2, sort_keys=True)
         tmp.replace(path)
+
+
+def _evidence_from_data(
+    intent: SkillIntent, evidence_data: object, frame_id: int | None
+) -> tuple[EvidenceFact, ...]:
+    """Accept only explicit semantic facts emitted by a trusted skill adapter."""
+    if not isinstance(evidence_data, list):
+        return ()
+    facts: list[EvidenceFact] = []
+    for index, item in enumerate(evidence_data):
+        if not isinstance(item, dict):
+            continue
+        subject_id = item.get("subject_id")
+        predicate = item.get("predicate")
+        object_id = item.get("object_id")
+        if (
+            not isinstance(subject_id, str)
+            or predicate
+            not in {"equals", "at", "near", "inside", "held_by", "observed"}
+            or not isinstance(object_id, str)
+        ):
+            continue
+        facts.append(
+            EvidenceFact(
+                evidence_id=f"skill:{intent.skill_id}:{index}",
+                goal_id=intent.goal_id,
+                source_kind="skill_result",
+                source_id=intent.skill_id,
+                observed_at=time.time(),
+                frame_id=frame_id,
+                subject_id=subject_id,
+                predicate=predicate,
+                object_id=object_id,
+            )
+        )
+    return tuple(facts)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 
-from hey_robot.cognition import RobotAgentService
+from hey_robot.cognition import AutonomousRobotAgentService
 from hey_robot.config import DeploymentConfig
 
 
@@ -18,7 +18,7 @@ async def async_main() -> None:
 
     config = DeploymentConfig.from_yaml(args.config)
     agent_id = args.agent_id or config.default_agent_id()
-    service = RobotAgentService(config, agent_id=agent_id, episode_dir=args.episode_dir)
+    service = AutonomousRobotAgentService(config, agent_id=agent_id)
     try:
         await service.start()
     finally:

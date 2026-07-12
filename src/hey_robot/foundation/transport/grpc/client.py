@@ -75,7 +75,7 @@ class GrpcModelServiceClient:
             objective=request.intent.objective,
             arguments=_dict_to_struct(dict(arguments)),
             timeout_sec=float(request.timeout_sec),
-            metadata=_dict_to_struct(dict(request.intent.metadata)),
+            metadata=_dict_to_struct({}),
         )
         try:
             response = await self._stub.ExecuteSkill(

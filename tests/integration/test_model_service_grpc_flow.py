@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 import grpc
+import pytest
 
 from hey_robot.config import DeploymentConfig
 from hey_robot.foundation.clients import ModelServiceRegistry, ServiceInvocationRequest
@@ -77,7 +78,10 @@ def test_deployment_style_model_service_grpc_flow(tmp_path) -> None:
             ModelServiceServicer(ModelServiceState("arm_vla", spec), FakeExecutor()),  # type: ignore[arg-type]
             server,
         )
-        port = server.add_insecure_port("127.0.0.1:0")
+        try:
+            port = server.add_insecure_port("127.0.0.1:0")
+        except RuntimeError as exc:
+            pytest.skip(f"gRPC loopback binding unavailable in this environment: {exc}")
         object.__setattr__(spec, "target", f"127.0.0.1:{port}")
         await server.start()
         try:
@@ -88,6 +92,10 @@ def test_deployment_style_model_service_grpc_flow(tmp_path) -> None:
                     robot_id="xlerobot",
                 ),
                 skill_id="skill-integration",
+                goal_id="goal-integration",
+                task_id="task-integration",
+                deliberation_id="deliberation-integration",
+                intent_kind="skill",
                 name="set_gripper",
                 arguments={"action": "close"},
                 objective="close the gripper",

@@ -306,6 +306,10 @@ async def test_xlerobot_driver_rejects_action_when_contract_readiness_fails() ->
     intent = SkillIntent(
         envelope=Envelope(robot_id="xlerobot"),
         skill_id="skill1",
+        goal_id="goal1",
+        task_id="task1",
+        deliberation_id="deliberation1",
+        intent_kind="skill",
         name="set_gripper",
         arguments={"action": "open"},
         objective="open gripper",
