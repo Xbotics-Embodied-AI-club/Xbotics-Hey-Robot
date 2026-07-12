@@ -5,7 +5,7 @@ import os
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from hey_robot.bus.client import BusClient
 from hey_robot.contracts import SkillContract, SkillContractRuntime
@@ -94,7 +94,7 @@ class SkillEventSink:
     async def publish_result(
         self,
         intent: SkillIntent,
-        status: str,
+        status: Literal["completed", "failed", "interrupted", "unknown"],
         success: bool | None,
         summary: str,
         *,

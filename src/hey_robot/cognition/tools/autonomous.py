@@ -7,7 +7,7 @@ do not hold IO, a bus connection, or a skill gateway.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, ClassVar, Protocol
 
 from hey_robot.protocol import ActionProposal
 
@@ -22,8 +22,8 @@ class AgentToolDependencies:
 
 
 class RequestObservationTool:
-    name = "request_observation"
-    schema = {
+    name: ClassVar[str] = "request_observation"
+    schema: ClassVar[dict[str, Any]] = {
         "type": "function",
         "function": {
             "name": name,
@@ -50,8 +50,8 @@ class RequestObservationTool:
 
 
 class RequestSkillTool:
-    name = "request_skill"
-    schema = {
+    name: ClassVar[str] = "request_skill"
+    schema: ClassVar[dict[str, Any]] = {
         "type": "function",
         "function": {
             "name": name,
@@ -84,17 +84,24 @@ class RequestSkillTool:
             raise ValueError("slots must be an object")
         try:
             spec = self._catalog.get(skill.strip())
-        except KeyError:
-            raise ValueError(f"unknown skill: {skill}")
+        except KeyError as err:
+            raise ValueError(f"unknown skill: {skill}") from err
         category = str(getattr(spec, "category", ""))
         if skill.strip() == "inspect_scene" or category in {"observe", "perception"}:
             raise ValueError("observation skills must use request_observation")
         return ActionProposal("skill", skill.strip(), objective.strip(), dict(slots))
 
 
+class ToolProtocol(Protocol):
+    @property
+    def schema(self) -> dict[str, Any]: ...
+
+    def proposal(self, arguments: dict[str, Any]) -> ActionProposal: ...
+
+
 class AutonomousToolRegistry:
     def __init__(self, deps: AgentToolDependencies) -> None:
-        self._tools = {
+        self._tools: dict[str, ToolProtocol] = {
             RequestObservationTool.name: RequestObservationTool(),
             RequestSkillTool.name: RequestSkillTool(deps.skill_catalog),
         }

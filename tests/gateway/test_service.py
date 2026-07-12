@@ -19,6 +19,7 @@ from hey_robot.protocol import (
     UserTurn,
 )
 from hey_robot.protocol.messages import to_payload
+from hey_robot.providers import ReasoningResponse, ReasoningToolCall
 
 
 class FakeBus:
@@ -57,6 +58,36 @@ class FakeChannels:
         self.stopped = True
 
 
+class GoalBuilderProvider:
+    def get_default_model(self) -> str:
+        return "test"
+
+    async def chat(self, **_kwargs) -> ReasoningResponse:
+        return ReasoningResponse(
+            tool_calls=[
+                ReasoningToolCall(
+                    "call-1",
+                    "route_interaction",
+                    {
+                        "kind": "goal",
+                        "objective": "observe the scene",
+                        "success_criteria": [
+                            {
+                                "criterion_id": "observed",
+                                "criterion_type": "evidence_present",
+                                "subject_id": "robot:mock0",
+                                "predicate": "observed",
+                                "object_id": "scene",
+                                "max_age_sec": 30,
+                            }
+                        ],
+                    },
+                )
+            ],
+            finish_reason="tool_calls",
+        )
+
+
 def _gateway(tmp_path) -> GatewayService:
     config = DeploymentConfig.from_dict(
         {
@@ -84,7 +115,7 @@ def _gateway(tmp_path) -> GatewayService:
     return gateway
 
 
-def test_gateway_rejects_ordinary_turn_and_publishes_explicit_goal_command(
+def test_gateway_routes_ordinary_turn_as_text_only_and_publishes_explicit_goal_command(
     tmp_path,
 ) -> None:
     gateway = _gateway(tmp_path)
@@ -103,11 +134,7 @@ def test_gateway_rejects_ordinary_turn_and_publishes_explicit_goal_command(
 
     fake_bus = cast(FakeBus, gateway.bus)
     assert all(topic != gateway.topics.user_turn for topic, _ in fake_bus.published)
-    assert any(
-        payload["text"].startswith("GOAL_REQUIRED")
-        for topic, payload in fake_bus.published
-        if topic == gateway.topics.agent_reply
-    )
+    assert any(topic == gateway.topics.agent_reply for topic, _ in fake_bus.published)
 
     create = UserTurn(
         envelope=turn.envelope,
@@ -121,6 +148,19 @@ def test_gateway_rejects_ordinary_turn_and_publishes_explicit_goal_command(
     )
     assert command["action"] == "create"
     assert command["envelope"]["robot_id"] == "mock0"
+
+
+def test_gateway_converts_model_goal_tool_call_to_goal_command(tmp_path) -> None:
+    gateway = _gateway(tmp_path)
+    gateway._presentation_providers["main"] = GoalBuilderProvider()
+    asyncio.run(
+        gateway._on_user_turn(
+            UserTurn(Envelope(channel="web", sender_id="u1"), "look around")
+        )
+    )
+    fake_bus = cast(FakeBus, gateway.bus)
+    assert any(topic == gateway.topics.goal_command for topic, _ in fake_bus.published)
+    assert all(topic != gateway.topics.skill_intent for topic, _ in fake_bus.published)
 
 
 def test_gateway_deduplicates_own_runtime_event_echo(tmp_path) -> None:
@@ -175,13 +215,6 @@ def test_gateway_web_history_uses_user_identity_scope(tmp_path) -> None:
 
 def test_gateway_web_cockpit_exposes_autonomy_goal_view(tmp_path) -> None:
     gateway = _gateway(tmp_path)
-    envelope = Envelope(
-        trace_id="tr1",
-        episode_id="ep1",
-        channel="web",
-        robot_id="mock0",
-        agent_id="main",
-    )
     gateway.autonomy_store.create_goal(
         command_id="cmd",
         goal_id="goal",

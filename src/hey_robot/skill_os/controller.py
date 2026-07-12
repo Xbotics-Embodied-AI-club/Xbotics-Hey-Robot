@@ -7,7 +7,7 @@ import math
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 from PIL import Image
 
@@ -250,8 +250,7 @@ class SkillControllerService:
                     stop_dispatched = True
                 except Exception:
                     logger.exception(
-                        "failed to publish physical stop for control %s",
-                        control.control_id,
+                        f"failed to publish physical stop for control {control.control_id}",
                     )
             idle_confirmed = bool(affected_states) and all(
                 self._idle_confirmed(state) for state in affected_states
@@ -274,7 +273,7 @@ class SkillControllerService:
         await self.bus.publish(self.topics.skill_control_result, encoded)
 
     async def _publish_stop_motion(
-        self, control: SkillControl, state: _SkillControllerState
+        self, control: SkillControl, _state: _SkillControllerState
     ) -> None:
         """Use the robot action path for a control-plane stop, never SkillIntent."""
         from hey_robot.protocol import RobotAction
@@ -583,16 +582,30 @@ class SkillControllerService:
         )
         if state.active_runs.get(intent.skill_id) is not run or run.terminal:
             return
+        evidence_data = getattr(result, "data", {}).get("evidence")
+        if result.success and intent.name == "inspect_scene":
+            facts = list(evidence_data) if isinstance(evidence_data, list) else []
+            facts.append(
+                {
+                    "subject_id": f"robot:{state.spec.robot_id}",
+                    "predicate": "observed",
+                    "object_id": "scene",
+                }
+            )
+            evidence_data = facts
         await self._finish_run(
             policy_id,
             state,
             run,
             success=bool(result.success),
             summary=str(result.summary),
-            status=str(result.status),
+            status=cast(
+                Literal["completed", "failed", "interrupted", "unknown"],
+                str(result.status),
+            ),
             failure_mode=getattr(result, "failure_mode", None),
             error=getattr(result, "error", None),
-            evidence_data=getattr(result, "data", {}).get("evidence"),
+            evidence_data=evidence_data,
         )
 
     async def _finish_run(
@@ -603,7 +616,7 @@ class SkillControllerService:
         *,
         success: bool | None,
         summary: str,
-        status: str,
+        status: Literal["completed", "failed", "interrupted", "unknown"],
         failure_mode: str | None = None,
         error: str | None = None,
         evidence_data: object = None,
@@ -958,7 +971,7 @@ class SkillControllerService:
     async def _publish_result(
         self,
         intent: SkillIntent,
-        status: str,
+        status: Literal["completed", "failed", "interrupted", "unknown"],
         success: bool | None,
         summary: str,
         *,
@@ -1247,7 +1260,7 @@ class SkillControllerService:
     async def _interrupt_active(
         self, policy_id: str, state: _SkillControllerState, interrupt: SkillIntent
     ) -> None:
-        await self._handle_interrupting_intent(policy_id, state, interrupt)
+        del policy_id, state, interrupt  # deleted bypass, use skill.control instead
 
     @staticmethod
     def _precondition_block(

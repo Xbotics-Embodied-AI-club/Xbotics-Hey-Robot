@@ -8,6 +8,9 @@ import time
 from pathlib import Path
 
 from hey_robot.bus.factory import create_bus_client
+from hey_robot.cognition.autonomous.context_builder import (
+    build_context,
+)
 from hey_robot.cognition.policy.task_evaluator import TaskEvaluator
 from hey_robot.cognition.runtime.deliberation_store import DeliberationStore
 from hey_robot.cognition.runtime.result import AgentRunRequest
@@ -25,7 +28,7 @@ from hey_robot.protocol import (
     Topics,
 )
 from hey_robot.protocol.messages import from_payload, to_payload
-from hey_robot.providers import ReasoningMessage, build_provider
+from hey_robot.providers import build_provider
 from hey_robot.skill_os.registry import registry_from_config
 
 
@@ -125,24 +128,24 @@ class AutonomousRobotAgentService:
                 "PERSISTENCE_FAILED",
                 "could not record model boundary",
             )
-        message = ReasoningMessage(
-            role="system",
-            content=json.dumps(
-                {
-                    "objective": request.goal.objective,
-                    "criteria": [
-                        item.__dict__ for item in request.goal.success_criteria
-                    ],
-                    "evidence": [item.__dict__ for item in request.evidence],
-                    "instruction": "Call exactly one available tool. Text cannot complete the physical goal.",
-                },
-                sort_keys=True,
-                default=str,
-            ),
+        context = build_context(
+            request,
+            evaluation_text=self._evaluation_text(evaluation),
         )
+        if context.failure is not None:
+            return DeliberationResult(
+                request.envelope,
+                request.deliberation_id,
+                request_hash,
+                request.goal.goal_id,
+                request.goal.task_id,
+                "failed",
+                failure=context.failure,
+                evaluation=evaluation,
+            )
         run = await self.runner.run(
             AgentRunRequest(
-                (message,),
+                context.messages,
                 frozenset({"request_observation", "request_skill"}),
                 time.monotonic() + 120.0,
                 request.deliberation_id,
@@ -182,6 +185,15 @@ class AutonomousRobotAgentService:
             failure=run.failure,
             evaluation=evaluation,
         )
+
+    @staticmethod
+    def _evaluation_text(evaluation) -> str:
+        if evaluation.outcome == "satisfied":
+            return f"CONTRACT SATISFIED: {evaluation.reason}"
+        missing = evaluation.missing_criteria_ids
+        if missing:
+            return f"INCONCLUSIVE — missing criteria: {', '.join(missing)}"
+        return f"INCONCLUSIVE — {evaluation.reason}"
 
     @staticmethod
     def _failed(

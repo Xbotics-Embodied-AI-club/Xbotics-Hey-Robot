@@ -238,7 +238,7 @@ class RobotService:
             status = RobotStatus(
                 envelope=action.envelope,
                 frame_id=None,
-                state="failed",
+                state="failed",  # type: ignore[arg-type]
                 task=None,
                 skill_id=action.skill_id or None,
                 success=False,

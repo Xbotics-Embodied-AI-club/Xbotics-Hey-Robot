@@ -8,8 +8,24 @@ deployment:
   bus:
     type: nats
     url: nats://127.0.0.1:4222
-
     options:
+      credentials:
+        autonomy_supervisor:
+          username: autonomy_supervisor
+          password_env: HEY_ROBOT_NATS_SUPERVISOR_PASSWORD
+        agent:
+          username: agent
+          password_env: HEY_ROBOT_NATS_AGENT_PASSWORD
+        skill_controller:
+          username: skill_controller
+          password_env: HEY_ROBOT_NATS_SKILL_CONTROLLER_PASSWORD
+        robot:
+          username: robot
+          password_env: HEY_ROBOT_NATS_ROBOT_PASSWORD
+        gateway:
+          username: gateway
+          password_env: HEY_ROBOT_NATS_GATEWAY_PASSWORD
+
       robot_publish_hz: 2.0
       robot_status_log_every_frames: 5
 

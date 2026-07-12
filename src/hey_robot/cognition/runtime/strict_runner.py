@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import cast
 
 from hey_robot.cognition.runtime.result import (
     AgentRunRequest,
@@ -33,11 +34,12 @@ class StrictAgentRunner:
             return self._failure(
                 "MODEL_REQUEST", "PROVIDER_TIMEOUT", "deliberation deadline elapsed"
             )
-        messages = list(request.messages)
-        if not all(isinstance(message, ReasoningMessage) for message in messages):
+        raw = list(request.messages)
+        if not all(isinstance(message, ReasoningMessage) for message in raw):
             return self._failure(
                 "CONTEXT_BUILD", "INVALID_MODEL_RESPONSE", "invalid reasoning message"
             )
+        messages = cast(list[ReasoningMessage], raw)
         try:
             response = await asyncio.wait_for(
                 self._provider.chat(messages=messages, tools=self._tools.definitions),

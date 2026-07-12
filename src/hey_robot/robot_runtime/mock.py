@@ -253,7 +253,7 @@ class MockRobotDriver:
         return RobotStatus(
             envelope=self._envelope(),
             frame_id=self.frame_id,
-            state=self.state,
+            state=self.state,  # type: ignore[arg-type]
             success=None,
             error=self.last_error,
             metrics=self._metrics(),
@@ -1097,7 +1097,7 @@ class MockRobotDriver:
         return RobotStatus(
             envelope=self._envelope(trace_id=action.envelope.trace_id),
             frame_id=self.frame_id,
-            state=self.state,
+            state=self.state,  # type: ignore[arg-type]
             skill_id=action.skill_id,
             success=success,
             error=None if success else self.last_error,

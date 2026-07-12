@@ -59,7 +59,8 @@ async def test_strict_runner_returns_one_proposal_from_one_request() -> None:
         )
     )
     assert result.status == "action_proposed"
-    assert result.proposal is not None and result.proposal.skill_name == "move"
+    assert result.proposal is not None
+    assert result.proposal.skill_name == "move"
     assert provider.calls == 1
 
 

@@ -22,7 +22,7 @@ def canonical_payload_hash(payload: dict[str, Any]) -> str:
 
 def _plain(value: Any) -> Any:
     if is_dataclass(value):
-        return _plain(asdict(value))
+        return _plain(asdict(value))  # type: ignore[arg-type]
     if isinstance(value, dict):
         return {str(key): _plain(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):

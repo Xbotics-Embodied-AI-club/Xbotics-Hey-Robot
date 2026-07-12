@@ -403,7 +403,7 @@ class XLeRobotSimDriver:
         return RobotStatus(
             envelope=self._envelope(),
             frame_id=self.frame_id,
-            state=self._protocol_state(),
+            state=self._protocol_state(),  # type: ignore[arg-type]
             location_id=self._location_id(),
             motion_state="moving" if self.state == "executing" else "idle",
             success=None,
@@ -1627,7 +1627,7 @@ class XLeRobotSimDriver:
         return RobotStatus(
             envelope=self._envelope(),
             frame_id=self.frame_id,
-            state=self._protocol_state(),
+            state=self._protocol_state(),  # type: ignore[arg-type]
             location_id=self._location_id(),
             motion_state="idle" if success else "unknown",
             skill_id=action.skill_id,

@@ -1,6 +1,14 @@
+import pytest
+
 from hey_robot.cognition.autonomous.policy import check_budget, dispatch_admission
 from hey_robot.config import DeploymentConfig
-from hey_robot.protocol import BudgetState, Envelope, GoalBudgets, RobotStatus
+from hey_robot.protocol import (
+    BudgetState,
+    Envelope,
+    GoalBudgets,
+    RobotExecutionGate,
+    RobotStatus,
+)
 
 
 def test_budget_rejects_missing_battery_for_physical_admission() -> None:
@@ -17,12 +25,14 @@ def test_budget_rejects_missing_battery_for_physical_admission() -> None:
 
 def test_dispatch_rejects_uncertain_gate_and_offline_status() -> None:
     assert (
-        dispatch_admission(gate_state="uncertain", status=None).code
+        dispatch_admission(
+            gate=RobotExecutionGate("main", 0, "uncertain"), status=None
+        ).code
         == "ROBOT_EXECUTION_UNCERTAIN"
     )
     assert (
         dispatch_admission(
-            gate_state="ready",
+            gate=RobotExecutionGate("main", 0, "ready"),
             status=RobotStatus(Envelope(robot_id="main"), state="offline"),
         ).code
         == "ROBOT_OFFLINE"
@@ -30,11 +40,7 @@ def test_dispatch_rejects_uncertain_gate_and_offline_status() -> None:
 
 
 def test_config_rejects_legacy_agent_autonomy_settings() -> None:
-    try:
+    with pytest.raises(ValueError, match="removed autonomy fields"):
         DeploymentConfig.from_dict(
             {"agents": {"main": {"settings": {"autonomy": {"enabled": True}}}}}
         )
-    except ValueError as exc:
-        assert "removed autonomy fields" in str(exc)
-    else:
-        raise AssertionError("legacy autonomy settings were accepted")

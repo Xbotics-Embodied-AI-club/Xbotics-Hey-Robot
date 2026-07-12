@@ -42,6 +42,14 @@ def _service(tmp_path: Path) -> AutonomySupervisorService:
     return service
 
 
+def _request_hash(service: AutonomySupervisorService, goal: dict) -> str:
+    value = service.store.deliberation_request_hash(
+        goal_id=goal["goal_id"], deliberation_id=goal["active_deliberation_id"]
+    )
+    assert value is not None
+    return value
+
+
 def test_supervisor_dispatches_one_intent_for_one_deliberation(tmp_path: Path) -> None:
     service = _service(tmp_path)
     envelope = Envelope(robot_id="main", agent_id="main")
@@ -69,11 +77,13 @@ def test_supervisor_dispatches_one_intent_for_one_deliberation(tmp_path: Path) -
     result = DeliberationResult(
         envelope,
         goal["active_deliberation_id"],
-        "request",
+        _request_hash(service, goal),
         goal["goal_id"],
         goal["snapshot"]["task_id"],
         "action_proposed",
-        proposal=ActionProposal("skill", "move_base", "move", {"direction": "forward"}),
+        proposal=ActionProposal(
+            "skill", "navigate_to", "navigate", {"target": "room:lab"}
+        ),
     )
     asyncio.run(
         service._on_deliberation_result(
@@ -121,11 +131,13 @@ def test_conflicting_skill_result_locks_robot_execution(tmp_path: Path) -> None:
     proposal = DeliberationResult(
         envelope,
         goal["active_deliberation_id"],
-        "request",
+        _request_hash(service, goal),
         goal["goal_id"],
         goal["snapshot"]["task_id"],
         "action_proposed",
-        proposal=ActionProposal("skill", "move_base", "move", {"direction": "forward"}),
+        proposal=ActionProposal(
+            "skill", "navigate_to", "navigate", {"target": "room:lab"}
+        ),
     )
     asyncio.run(
         service._on_deliberation_result(
@@ -152,7 +164,7 @@ def test_conflicting_skill_result_locks_robot_execution(tmp_path: Path) -> None:
         )
     )
     assert service.store.action(skill_id)["status"] == "unknown"
-    assert service.store.gate("main")["state"] == "uncertain"
+    assert service.store.gate("main").state == "uncertain"
     assert service.store.goal(goal["goal_id"])["status"] == "blocked"
 
 
@@ -185,11 +197,13 @@ def test_cancel_waiting_goal_persists_interrupt_and_blocks_late_dispatch(
     proposal = DeliberationResult(
         envelope,
         goal["active_deliberation_id"],
-        "request",
+        _request_hash(service, goal),
         goal["goal_id"],
         goal["snapshot"]["task_id"],
         "action_proposed",
-        proposal=ActionProposal("skill", "move_base", "move", {"direction": "forward"}),
+        proposal=ActionProposal(
+            "skill", "navigate_to", "navigate", {"target": "room:lab"}
+        ),
     )
     asyncio.run(
         service._on_deliberation_result(
@@ -207,7 +221,7 @@ def test_cancel_waiting_goal_persists_interrupt_and_blocks_late_dispatch(
         if topic == service.topics.skill_control
     ]  # type: ignore[attr-defined]
     assert len(controls) == 1
-    assert service.store.gate("main")["state"] == "stop_pending"
+    assert service.store.gate("main").state == "stop_pending"
     asyncio.run(
         service._on_deliberation_result(
             service.topics.agent_deliberation_result, to_payload(proposal)
@@ -252,11 +266,13 @@ def test_unknown_control_result_keeps_execution_lock(tmp_path: Path) -> None:
     proposal = DeliberationResult(
         envelope,
         goal["active_deliberation_id"],
-        "request",
+        _request_hash(service, goal),
         goal["goal_id"],
         goal["snapshot"]["task_id"],
         "action_proposed",
-        proposal=ActionProposal("skill", "move_base", "move", {"direction": "forward"}),
+        proposal=ActionProposal(
+            "skill", "navigate_to", "navigate", {"target": "room:lab"}
+        ),
     )
     asyncio.run(
         service._on_deliberation_result(
@@ -290,5 +306,5 @@ def test_unknown_control_result_keeps_execution_lock(tmp_path: Path) -> None:
             service.topics.skill_control_result, to_payload(result)
         )
     )
-    assert service.store.gate("main")["state"] == "uncertain"
+    assert service.store.gate("main").state == "uncertain"
     assert service.store.goal(goal["goal_id"])["status"] == "blocked"

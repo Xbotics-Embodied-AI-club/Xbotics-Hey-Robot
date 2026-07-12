@@ -15,7 +15,6 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Literal,
-    TypeVar,
     Union,
     get_args,
     get_origin,
@@ -224,7 +223,7 @@ class EvidenceFact:
 class GoalCommand:
     envelope: Envelope
     command_id: str
-    action: Literal["create", "cancel"]
+    action: Literal["create", "cancel", "emergency_stop"]
     goal_id: str | None = None
     objective: str = ""
     contract_template_id: str | None = None
@@ -385,24 +384,31 @@ class SkillControlResult:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class RobotExecutionGate:
+    robot_id: str
+    version: int
+    state: Literal["ready", "stop_pending", "uncertain"]
+    control_id: str | None = None
+    reason: str | None = None
+    updated_at: float = 0.0
+
+
 def to_payload(message: DataclassInstance) -> dict[str, Any]:
     return asdict(message)
 
 
-T = TypeVar("T")
-
-
-def from_payload(cls: type[T], payload: dict[str, Any]) -> T:
+def from_payload[T](cls: type[T], payload: dict[str, Any]) -> T:
     """Decode a protocol message without accepting unknown or malformed fields."""
     if not isinstance(payload, dict):
         raise TypeError(f"{cls.__name__} payload must be an object")
-    known = {item.name for item in fields(cls)}
+    known = {item.name for item in fields(cls)}  # type: ignore[arg-type]
     unknown = set(payload) - known
     if unknown:
         raise ValueError(f"{cls.__name__} has unknown fields: {sorted(unknown)}")
     hints = get_type_hints(cls)
     kwargs: dict[str, Any] = {}
-    for item in fields(cls):
+    for item in fields(cls):  # type: ignore[arg-type]
         if item.name not in payload:
             if item.default is MISSING and item.default_factory is MISSING:
                 raise ValueError(f"{cls.__name__} missing required field: {item.name}")
@@ -509,6 +515,8 @@ def _validate_message(message: Any) -> None:
                 )
         elif message.action == "cancel" and not message.goal_id:
             raise ValueError("cancel GoalCommand requires goal_id")
+        elif message.action == "emergency_stop" and not message.envelope.robot_id:
+            raise ValueError("emergency_stop GoalCommand requires robot_id")
     if isinstance(message, SkillResult):
         if message.status == "completed" and message.success is not True:
             raise ValueError("completed SkillResult requires success=True")

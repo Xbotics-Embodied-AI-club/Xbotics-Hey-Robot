@@ -144,7 +144,7 @@ class SO101Driver:
         return RobotStatus(
             envelope=self._envelope(),
             frame_id=self.frame_id,
-            state=self.state,
+            state=self.state,  # type: ignore[arg-type]
             success=None,
             error=self.last_error,
             metrics={

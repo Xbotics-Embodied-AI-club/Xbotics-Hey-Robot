@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from hey_robot.protocol import BudgetState, GoalBudgets, RobotStatus
+from hey_robot.protocol import BudgetState, GoalBudgets, RobotExecutionGate, RobotStatus
 
 
 @dataclass(frozen=True)
@@ -38,9 +38,9 @@ def check_budget(
 
 
 def dispatch_admission(
-    *, gate_state: str, status: RobotStatus | None
+    *, gate: RobotExecutionGate, status: RobotStatus | None
 ) -> PolicyDecision:
-    if gate_state != "ready":
+    if gate.state != "ready":
         return PolicyDecision(False, "ROBOT_EXECUTION_UNCERTAIN")
     if status is None or status.state in {"offline", "unknown"}:
         return PolicyDecision(False, "ROBOT_OFFLINE")

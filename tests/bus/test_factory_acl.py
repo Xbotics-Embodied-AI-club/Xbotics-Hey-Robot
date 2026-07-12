@@ -20,7 +20,7 @@ def test_bus_factory_uses_service_role_credentials(monkeypatch) -> None:
         role="autonomy_supervisor",
     )
     assert client.username == "supervisor"
-    assert client.password == "secret"
+    assert client.password == "secret"  # noqa: S105
 
 
 def test_bus_factory_rejects_missing_acl_role() -> None:

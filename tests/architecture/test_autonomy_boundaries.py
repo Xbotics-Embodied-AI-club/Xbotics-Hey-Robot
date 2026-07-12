@@ -1,0 +1,69 @@
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+COGNITION_ROOT = ROOT / "src" / "hey_robot" / "cognition"
+
+
+def _cognition_source_files() -> list[Path]:
+    return sorted(path for path in COGNITION_ROOT.rglob("*.py") if path.is_file())
+
+
+def test_autonomous_agent_tools_are_exactly_two() -> None:
+    """The autonomous agent surface must have exactly request_observation and request_skill."""
+    registry_path = COGNITION_ROOT / "tools" / "autonomous.py"
+    text = registry_path.read_text(encoding="utf-8")
+
+    found_tools = set(re.findall(r'name\s*(?::\s*\S+)?\s*=\s*"([^"]+)"', text))
+    assert found_tools == {"request_observation", "request_skill"}, (
+        f"autonomous tool surface must be exactly request_observation and request_skill, got: {sorted(found_tools)}"
+    )
+
+
+def test_autonomous_path_does_not_import_legacy_tools() -> None:
+    """No cognition/autonomous source may import any deleted legacy tool."""
+    forbidden_tools = (
+        re.compile(r"\bget_robot_status\b"),
+        re.compile(r"\bget_task_context\b"),
+        re.compile(r"\bpropose_skill\b"),
+        re.compile(r"\bsearch_memory\b"),
+        re.compile(r"\bwrite_memory\b"),
+        re.compile(r"\brequest_perception\b"),
+    )
+    offenders: list[str] = []
+    for path in COGNITION_ROOT.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        offenders.extend(
+            f"{path.relative_to(ROOT)}: {pattern.pattern}"
+            for pattern in forbidden_tools
+            if pattern.search(text)
+        )
+    assert offenders == [], f"autonomous path imports legacy tools: {offenders}"
+
+
+def test_strict_runner_does_not_import_task_contract() -> None:
+    """StrictAgentRunner must not import TaskContract or TaskEvaluator."""
+    runner_path = COGNITION_ROOT / "runtime" / "strict_runner.py"
+    text = runner_path.read_text(encoding="utf-8")
+    forbidden = ("TaskContract", "TaskEvaluator", "EvidenceFact", "GoalSnapshot")
+    offenders = [f"strict_runner.py: {name}" for name in forbidden if name in text]
+    assert offenders == [], f"strict_runner imports task state: {offenders}"
+
+
+def test_agent_service_does_not_publish_skill_intent() -> None:
+    """RobotAgentService must never publish skill.intent directly."""
+    agent_path = COGNITION_ROOT / "autonomous" / "agent_service.py"
+    text = agent_path.read_text(encoding="utf-8")
+    assert "skill_intent" not in text, "agent_service references skill_intent"
+    assert "SkillIntent(" not in text, "agent_service constructs SkillIntent"
+
+
+def test_supervisor_does_not_import_provider() -> None:
+    """AutonomySupervisor must never call a model provider."""
+    supervisor_path = COGNITION_ROOT / "autonomous" / "supervisor.py"
+    text = supervisor_path.read_text(encoding="utf-8")
+    forbidden = ("ReasoningProvider", "build_provider", "provider.chat", "chat(")
+    offenders = [f"supervisor.py: {name}" for name in forbidden if name in text]
+    assert offenders == [], f"supervisor imports provider: {offenders}"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+import uuid
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,7 @@ from hey_robot.protocol.messages import (
     from_payload,
     to_payload,
 )
+from hey_robot.providers import ReasoningMessage, build_provider
 from hey_robot.skill_os import SkillStore
 from hey_robot.skill_os.command_store import SkillCommandStore
 
@@ -50,6 +52,47 @@ _BINDING_COMMAND = re.compile(
     r"^\s*(?:bind|绑定)\s+([A-Za-z0-9]{4,12})\s*$", re.IGNORECASE
 )
 _ROBOT_STATUS_PERSIST_INTERVAL_SEC = 5.0
+_ROUTE_INTERACTION_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "route_interaction",
+        "description": "Classify the user request as a text conversation or a physical robot goal.",
+        "parameters": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "kind": {"type": "string", "enum": ["conversation", "goal"]},
+                "response_text": {"type": ["string", "null"]},
+                "objective": {"type": "string"},
+                "success_criteria": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "criterion_id": {"type": "string"},
+                            "criterion_type": {"type": "string"},
+                            "subject_id": {"type": "string"},
+                            "predicate": {"type": "string"},
+                            "object_id": {"type": "string"},
+                            "max_age_sec": {"type": "number"},
+                        },
+                        "required": [
+                            "criterion_id",
+                            "criterion_type",
+                            "subject_id",
+                            "predicate",
+                            "object_id",
+                            "max_age_sec",
+                        ],
+                    },
+                },
+            },
+            "required": ["kind"],
+        },
+    },
+}
 
 
 class GatewayService:
@@ -91,6 +134,7 @@ class GatewayService:
         )
         self._ready = asyncio.Event()
         self._last_robot_status_persisted_at: dict[str, float] = {}
+        self._presentation_providers: dict[str, Any] = {}
         self._register_channels()
 
     async def start(self) -> None:
@@ -158,13 +202,112 @@ class GatewayService:
         )
         if await self._handle_goal_command(turn.text, envelope):
             return
-        await self._send_reply(
-            AgentReply(
-                envelope=envelope,
-                text="GOAL_REQUIRED: use /goal create with an explicit success contract.",
+        await self._reply_to_presentation_turn(envelope, turn.text)
+
+    async def _reply_to_presentation_turn(self, envelope: Envelope, text: str) -> None:
+        """Handle chat directly or create a validated GoalCommand from one model tool call."""
+        agent_id = self._agent_id(envelope.agent_id)
+        try:
+            provider = self._presentation_providers.get(agent_id)
+            if provider is None:
+                provider = build_provider(self.config, agent_id, purpose="agent")
+                self._presentation_providers[agent_id] = provider
+            response = await asyncio.wait_for(
+                provider.chat(
+                    messages=[
+                        ReasoningMessage(
+                            role="system",
+                            content=(
+                                "Route every request by calling route_interaction exactly once. "
+                                "Use kind=conversation with response_text for non-physical requests. "
+                                "Use kind=goal for a request to physically observe or act with the robot, "
+                                "and provide a concrete immutable success contract. "
+                                "A question about what the robot sees or what is in its environment is a "
+                                "physical observation request and must use kind=goal. "
+                                f"Allowed entity IDs: {sorted(self.config.autonomy.entity_catalog)}. "
+                                "Never claim that a physical task has completed. "
+                                "For a scene observation, use exactly this success criterion: "
+                                "criterion_id=scene_observed, criterion_type=evidence_present, "
+                                "subject_id=robot:sim_robot, predicate=observed, object_id=scene, "
+                                "max_age_sec=60. Every kind=goal result must contain at least one "
+                                "complete success_criteria item."
+                            ),
+                        ),
+                        ReasoningMessage(role="user", content=text),
+                    ],
+                    tools=[_ROUTE_INTERACTION_TOOL],
+                ),
+                timeout=60.0,
             )
-        )
-        return
+            if response.tool_calls:
+                if (
+                    len(response.tool_calls) != 1
+                    or response.tool_calls[0].name != "route_interaction"
+                ):
+                    reply = "I could not form a safe autonomous goal from that request."
+                else:
+                    reply = await self._route_model_interaction(
+                        envelope, response.tool_calls[0].arguments
+                    )
+            else:
+                reply = (
+                    response.content or "I cannot provide a text response right now."
+                )
+        except Exception:
+            logger.exception("presentation request failed")
+            reply = "The text assistant is temporarily unavailable."
+        await self._send_reply(AgentReply(envelope=envelope, text=reply))
+
+    async def _route_model_interaction(
+        self, envelope: Envelope, arguments: dict[str, Any]
+    ) -> str:
+        if arguments.get("kind") == "conversation":
+            response_text = arguments.get("response_text")
+            return (
+                str(response_text).strip()
+                or "I cannot provide a text response right now."
+            )
+        if arguments.get("kind") != "goal":
+            return "I could not determine how to handle that request."
+
+        try:
+            objective = str(arguments["objective"]).strip()
+            criteria = self._goal_criteria_from_arguments(arguments)
+            if not objective or not criteria:
+                raise ValueError("missing objective or criteria")
+            command = GoalCommand(
+                envelope,
+                str(uuid.uuid4()),
+                "create",
+                objective=objective,
+                success_criteria=criteria,
+                budgets=GoalBudgets(),
+            )
+            # Decode once here to enforce protocol validation before publication.
+            from_payload(GoalCommand, to_payload(command))
+        except (KeyError, TypeError, ValueError):
+            return "I need a clearer, verifiable success condition before creating that robot task."
+        await self.bus.publish(self.topics.goal_command, to_payload(command))
+        return f"Created autonomous goal: {objective}"
+
+    @staticmethod
+    def _goal_criteria_from_arguments(
+        arguments: dict[str, Any],
+    ) -> tuple[SuccessCriterion, ...]:
+        raw_criteria = arguments.get("success_criteria")
+        try:
+            if not isinstance(raw_criteria, list):
+                raise ValueError("criteria must be a list")
+            criteria = tuple(
+                SuccessCriterion(**item)
+                for item in raw_criteria
+                if isinstance(item, dict)
+            )
+            if criteria:
+                return criteria
+        except (TypeError, ValueError):
+            pass
+        return ()
 
     async def _handle_goal_command(self, text: str, envelope: Envelope) -> bool:
         """The gateway accepts only explicit, structured autonomous commands."""
@@ -172,13 +315,17 @@ class GatewayService:
         if not stripped.startswith("/goal "):
             return False
         parts = stripped.split(maxsplit=2)
-        if len(parts) < 2 or parts[1] not in {"create", "cancel", "reconcile"}:
+        if len(parts) < 2 or parts[1] not in {
+            "create",
+            "cancel",
+            "reconcile",
+            "emergency_stop",
+        }:
             await self._send_reply(
                 AgentReply(envelope=envelope, text="GOAL_CONTRACT_INVALID")
             )
             return True
         import json
-        import uuid
 
         if parts[1] == "reconcile":
             if len(parts) != 3:
@@ -230,6 +377,13 @@ class GatewayService:
             command = GoalCommand(
                 envelope, str(uuid.uuid4()), "cancel", goal_id=parts[2].strip()
             )
+        elif parts[1] == "emergency_stop":
+            if len(parts) != 2:
+                await self._send_reply(
+                    AgentReply(envelope=envelope, text="GOAL_CONTRACT_INVALID")
+                )
+                return True
+            command = GoalCommand(envelope, str(uuid.uuid4()), "emergency_stop")
         else:
             if len(parts) != 3:
                 await self._send_reply(

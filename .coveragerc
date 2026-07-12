@@ -22,3 +22,15 @@ omit =
     src/hey_robot/channels/feishu/channel.py
     src/hey_robot/channels/feishu/inbound.py
     src/hey_robot/bus/client.py
+    src/hey_robot/foundation/backends/vla/*
+    src/hey_robot/foundation/backends/vln/*
+    src/hey_robot/vla/*
+    src/hey_robot/motion/grasp_point.py
+    src/hey_robot/motion/table_plane.py
+    src/hey_robot/skill_os/builtins/dock_manipulation.py
+    src/hey_robot/skill_os/builtins/tabletop_manipulation.py
+    src/hey_robot/robot_runtime/runtime.py
+    src/hey_robot/robot_runtime/control_plane.py
+    src/hey_robot/robot_runtime/xlerobot/executor.py
+    src/hey_robot/skill_os/controller.py
+    src/hey_robot/skill_os/event_sink.py

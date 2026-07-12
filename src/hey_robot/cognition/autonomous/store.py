@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from hey_robot.protocol.messages import RobotExecutionGate
+
 
 class AutonomyStore:
     SCHEMA_VERSION = 2
@@ -125,7 +127,7 @@ class AutonomyStore:
             "battery_percentage": battery_percentage,
         }
 
-    def gate(self, robot_id: str) -> dict[str, Any]:
+    def gate(self, robot_id: str) -> RobotExecutionGate:
         row = self._db.execute(
             "SELECT * FROM robot_execution_gate WHERE robot_id=?", (robot_id,)
         ).fetchone()
@@ -136,7 +138,14 @@ class AutonomyStore:
                     (robot_id, time.time()),
                 )
             return self.gate(robot_id)
-        return dict(row)
+        return RobotExecutionGate(
+            robot_id=str(row["robot_id"]),
+            version=int(row["version"]),
+            state=str(row["state"]),  # type: ignore[arg-type]
+            control_id=str(row["control_id"]) if row["control_id"] else None,
+            reason=str(row["reason"]) if row["reason"] else None,
+            updated_at=float(row["updated_at"]),
+        )
 
     def active_goal_for_robot(self, robot_id: str) -> dict[str, Any] | None:
         row = self._db.execute(
@@ -149,9 +158,12 @@ class AutonomyStore:
         rows = self._db.execute(
             "SELECT goal_id FROM goals ORDER BY created_at DESC LIMIT ?", (limit,)
         ).fetchall()
-        return [
-            self.goal(str(row[0])) for row in rows if self.goal(str(row[0])) is not None
-        ]
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            goal_data = self.goal(str(row[0]))
+            if goal_data is not None:
+                result.append(goal_data)
+        return result
 
     def actions_for_goal(self, goal_id: str) -> list[dict[str, Any]]:
         rows = self._db.execute(
@@ -202,6 +214,16 @@ class AutonomyStore:
                 (deliberation_id, goal_id),
             )
             return True
+
+    def deliberation_request_hash(
+        self, *, goal_id: str, deliberation_id: str
+    ) -> str | None:
+        row = self._db.execute(
+            "SELECT request_hash FROM outgoing_deliberations "
+            "WHERE goal_id=? AND deliberation_id=?",
+            (goal_id, deliberation_id),
+        ).fetchone()
+        return None if row is None else str(row[0])
 
     def accept_action(
         self,
@@ -333,7 +355,13 @@ class AutonomyStore:
             if control is None:
                 return None
             if control[4] is not None:
-                return control[1] if control[4] == result_hash else "conflict"
+                return (
+                    str(control[1])
+                    if control[4] == result_hash and control[1] is not None
+                    else None
+                    if control[4] == result_hash
+                    else "conflict"
+                )
             self._db.execute(
                 "UPDATE control_commands SET status=?, terminal_hash=? WHERE control_id=?",
                 (status, result_hash, control_id),
@@ -373,7 +401,7 @@ class AutonomyStore:
                         "UPDATE goals SET status='blocked', version=version+1 WHERE goal_id=? AND status NOT IN ('completed','failed','cancelled')",
                         (control[1],),
                     )
-            return control[1]
+            return str(control[1]) if control[1] is not None else None
 
     def reconcile_unknown_action(
         self,
@@ -458,20 +486,24 @@ class AutonomyStore:
         status: str,
         result_hash: str,
         evidence: list[dict[str, Any]],
+        result: dict[str, Any] | None = None,
     ) -> str | None:
         """Atomically record terminal action/evidence and reactivate its waiting goal."""
         with self._db:
             action = self._db.execute(
-                "SELECT goal_id, status, terminal_hash FROM actions WHERE skill_id=?",
+                "SELECT goal_id, status, terminal_hash, payload FROM actions WHERE skill_id=?",
                 (skill_id,),
             ).fetchone()
             if action is None:
                 return None
             if action[2] is not None:
                 return action[0] if action[2] == result_hash else "conflict"
+            payload = json.loads(action[3])
+            if result is not None:
+                payload["result"] = result
             self._db.execute(
-                "UPDATE actions SET status=?, terminal_hash=?, version=version+1 WHERE skill_id=?",
-                (status, result_hash, skill_id),
+                "UPDATE actions SET status=?, payload=?, terminal_hash=?, version=version+1 WHERE skill_id=?",
+                (status, _json(payload), result_hash, skill_id),
             )
             for fact in evidence:
                 self._db.execute(
@@ -549,6 +581,34 @@ class AutonomyStore:
                 (status, terminal_hash, skill_id, expected),
             )
             return cur.rowcount == 1
+
+    def mark_action_unknown(self, *, skill_id: str, expected: str, reason: str) -> bool:
+        """Atomically retain the execution lock when physical dispatch is uncertain."""
+        with self._db:
+            row = self._db.execute(
+                "SELECT actions.goal_id, goals.robot_id FROM actions "
+                "JOIN goals ON goals.goal_id=actions.goal_id "
+                "WHERE actions.skill_id=? AND actions.status=?",
+                (skill_id, expected),
+            ).fetchone()
+            if row is None:
+                return False
+            self._db.execute(
+                "UPDATE actions SET status='unknown', version=version+1 "
+                "WHERE skill_id=? AND status=?",
+                (skill_id, expected),
+            )
+            self._db.execute(
+                "UPDATE robot_execution_gate SET state='uncertain', reason=?, "
+                "version=version+1, updated_at=? WHERE robot_id=?",
+                (reason, time.time(), row[1]),
+            )
+            self._db.execute(
+                "UPDATE goals SET status='blocked', version=version+1 "
+                "WHERE goal_id=? AND status NOT IN ('completed','failed','cancelled')",
+                (row[0],),
+            )
+            return True
 
     def recover_publishing(self) -> list[str]:
         with self._db:
