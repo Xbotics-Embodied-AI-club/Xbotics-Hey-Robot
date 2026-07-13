@@ -98,7 +98,7 @@ Feishu 文本/图片/音频 ─┘                            │
 - `channels/voice.py` 把 ASR 文本变为 `UserTurn`，并把最终回复或重要通知 TTS 播报；
 - `channels/feishu/channel.py` 把文本、图片、音频、文件转换为统一的 `UserTurn` / `MediaRef`；
 - `GatewayService._reply_to_presentation_turn()` 通过一个 `route_interaction` tool 将非物理对话和物理 Goal 分开；物理请求只有形成 `objective + success_criteria` 后才会发布 `GoalCommand`；
-- `interaction/InteractionStateStore` 已能记录 episode 的偏好通道、最近意图、待确认信息和已关联渠道，但它是产品查询/展示状态，**目前不应被误当成 Supervisor 的执行真相**。
+- 旧的 `interaction/InteractionStateStore` 已因未接入生产控制链而移除；跨渠道事实统一以 Goal owner、identity binding 和 Gateway receipt 为准。
 
 这个分层方向是对的：nanobot 的 channel 适配器也只负责把外部消息转换为统一入口，不能直接调用工具。Hey Robot 需要再进一步：把“自然语言输入”转为**类型化的用户控制事件**，再由 Goal/Supervisor 的确定性规则决定是否影响物理世界。
 
@@ -190,7 +190,7 @@ hash(deployment_id, principal_id, channel, account_id, message_id, semantic_acti
 
 没有稳定 `message_id` 的语音输入，必须在 Gateway receipt store 生成并持久化一个输入 receipt，再生成 command id。不要使用“相同文本”去重，因为用户可能合理地连续说两次相同命令。
 
-跨渠道状态应以 `(principal_id, robot_id, interaction_scope)` 关联，而不能仅靠 channel-local `episode_id`。`InteractionStateStore` 可以继续保存“最近用 Web 还是语音、哪些渠道订阅进度”，但 Goal 的所有权、取消权和权限校验必须以持久化 principal/role 为准。
+跨渠道状态应以 `(principal_id, robot_id, interaction_scope)` 关联，而不能仅靠 channel-local `episode_id`。Goal 的所有权、取消权和权限校验必须以持久化 principal/role 为准；渠道偏好若未来需要，应作为 Gateway 的独立展示数据实现，不能成为执行真相。
 
 回复投递也应分两类：
 
@@ -199,7 +199,7 @@ hash(deployment_id, principal_id, channel, account_id, message_id, semantic_acti
 
 ### 3.6 紧急命令必须绕过 LLM，但不能绕过审计
 
-`interaction.intent.classify_user_interaction()` 已能识别 stop、interrupt、emergency 等语义；Gateway 也支持显式 `/goal emergency_stop`。不过当前交互路由仍可能让普通自然语言先进入 presentation provider。
+Gateway 对明确的 stop、cancel、status 与 confirm 已有确定性路由；其他自然语言才进入 presentation provider。旧的关键词意图分类器已移除，避免出现第二套未接入 Supervisor 的控制语义。
 
 建议在所有 Channel 归一成 `UserTurn` 后、调用任何 LLM 前，设置一个确定性的 `SafetyCommandRouter`：
 
@@ -218,7 +218,7 @@ ASR/text input -> normalize -> SafetyCommandRouter
 |---|---|---|
 | I0 | 统一事实状态卡：目标、当前 skill、等待原因、证据、预算、Gate | 所有渠道展示同一 Goal snapshot，不从模型文本拼进度 |
 | I1 | 自然语言 create/query/cancel + 确定性 emergency router | create 必须形成合同；cancel/stop 不经 LLM；消息 receipt 幂等 |
-| I2 | 跨 Web/语音/飞书订阅和持久化 `InteractionState` | 任务所有权按 principal，不按某个 WebSocket/频道 |
+| I2 | 跨 Web/语音/飞书订阅与 identity binding | 任务所有权按 principal，不按某个 WebSocket/频道 |
 | I3 | pending amendment、HumanConfirmation、`WAITING_CONDITION` | 修正不会注入正在执行的 skill；合同替换是显式 cancel + create |
 | I4 | TaskContract + SkillGateway | “做任何事”被收敛为“尽可能理解、在已注册技能、已验证实体和证据合同内执行或清晰澄清” |
 

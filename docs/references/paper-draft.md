@@ -149,7 +149,7 @@ User Channel -> Gateway -> Agent/Cognition
 - `MemoryBroker`：统一记忆路由，根据 task state（active / recovering / completed）选择性组合 task memory、scene evidence 和 LTM。
 - `SceneRuntime`：场景记忆、场景证据查询和主动感知门控。
 - `RobotAgentCore`：LLM / 工具执行与 skill-level 决策。
-- `classify_user_interaction`：基于规则识别 `new_task`、`follow_up`、`correction`、`interrupt`、`emergency_stop`、`read_only`、`retry` 和 `reset`。
+- Gateway 的确定性安全路由：处理急停、取消、状态查询和确认；其他自然语言交给 presentation router。
 - `RobotTurnPolicy` / `AgentTurnPolicy`：构建工具权限、主动感知要求和 scene freshness；它们不是用户意图分类器。
 - `BusyTurnHandler`：机器人忙时绕过完整 LLM 推理，直接处理状态查询和打断，或将纠偏、追问、重试和复位排入安全边界。
 - `AgentNotificationRuntime`：任务进度和恢复通知。
@@ -236,7 +236,7 @@ restore → build → run → save
 
 `restore` 阶段从 `TaskRunManager` 恢复任务状态、执行反馈和恢复上下文。`build` 阶段由 `MemoryBroker` 根据 task status 选择性组合记忆：active 任务注入完整 context（task state + recent scene evidence + relevant LTM），recovering 任务只注入 recovery state + last failure，completed 任务只注入 generic LTM。`run` 阶段由 `RobotAgentCore` 执行 LLM 推理和 skill 调用。`save` 阶段持久化检查点。
 
-交互连续性由任务状态、`classify_user_interaction`、confirmation interpreter 和 `BusyTurnHandler` 共同实现。机器人忙碌时，状态查询和安全打断可以绕过完整 LLM 推理；纠偏和任务改派进入待处理队列。该路径在结构上减少了模型调用开销，但本文尚未获得足以支持固定延迟上界的基准数据。未解决 recovery 前，`block_actuation=True` 贯穿 Agent pipeline，阻止提交新的 actuation skill。
+交互连续性由持久化 Goal、Gateway 的确定性安全路由和 confirmation interpreter 共同实现。机器人忙碌时，状态查询和安全打断可以绕过完整 LLM 推理；新目标不会注入正在执行的物理循环，而是要求在安全边界取消后以新合同创建。该路径在结构上减少了模型调用开销，但本文尚未获得足以支持固定延迟上界的基准数据。未解决 recovery 前，`block_actuation=True` 贯穿 Agent pipeline，阻止提交新的 actuation skill。
 
 ### 6.3 Skill OS 与当前部署表面
 
