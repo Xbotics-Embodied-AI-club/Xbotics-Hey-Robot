@@ -19,7 +19,6 @@ from hey_robot.robot_runtime.so101 import SO101Driver
 from hey_robot.robot_runtime.xlerobot import XLeRobotDriver
 from hey_robot.robot_runtime.xlerobot.executor import XLeRobotSkillExecutor
 from hey_robot.robot_runtime.xlerobot.hardware.native import _service_diagnostic
-from hey_robot.skill_os import SkillPlanner
 
 
 def test_robot_manager_supports_xlerobot() -> None:
@@ -60,14 +59,6 @@ def test_robot_manager_supports_explicit_family_environment_driver_identity() ->
     from hey_robot.robot_runtime.simulation.xlerobot_sim_driver import XLeRobotSimDriver
 
     assert isinstance(driver, XLeRobotSimDriver)
-
-
-def test_skill_planner_maps_chinese_forward_motion() -> None:
-    assert SkillPlanner().plan("往前走10cm") == RobotSkillAction(
-        "move_base",
-        {"direction": "forward", "distance_cm": 10.0},
-        expected_duration_sec=1.0,
-    )
 
 
 def test_xlerobot_deployment_uses_native_skill_policy() -> None:

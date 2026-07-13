@@ -18,7 +18,6 @@ from hey_robot.skill_os.runtime import (
     SkillOSPort,
     SkillRuntime,
 )
-from hey_robot.skill_os.skill_planner import SkillPlanner
 
 __all__ = [
     "BaseSkill",
@@ -31,7 +30,6 @@ __all__ = [
     "SkillExecutionPlan",
     "SkillOSPort",
     "SkillPhase",
-    "SkillPlanner",
     "SkillRecord",
     "SkillRegistry",
     "SkillRuntime",
