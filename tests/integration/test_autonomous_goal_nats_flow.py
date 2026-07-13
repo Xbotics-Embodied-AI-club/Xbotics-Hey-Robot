@@ -11,8 +11,9 @@ import uuid
 from pathlib import Path
 
 import pytest
-from nats.aio.client import Client as NATS
+from nats.aio.client import Client as NatsClient
 
+from hey_robot.bus.factory import create_bus_client
 from hey_robot.cognition.autonomous.supervisor import AutonomySupervisorService
 from hey_robot.config import DeploymentConfig
 from hey_robot.protocol import (
@@ -33,11 +34,13 @@ from hey_robot.protocol.messages import from_payload, to_payload
 def _nats_reachable() -> bool:
     """Check if NATS is reachable without authentication."""
     try:
+
         async def _probe() -> bool:
-            nc = NATS()
+            nc = NatsClient()
             await nc.connect("nats://127.0.0.1:4222", connect_timeout=2)
             await nc.close()
             return True
+
         return asyncio.run(_probe())
     except Exception:
         return False

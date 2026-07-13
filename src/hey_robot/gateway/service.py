@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import re
 import time
 import uuid
@@ -25,12 +27,14 @@ from hey_robot.events import EventKind, RuntimeEvent
 from hey_robot.events.bus import BusEventPublisher
 from hey_robot.events.store import RuntimeEventStore
 from hey_robot.gateway.identity import ClaimedBinding, IdentityResolver, PendingBinding
+from hey_robot.gateway.receipts import InteractionReceiptStore
 from hey_robot.health import HealthReportService
 from hey_robot.logging import HeyRobotLogger
 from hey_robot.protocol import (
     AgentReply,
     Envelope,
     GoalCommand,
+    GoalEvent,
     RobotStatus,
     SkillEvent,
     SkillResult,
@@ -125,6 +129,11 @@ class GatewayService:
         self.skill_receipts = SkillCommandStore(
             Path(config.resources.runtime_dir) / "skill_receipts.sqlite3"
         )
+        self.interaction_receipts = InteractionReceiptStore(
+            Path(config.resources.runtime_dir)
+            / config.deployment.id
+            / "interaction_receipts.sqlite3"
+        )
         self.latest_robot_status: dict[str, RobotStatus] = {}
         self.identity = IdentityResolver(
             config.identity,
@@ -155,9 +164,11 @@ class GatewayService:
         await self.bus.subscribe([self.topics.robot_status], self._on_robot_status)
         await self.bus.subscribe([self.topics.skill_event], self._on_skill_event)
         await self.bus.subscribe([self.topics.skill_result], self._on_skill_result)
+        await self.bus.subscribe([self.topics.goal_event], self._on_goal_event)
         logger.info(
             f"gateway subscribed {self.topics.agent_reply}, {self.topics.runtime_event}, "
-            f"{self.topics.robot_status}, {self.topics.skill_event}, {self.topics.skill_result}"
+            f"{self.topics.robot_status}, {self.topics.skill_event}, {self.topics.skill_result}, "
+            f"{self.topics.goal_event}"
         )
         await self.channels.start_all(self._on_user_turn)
         self._log_channel_ready()
@@ -174,6 +185,7 @@ class GatewayService:
         self.event_store.append(event)
         await self.channels.stop_all()
         await self.bus.close()
+        self.interaction_receipts.close()
 
     async def _on_user_turn(self, turn: UserTurn) -> None:
         if await self._try_handle_identity_binding_turn(turn):
@@ -188,6 +200,11 @@ class GatewayService:
         envelope = turn.envelope.child(
             agent_id=agent_id, robot_id=robot_id, user_id=identity.user_id
         )
+        payload_hash = self._interaction_payload_hash(turn, envelope)
+        interaction_id = self._interaction_id(envelope, payload_hash)
+        if not self.interaction_receipts.claim(interaction_id, payload_hash):
+            logger.info(f"Ignoring replayed interaction {interaction_id}")
+            return
         allocation = allocate_episode(
             envelope,
             agent_id=agent_id,
@@ -200,11 +217,18 @@ class GatewayService:
             allocation.episode_id,
             replace(turn, envelope=envelope.child(episode_id=allocation.episode_id)),
         )
-        if await self._handle_goal_command(turn.text, envelope):
+        if await self._handle_safety_command(turn.text, envelope, interaction_id):
+            self.interaction_receipts.complete(interaction_id, "safety_command")
             return
-        await self._reply_to_presentation_turn(envelope, turn.text)
+        if await self._handle_goal_command(turn.text, envelope, interaction_id):
+            self.interaction_receipts.complete(interaction_id, "goal_command")
+            return
+        await self._reply_to_presentation_turn(envelope, turn.text, interaction_id)
+        self.interaction_receipts.complete(interaction_id, "presentation")
 
-    async def _reply_to_presentation_turn(self, envelope: Envelope, text: str) -> None:
+    async def _reply_to_presentation_turn(
+        self, envelope: Envelope, text: str, interaction_id: str
+    ) -> None:
         """Handle chat directly or create a validated GoalCommand from one model tool call."""
         agent_id = self._agent_id(envelope.agent_id)
         try:
@@ -222,6 +246,7 @@ class GatewayService:
                                 "Use kind=conversation with response_text for non-physical requests. "
                                 "Use kind=goal for a request to physically observe or act with the robot, "
                                 "and provide a concrete immutable success contract. "
+                                "Provide complete success_criteria for every physical goal. "
                                 "A question about what the robot sees or what is in its environment is a "
                                 "physical observation request and must use kind=goal. "
                                 f"Allowed entity IDs: {sorted(self.config.autonomy.entity_catalog)}. "
@@ -247,7 +272,7 @@ class GatewayService:
                     reply = "I could not form a safe autonomous goal from that request."
                 else:
                     reply = await self._route_model_interaction(
-                        envelope, response.tool_calls[0].arguments
+                        envelope, response.tool_calls[0].arguments, interaction_id
                     )
             else:
                 reply = (
@@ -259,7 +284,7 @@ class GatewayService:
         await self._send_reply(AgentReply(envelope=envelope, text=reply))
 
     async def _route_model_interaction(
-        self, envelope: Envelope, arguments: dict[str, Any]
+        self, envelope: Envelope, arguments: dict[str, Any], interaction_id: str
     ) -> str:
         if arguments.get("kind") == "conversation":
             response_text = arguments.get("response_text")
@@ -275,9 +300,21 @@ class GatewayService:
             criteria = self._goal_criteria_from_arguments(arguments)
             if not objective or not criteria:
                 raise ValueError("missing objective or criteria")
+            active = self.autonomy_store.active_goal_for_robot(
+                str(envelope.robot_id or "")
+            )
+            if active is not None:
+                # A new natural-language task must never be injected into an
+                # active physical loop. The owner can cancel at a safe
+                # boundary, then submit the replacement as a new immutable
+                # contract.
+                return (
+                    "The robot already has an active task. Cancel that task "
+                    "before creating a replacement; the current contract was not modified."
+                )
             command = GoalCommand(
                 envelope,
-                str(uuid.uuid4()),
+                self._command_id(envelope, interaction_id, "create"),
                 "create",
                 objective=objective,
                 success_criteria=criteria,
@@ -309,7 +346,9 @@ class GatewayService:
             pass
         return ()
 
-    async def _handle_goal_command(self, text: str, envelope: Envelope) -> bool:
+    async def _handle_goal_command(
+        self, text: str, envelope: Envelope, interaction_id: str
+    ) -> bool:
         """The gateway accepts only explicit, structured autonomous commands."""
         stripped = text.strip()
         if not stripped.startswith("/goal "):
@@ -318,6 +357,7 @@ class GatewayService:
         if len(parts) < 2 or parts[1] not in {
             "create",
             "cancel",
+            "confirm",
             "reconcile",
             "emergency_stop",
         }:
@@ -327,7 +367,27 @@ class GatewayService:
             return True
         import json
 
-        if parts[1] == "reconcile":
+        if parts[1] == "confirm":
+            if len(parts) != 3:
+                await self._send_reply(
+                    AgentReply(envelope=envelope, text="CONFIRM_CONTRACT_INVALID")
+                )
+                return True
+            try:
+                body = json.loads(parts[2])
+                command = GoalCommand(
+                    envelope,
+                    self._command_id(envelope, interaction_id, "confirm"),
+                    "confirm",
+                    goal_id=str(body["goal_id"]),
+                    condition_id=str(body["condition_id"]),
+                )
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                await self._send_reply(
+                    AgentReply(envelope=envelope, text="CONFIRM_CONTRACT_INVALID")
+                )
+                return True
+        elif parts[1] == "reconcile":
             if len(parts) != 3:
                 await self._send_reply(
                     AgentReply(envelope=envelope, text="RECONCILE_CONTRACT_INVALID")
@@ -375,7 +435,10 @@ class GatewayService:
                 )
                 return True
             command = GoalCommand(
-                envelope, str(uuid.uuid4()), "cancel", goal_id=parts[2].strip()
+                envelope,
+                self._command_id(envelope, interaction_id, "cancel"),
+                "cancel",
+                goal_id=parts[2].strip(),
             )
         elif parts[1] == "emergency_stop":
             if len(parts) != 2:
@@ -383,7 +446,11 @@ class GatewayService:
                     AgentReply(envelope=envelope, text="GOAL_CONTRACT_INVALID")
                 )
                 return True
-            command = GoalCommand(envelope, str(uuid.uuid4()), "emergency_stop")
+            command = GoalCommand(
+                envelope,
+                self._command_id(envelope, interaction_id, "emergency_stop"),
+                "emergency_stop",
+            )
         else:
             if len(parts) != 3:
                 await self._send_reply(
@@ -398,10 +465,9 @@ class GatewayService:
                 budgets = GoalBudgets(**dict(body.get("budgets") or {}))
                 command = GoalCommand(
                     envelope,
-                    str(uuid.uuid4()),
+                    self._command_id(envelope, interaction_id, "create"),
                     "create",
                     objective=str(body["objective"]),
-                    contract_template_id=body.get("contract_template_id"),
                     success_criteria=criteria,
                     budgets=budgets,
                 )
@@ -412,6 +478,150 @@ class GatewayService:
                 return True
         await self.bus.publish(self.topics.goal_command, to_payload(command))
         return True
+
+    async def _handle_safety_command(
+        self, text: str, envelope: Envelope, interaction_id: str
+    ) -> bool:
+        """Route high-priority controls without waiting for an LLM response."""
+        normalized = " ".join(str(text or "").lower().split())
+        compact = normalized.replace(" ", "")
+        emergency = {
+            "emergency stop",
+            "emergencystop",
+            "e-stop",
+            "estop",
+            "\u6025\u505c",
+            "\u7d27\u6025\u505c\u6b62",
+        }
+        if compact in {item.replace(" ", "") for item in emergency}:
+            command = GoalCommand(
+                envelope,
+                self._command_id(envelope, interaction_id, "emergency_stop"),
+                "emergency_stop",
+            )
+            await self.bus.publish(self.topics.goal_command, to_payload(command))
+            await self._send_reply(
+                AgentReply(envelope=envelope, text="EMERGENCY_STOP_REQUESTED")
+            )
+            return True
+
+        cancel = {
+            "cancel current task",
+            "cancel task",
+            "stop current task",
+            "\u53d6\u6d88\u5f53\u524d\u4efb\u52a1",
+        }
+        if compact in {item.replace(" ", "") for item in cancel}:
+            goal = self.autonomy_store.active_goal_for_robot(envelope.robot_id or "")
+            if goal is None:
+                await self._send_reply(
+                    AgentReply(envelope=envelope, text="NO_ACTIVE_GOAL")
+                )
+                return True
+            command = GoalCommand(
+                envelope,
+                self._command_id(envelope, interaction_id, "cancel"),
+                "cancel",
+                goal_id=str(goal["goal_id"]),
+            )
+            await self.bus.publish(self.topics.goal_command, to_payload(command))
+            await self._send_reply(
+                AgentReply(envelope=envelope, text="CANCEL_REQUESTED")
+            )
+            return True
+
+        confirmations = {"confirm", "yes", "\u786e\u8ba4", "\u7ee7\u7eed"}
+        if compact in confirmations:
+            goal = self.autonomy_store.active_goal_for_robot(envelope.robot_id or "")
+            condition = (
+                None
+                if goal is None
+                else self.autonomy_store.pending_wake_condition(
+                    goal_id=str(goal["goal_id"]), kind="human_confirmation"
+                )
+            )
+            if (
+                goal is None
+                or goal["status"] != "waiting_condition"
+                or condition is None
+            ):
+                await self._send_reply(
+                    AgentReply(envelope=envelope, text="NO_PENDING_CONFIRMATION")
+                )
+                return True
+            command = GoalCommand(
+                envelope,
+                self._command_id(envelope, interaction_id, "confirm"),
+                "confirm",
+                goal_id=str(goal["goal_id"]),
+                condition_id=str(condition["condition_id"]),
+            )
+            await self.bus.publish(self.topics.goal_command, to_payload(command))
+            await self._send_reply(
+                AgentReply(envelope=envelope, text="CONFIRM_REQUESTED")
+            )
+            return True
+
+        query = {
+            "status",
+            "task status",
+            "current progress",
+            "\u5f53\u524d\u8fdb\u5ea6",
+            "\u673a\u5668\u4eba\u72b6\u6001",
+        }
+        if compact in {item.replace(" ", "") for item in query}:
+            goal = self.autonomy_store.active_goal_for_robot(envelope.robot_id or "")
+            if goal is None:
+                text_reply = "NO_ACTIVE_GOAL"
+            else:
+                view = self.autonomy_store.goal_view(str(goal["goal_id"])) or {}
+                text_reply = (
+                    f"GOAL_STATUS: {view.get('status', goal['status'])}; "
+                    f"objective={view.get('objective', '')}; "
+                    f"current_skill={view.get('current_skill_name') or 'none'}; "
+                    f"evidence_count={view.get('evidence_count', 0)}; "
+                    f"termination_reason={view.get('termination_reason') or 'none'}"
+                )
+            await self._send_reply(AgentReply(envelope=envelope, text=text_reply))
+            return True
+        return False
+
+    @staticmethod
+    def _interaction_id(envelope: Envelope, payload_hash: str) -> str:
+        # A transport message_id/turn_id identifies a retried delivery.  Local
+        # inputs without one get a payload-scoped receipt so distinct commands
+        # sharing an Envelope in an in-process caller are not swallowed.
+        source = envelope.message_id or envelope.turn_id
+        if source is None:
+            source = f"{envelope.trace_id}:{payload_hash}"
+        raw = "|".join(
+            (
+                str(envelope.deployment_id or ""),
+                str(envelope.channel or ""),
+                str(envelope.account_id or ""),
+                str(envelope.user_id or envelope.sender_id or ""),
+                str(source or ""),
+            )
+        )
+        return hashlib.sha256(raw.encode()).hexdigest()
+
+    @staticmethod
+    def _interaction_payload_hash(turn: UserTurn, envelope: Envelope) -> str:
+        payload = {
+            "text": turn.text,
+            "media": [item.uri for item in turn.media],
+            "channel": envelope.channel,
+            "user_id": envelope.user_id,
+            "message_id": envelope.message_id,
+        }
+        return hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+
+    @staticmethod
+    def _command_id(envelope: Envelope, interaction_id: str, action: str) -> str:
+        raw = "|".join((str(envelope.deployment_id or ""), interaction_id, action))
+        return hashlib.sha256(raw.encode()).hexdigest()
 
     async def _send_reply(self, reply: AgentReply) -> None:
         await self.bus.publish(self.topics.agent_reply, to_payload(reply))
@@ -425,6 +635,45 @@ class GatewayService:
         if reply.envelope.episode_id:
             self.episodes.append_agent_reply(reply.envelope.episode_id, reply)
         await self.channels.send(reply)
+
+    async def _on_goal_event(self, _topic: str, payload: dict) -> None:
+        """Deliver one durable Goal notification per linked output channel."""
+        event = from_payload(GoalEvent, payload)
+        view = self.autonomy_store.goal_view(event.goal_id)
+        if view is None:
+            return
+        owner = view.get("owner_principal_id")
+        targets = self.identity.linked_channel_targets(str(owner or ""))
+        if not targets and event.envelope.channel:
+            targets = [event.envelope]
+        for target in targets:
+            channel = str(target.channel or "")
+            if not channel or not self.autonomy_store.claim_goal_notification(
+                goal_id=event.goal_id,
+                goal_version=int(view["version"]),
+                status=event.status,
+                channel=channel,
+            ):
+                continue
+            await self.channels.send(
+                AgentReply(
+                    envelope=target.child(
+                        deployment_id=self.config.deployment.id,
+                        robot_id=event.envelope.robot_id,
+                        agent_id=event.envelope.agent_id,
+                    ),
+                    text=(
+                        f"Goal {event.status}: {view['objective']} "
+                        f"(current_skill={view.get('current_skill_name') or 'none'})"
+                    ),
+                    metadata={
+                        "notification": True,
+                        "goal_id": event.goal_id,
+                        "goal_status": event.status,
+                        "goal_version": view["version"],
+                    },
+                )
+            )
 
     def _materialize_reply(self, reply: AgentReply) -> AgentReply:
         envelope = reply.envelope
@@ -558,6 +807,7 @@ class GatewayService:
             return None
         return {
             "goal": _goal_payload(goals[0]),
+            "goal_view": self.autonomy_store.goal_view(goals[0]["goal_id"]),
             "health": HealthReportService(self.config).payload(
                 robot_id=goals[0]["robot_id"]
             ),
@@ -566,7 +816,10 @@ class GatewayService:
     async def _web_tasks_list(self, limit: int) -> dict[str, Any]:
         return {
             "goals": [
-                _goal_payload(goal)
+                {
+                    **_goal_payload(goal),
+                    "goal_view": self.autonomy_store.goal_view(goal["goal_id"]),
+                }
                 for goal in self.autonomy_store.goals_recent(limit=limit)
             ]
         }
@@ -624,7 +877,9 @@ class GatewayService:
             if not goals
             else {
                 "goal": _goal_payload(goals[0]),
+                "goal_view": self.autonomy_store.goal_view(goals[0]["goal_id"]),
                 "actions": self.autonomy_store.actions_for_goal(goals[0]["goal_id"]),
+                "timeline": self.autonomy_store.goal_timeline(goals[0]["goal_id"]),
             }
         )
 

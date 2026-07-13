@@ -151,15 +151,17 @@ def test_fail_goal_only_on_nonterminal(tmp_path: Path) -> None:
     assert g["termination_reason"] == "TEST_FAILURE"
 
 
-def test_cancel_goal_returns_false_for_non_pending_active(tmp_path: Path) -> None:
+def test_cancel_goal_succeeds_for_waiting_goal_without_active_action(
+    tmp_path: Path,
+) -> None:
     s = _store(tmp_path)
     s.create_goal(command_id="c1", goal_id="g1", robot_id="r1", snapshot={}, budgets={})
     s._db.execute("UPDATE goals SET status='waiting' WHERE goal_id='g1'")
     s._db.commit()
-    assert not s.cancel_goal("g1")
+    assert s.cancel_goal("g1")
     g = s.goal("g1")
     assert g is not None
-    assert g["status"] == "waiting"
+    assert g["status"] == "cancelled"
 
 
 def test_cancel_goal_succeeds_for_active(tmp_path: Path) -> None:

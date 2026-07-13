@@ -45,6 +45,11 @@ class VoiceChannel:
         async def on_text(text: str, metadata: dict) -> None:
             if _is_nonsense_asr(text):
                 return
+            if _asr_confidence_rejected(
+                metadata, self.config.activation.min_command_confidence
+            ):
+                await self.loop.speak("我没有听清，请在唤醒后再说一遍。")
+                return
             if _needs_voice_clarification(text):
                 await self.loop.speak("请说清楚要观察哪里，或要我做哪个动作。")
                 return
@@ -59,6 +64,9 @@ class VoiceChannel:
                 chat_id=self.config.chat_id,
                 chat_type="voice",
                 sender_id=self.config.sender_id,
+                # Voice has no upstream broker message id. The audio loop
+                # assigns this receipt before the turn enters Gateway.
+                message_id=_voice_utterance_id(metadata),
                 deployment_id=self.context.deployment_id,
                 timestamp=time.time(),
             )
@@ -190,3 +198,27 @@ def _voice_event_key(event: RuntimeEvent) -> str:
             payload.get("summary") or payload.get("error"),
         )
     )
+
+
+def _voice_utterance_id(metadata: dict) -> str | None:
+    voice = metadata.get("voice") if isinstance(metadata, dict) else None
+    if not isinstance(voice, dict):
+        return None
+    value = voice.get("utterance_id")
+    return str(value).strip() or None if value is not None else None
+
+
+def _asr_confidence_rejected(metadata: dict, minimum: float) -> bool:
+    """Reject only an explicitly low ASR score; unknown is never treated as high."""
+    if minimum <= 0:
+        return False
+    audio = metadata.get("audio") if isinstance(metadata, dict) else None
+    if not isinstance(audio, dict):
+        return False
+    value = audio.get("asr_confidence")
+    if value is None:
+        return False
+    try:
+        return float(value) < minimum
+    except (TypeError, ValueError):
+        return True

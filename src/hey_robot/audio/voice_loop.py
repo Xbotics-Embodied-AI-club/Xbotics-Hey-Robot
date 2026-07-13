@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from pathlib import Path
@@ -142,13 +143,21 @@ class VoiceInteractionLoop:
                     text,
                     {
                         **self.config.metadata,
-                        "voice": _route_metadata(decision),
+                        "voice": {
+                            **_route_metadata(decision),
+                            # This identifies one captured utterance, rather
+                            # than its text. Gateway uses it as a durable
+                            # receipt key, so two identical spoken commands
+                            # remain two commands while transport retries do not.
+                            "utterance_id": str(uuid.uuid4()),
+                        },
                         "audio": {
                             "duration_sec": utterance.duration_sec,
                             "sample_rate": utterance.sample_rate,
                             "channels": utterance.channels,
                             "peak": utterance.peak,
                             "rms": utterance.rms,
+                            "asr_confidence": getattr(utterance, "confidence", None),
                         },
                     },
                 )
@@ -196,7 +205,10 @@ class VoiceInteractionLoop:
                         decision.text,
                         {
                             **self.config.metadata,
-                            "voice": _route_metadata(decision),
+                            "voice": {
+                                **_route_metadata(decision),
+                                "utterance_id": str(uuid.uuid4()),
+                            },
                             "audio": {
                                 "source": "scripted",
                                 "sample_rate": self.config.recorder.sample_rate,

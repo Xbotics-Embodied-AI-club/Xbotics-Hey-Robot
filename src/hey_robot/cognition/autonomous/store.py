@@ -12,7 +12,7 @@ from hey_robot.protocol.messages import RobotExecutionGate
 
 
 class AutonomyStore:
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 8
 
     def __init__(self, path: str | Path) -> None:
         location = Path(path)
@@ -43,13 +43,28 @@ class AutonomyStore:
         CREATE TABLE IF NOT EXISTS reconcile_records (reconcile_id TEXT PRIMARY KEY,
           robot_id TEXT NOT NULL, skill_id TEXT NOT NULL, operator_id TEXT NOT NULL,
           status_payload TEXT NOT NULL, created_at REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS goal_origins (goal_id TEXT PRIMARY KEY,
+          owner_principal_id TEXT, origin_interaction_id TEXT, origin_channel TEXT,
+          created_by TEXT);
+        CREATE TABLE IF NOT EXISTS wake_conditions (condition_id TEXT PRIMARY KEY,
+          goal_id TEXT NOT NULL, kind TEXT NOT NULL, expected_payload TEXT NOT NULL,
+          policy TEXT NOT NULL, status TEXT NOT NULL, created_at REAL NOT NULL,
+          expires_at REAL NOT NULL, fulfilled_at REAL, fulfilled_by TEXT);
+        CREATE TABLE IF NOT EXISTS goal_notifications (
+          goal_id TEXT NOT NULL, goal_version INTEGER NOT NULL, status TEXT NOT NULL,
+          channel TEXT NOT NULL, PRIMARY KEY(goal_id, goal_version, status, channel));
+        CREATE TABLE IF NOT EXISTS goal_review_records (
+          goal_id TEXT PRIMARY KEY, reason TEXT NOT NULL, details TEXT NOT NULL,
+          created_at REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS auto_reobservations (
+          goal_id TEXT PRIMARY KEY, count INTEGER NOT NULL);
         """)
         row = self._db.execute("SELECT version FROM schema_version").fetchone()
         if row is None:
             self._db.execute(
                 "INSERT INTO schema_version VALUES (?)", (self.SCHEMA_VERSION,)
             )
-        elif row[0] == 1:
+        elif row[0] in {1, 2, 3, 4, 5, 6, 7}:
             self._db.execute(
                 "UPDATE schema_version SET version=?", (self.SCHEMA_VERSION,)
             )
@@ -71,6 +86,10 @@ class AutonomyStore:
         robot_id: str,
         snapshot: dict[str, Any],
         budgets: dict[str, Any],
+        owner_principal_id: str | None = None,
+        origin_interaction_id: str | None = None,
+        origin_channel: str | None = None,
+        created_by: str | None = None,
     ) -> bool:
         with self._db:
             try:
@@ -84,6 +103,16 @@ class AutonomyStore:
                 self._db.execute(
                     "INSERT INTO goal_commands VALUES (?, ?)",
                     (command_id, _json({"goal_id": goal_id, "status": "pending"})),
+                )
+                self._db.execute(
+                    "INSERT INTO goal_origins VALUES (?, ?, ?, ?, ?)",
+                    (
+                        goal_id,
+                        owner_principal_id,
+                        origin_interaction_id,
+                        origin_channel,
+                        created_by,
+                    ),
                 )
                 self._db.execute(
                     "INSERT OR IGNORE INTO robot_execution_gate VALUES (?, 0, 'ready', NULL, NULL, ?)",
@@ -101,7 +130,200 @@ class AutonomyStore:
             return None
         value = dict(row)
         value["snapshot"] = json.loads(value["snapshot"])
+        origin = self._db.execute(
+            "SELECT owner_principal_id, origin_interaction_id, origin_channel, created_by "
+            "FROM goal_origins WHERE goal_id=?",
+            (goal_id,),
+        ).fetchone()
+        if origin is not None:
+            value["owner_principal_id"] = origin["owner_principal_id"]
+            value["origin_interaction_id"] = origin["origin_interaction_id"]
+            value["origin_channel"] = origin["origin_channel"]
+            value["created_by"] = origin["created_by"]
         return value
+
+    def goal_owner(self, goal_id: str) -> str | None:
+        row = self._db.execute(
+            "SELECT owner_principal_id FROM goal_origins WHERE goal_id=?", (goal_id,)
+        ).fetchone()
+        return None if row is None or row[0] is None else str(row[0])
+
+    def create_wake_condition(
+        self,
+        *,
+        condition_id: str,
+        goal_id: str,
+        kind: str,
+        expected_payload: dict[str, Any],
+        expires_at: float,
+        policy: str = "manual_only",
+    ) -> bool:
+        """Persist a wait boundary; it never resumes a physical action itself."""
+        with self._db:
+            goal = self._db.execute(
+                "SELECT status, termination_reason FROM goals WHERE goal_id=?",
+                (goal_id,),
+            ).fetchone()
+            if goal is None or goal[0] != "active" or goal[1] is not None:
+                return False
+            try:
+                self._db.execute(
+                    "INSERT INTO wake_conditions VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, NULL, NULL)",
+                    (
+                        condition_id,
+                        goal_id,
+                        kind,
+                        _json(expected_payload),
+                        policy,
+                        time.time(),
+                        expires_at,
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                return False
+            self._db.execute(
+                "UPDATE goals SET status='waiting_condition', active_deliberation_id=NULL, "
+                "version=version+1 WHERE goal_id=?",
+                (goal_id,),
+            )
+            return True
+
+    def wake_condition(self, condition_id: str) -> dict[str, Any] | None:
+        row = self._db.execute(
+            "SELECT * FROM wake_conditions WHERE condition_id=?", (condition_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        value = dict(row)
+        value["expected_payload"] = json.loads(value["expected_payload"])
+        return value
+
+    def pending_wake_condition(
+        self, *, goal_id: str, kind: str
+    ) -> dict[str, Any] | None:
+        row = self._db.execute(
+            "SELECT condition_id FROM wake_conditions WHERE goal_id=? AND kind=? "
+            "AND status='pending' ORDER BY created_at LIMIT 1",
+            (goal_id, kind),
+        ).fetchone()
+        return None if row is None else self.wake_condition(str(row[0]))
+
+    def expire_wake_conditions(self, *, now: float | None = None) -> list[str]:
+        """Move expired waits to review; expiry never resumes or retries work."""
+        current = time.time() if now is None else now
+        with self._db:
+            rows = self._db.execute(
+                "SELECT condition_id, goal_id FROM wake_conditions "
+                "WHERE status='pending' AND expires_at<=?",
+                (current,),
+            ).fetchall()
+            expired_goal_ids: list[str] = []
+            for row in rows:
+                goal_id = str(row["goal_id"])
+                self._db.execute(
+                    "UPDATE wake_conditions SET status='expired' WHERE condition_id=? "
+                    "AND status='pending'",
+                    (row["condition_id"],),
+                )
+                updated = self._db.execute(
+                    "UPDATE goals SET status='needs_review', version=version+1 "
+                    "WHERE goal_id=? AND status='waiting_condition' "
+                    "AND termination_reason IS NULL",
+                    (goal_id,),
+                )
+                if updated.rowcount == 1:
+                    self._db.execute(
+                        "INSERT OR REPLACE INTO goal_review_records VALUES (?, ?, ?, ?)",
+                        (
+                            goal_id,
+                            "WAKE_CONDITION_EXPIRED",
+                            _json({"condition_id": row["condition_id"]}),
+                            current,
+                        ),
+                    )
+                    expired_goal_ids.append(goal_id)
+            return expired_goal_ids
+
+    def confirm_wake_condition(
+        self, *, condition_id: str, goal_id: str, principal_id: str | None
+    ) -> bool:
+        """Consume one valid human confirmation and reopen scheduling only."""
+        with self._db:
+            condition = self._db.execute(
+                "SELECT status, kind, expires_at FROM wake_conditions "
+                "WHERE condition_id=? AND goal_id=?",
+                (condition_id, goal_id),
+            ).fetchone()
+            goal = self._db.execute(
+                "SELECT status, termination_reason FROM goals WHERE goal_id=?",
+                (goal_id,),
+            ).fetchone()
+            if (
+                condition is None
+                or goal is None
+                or condition[0] != "pending"
+                or condition[1] != "human_confirmation"
+                or float(condition[2]) <= time.time()
+                or goal[0] != "waiting_condition"
+                or goal[1] is not None
+            ):
+                return False
+            self._db.execute(
+                "UPDATE wake_conditions SET status='satisfied', fulfilled_at=?, fulfilled_by=? "
+                "WHERE condition_id=?",
+                (time.time(), principal_id, condition_id),
+            )
+            self._db.execute(
+                "UPDATE goals SET status='waiting', version=version+1 WHERE goal_id=?",
+                (goal_id,),
+            )
+            return True
+
+    def satisfy_wake_condition(
+        self,
+        *,
+        condition_id: str,
+        goal_id: str,
+        kind: str,
+        observed_payload: dict[str, Any],
+        fulfilled_by: str,
+    ) -> bool:
+        """Consume a trusted non-human wake event and reopen scheduling."""
+        with self._db:
+            condition = self._db.execute(
+                "SELECT status, kind, expected_payload, expires_at FROM wake_conditions "
+                "WHERE condition_id=? AND goal_id=?",
+                (condition_id, goal_id),
+            ).fetchone()
+            goal = self._db.execute(
+                "SELECT status, termination_reason FROM goals WHERE goal_id=?",
+                (goal_id,),
+            ).fetchone()
+            if (
+                condition is None
+                or goal is None
+                or condition[0] != "pending"
+                or condition[1] != kind
+                or float(condition[3]) <= time.time()
+                or goal[0] != "waiting_condition"
+                or goal[1] is not None
+            ):
+                return False
+            expected = json.loads(condition[2])
+            if not isinstance(expected, dict) or any(
+                observed_payload.get(key) != value for key, value in expected.items()
+            ):
+                return False
+            self._db.execute(
+                "UPDATE wake_conditions SET status='satisfied', fulfilled_at=?, fulfilled_by=? "
+                "WHERE condition_id=?",
+                (time.time(), fulfilled_by, condition_id),
+            )
+            self._db.execute(
+                "UPDATE goals SET status='waiting', version=version+1 WHERE goal_id=?",
+                (goal_id,),
+            )
+            return True
 
     def budget_state(
         self, goal_id: str, battery_percentage: float | None
@@ -164,6 +386,120 @@ class AutonomyStore:
             if goal_data is not None:
                 result.append(goal_data)
         return result
+
+    def goal_view(self, goal_id: str) -> dict[str, Any] | None:
+        """Return the channel-safe read model for one autonomous goal.
+
+        This is a projection of durable facts only.  It never consults model
+        text and never makes a scheduling or execution decision.
+        """
+        goal = self.goal(goal_id)
+        if goal is None:
+            return None
+        actions = self.actions_for_goal(goal_id)
+        evidence = self.evidence_for_goal(goal_id)
+        review = self._db.execute(
+            "SELECT reason, details FROM goal_review_records WHERE goal_id=?",
+            (goal_id,),
+        ).fetchone()
+        active = self.active_action_for_goal(goal_id)
+        snapshot = goal["snapshot"]
+        waiting = self._db.execute(
+            "SELECT condition_id, kind, expected_payload, expires_at, policy "
+            "FROM wake_conditions WHERE goal_id=? AND status='pending' "
+            "ORDER BY created_at LIMIT 1",
+            (goal_id,),
+        ).fetchone()
+        budget = self.budget_state(goal_id, None)
+        gate = self.gate(goal["robot_id"])
+        return {
+            "goal_id": goal_id,
+            "objective": snapshot.get("objective", ""),
+            "status": goal["status"],
+            "version": goal["version"],
+            "termination_reason": goal.get("termination_reason"),
+            "owner_principal_id": goal.get("owner_principal_id"),
+            "current_skill": None if active is None else active["skill_id"],
+            "current_skill_name": (
+                None if active is None else (active.get("payload") or {}).get("name")
+            ),
+            "gate": {
+                "state": gate.state,
+                "reason": gate.reason,
+                "control_id": gate.control_id,
+            },
+            "waiting_condition": (
+                None
+                if waiting is None
+                else {
+                    "condition_id": waiting["condition_id"],
+                    "kind": waiting["kind"],
+                    "expected_payload": json.loads(waiting["expected_payload"]),
+                    "expires_at": waiting["expires_at"],
+                    "policy": waiting["policy"],
+                }
+            ),
+            "budget": None
+            if budget is None
+            else {"limits": budget[0], "state": budget[1]},
+            "evidence_count": len(evidence),
+            "action_count": len(actions),
+            "latest_evidence": evidence[-1] if evidence else None,
+            "latest_action": actions[-1] if actions else None,
+            "review": (
+                None
+                if review is None
+                else {"reason": review[0], "details": json.loads(review[1])}
+            ),
+        }
+
+    def goal_timeline(self, goal_id: str) -> list[dict[str, Any]]:
+        """Return a compact, durable causal timeline for a single Goal."""
+        goal = self.goal(goal_id)
+        if goal is None:
+            return []
+        timeline = [
+            {
+                "kind": "goal.created",
+                "timestamp": goal["created_at"],
+                "goal_id": goal_id,
+                "status": goal["status"],
+            }
+        ]
+        timeline.extend(
+            {
+                "kind": "action",
+                "timestamp": action["created_at"],
+                "skill_id": action["skill_id"],
+                "status": action["status"],
+                "payload": action["payload"],
+            }
+            for action in self.actions_for_goal(goal_id)
+        )
+        timeline.extend(
+            {
+                "kind": "evidence",
+                "timestamp": fact.get("observed_at", 0),
+                "evidence_id": fact.get("evidence_id"),
+                "payload": fact,
+            }
+            for fact in self.evidence_for_goal(goal_id)
+        )
+        return sorted(timeline, key=lambda item: float(item["timestamp"] or 0))
+
+    def claim_goal_notification(
+        self, *, goal_id: str, goal_version: int, status: str, channel: str
+    ) -> bool:
+        """Return true only once for a Goal state delivery to a channel."""
+        try:
+            with self._db:
+                self._db.execute(
+                    "INSERT INTO goal_notifications VALUES (?, ?, ?, ?)",
+                    (goal_id, goal_version, status, channel),
+                )
+            return True
+        except sqlite3.IntegrityError:
+            return False
 
     def actions_for_goal(self, goal_id: str) -> list[dict[str, Any]]:
         rows = self._db.execute(
@@ -260,6 +596,51 @@ class AutonomyStore:
                 (reason, goal_id),
             )
 
+    def mark_needs_review(
+        self, *, goal_id: str, reason: str, details: dict[str, Any]
+    ) -> bool:
+        """Stop autonomous progression without claiming physical failure."""
+        with self._db:
+            cur = self._db.execute(
+                "UPDATE goals SET status='needs_review', version=version+1 "
+                "WHERE goal_id=? AND status IN ('active','waiting') AND termination_reason IS NULL",
+                (goal_id,),
+            )
+            if cur.rowcount != 1:
+                return False
+            self._db.execute(
+                "INSERT OR REPLACE INTO goal_review_records VALUES (?, ?, ?, ?)",
+                (goal_id, reason, _json(details), time.time()),
+            )
+            return True
+
+    def reserve_auto_reobservation(self, *, goal_id: str, limit: int = 1) -> int | None:
+        """Reserve one safe, read-only re-observation and reopen dispatch once."""
+        with self._db:
+            goal = self._db.execute(
+                "SELECT status, termination_reason FROM goals WHERE goal_id=?",
+                (goal_id,),
+            ).fetchone()
+            if goal is None or goal[0] != "waiting" or goal[1] is not None:
+                return None
+            row = self._db.execute(
+                "SELECT count FROM auto_reobservations WHERE goal_id=?", (goal_id,)
+            ).fetchone()
+            count = 0 if row is None else int(row[0])
+            if count >= limit:
+                return None
+            next_count = count + 1
+            self._db.execute(
+                "INSERT INTO auto_reobservations VALUES (?, ?) "
+                "ON CONFLICT(goal_id) DO UPDATE SET count=excluded.count",
+                (goal_id, next_count),
+            )
+            self._db.execute(
+                "UPDATE goals SET status='active', version=version+1 WHERE goal_id=?",
+                (goal_id,),
+            )
+            return next_count
+
     def complete_goal(self, goal_id: str) -> bool:
         with self._db:
             cur = self._db.execute(
@@ -272,7 +653,9 @@ class AutonomyStore:
     def cancel_goal(self, goal_id: str) -> bool:
         with self._db:
             cur = self._db.execute(
-                "UPDATE goals SET status='cancelled', termination_reason='cancel', version=version+1 WHERE goal_id=? AND status IN ('pending','active')",
+                "UPDATE goals SET status='cancelled', termination_reason='cancel', version=version+1 "
+                "WHERE goal_id=? AND status IN "
+                "('pending','active','waiting','waiting_condition','needs_review')",
                 (goal_id,),
             )
             return cur.rowcount == 1

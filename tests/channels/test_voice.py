@@ -9,6 +9,7 @@ from hey_robot.audio.streaming_asr import StreamingASRTurn
 from hey_robot.audio.voice_loop import VoiceInteractionLoop
 from hey_robot.channels import ChannelContext, VoiceChannel
 from hey_robot.channels.voice import (
+    _asr_confidence_rejected,
     _is_nonsense_asr,
     _is_specific_action_intent,
     _needs_voice_clarification,
@@ -74,6 +75,12 @@ def test_voice_config_keeps_activation_separate_from_asr() -> None:
     assert config.activation.wake_words == ["小白"]
     assert config.asr.provider == "sherpa_onnx"
     assert config.asr.resolved_sherpa_model_dir == "models/sherpa"
+
+
+def test_voice_rejects_only_explicitly_low_asr_confidence() -> None:
+    assert _asr_confidence_rejected({"audio": {"asr_confidence": 0.3}}, 0.7)
+    assert not _asr_confidence_rejected({"audio": {"asr_confidence": 0.9}}, 0.7)
+    assert not _asr_confidence_rejected({"audio": {}}, 0.7)
 
 
 def test_voice_session_routes_without_activation_when_no_wake_words() -> None:
@@ -240,6 +247,7 @@ def test_voice_interaction_loop_scripted_text_routes_without_audio() -> None:
 
     assert received[0][0] == "hey 检查桌面"
     assert received[0][1]["audio"]["source"] == "scripted"
+    assert received[0][1]["voice"]["utterance_id"]
 
 
 def test_voice_interaction_loop_scripted_text_drops_short_routes() -> None:

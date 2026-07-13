@@ -199,6 +199,8 @@ class AutonomySpec:
     hard_max_skills: int = 24
     min_battery_percentage: float = 20.0
     entity_catalog: tuple[str, ...] = ()
+    enable_auto_reobserve_once: bool = False
+    enable_no_progress_review: bool = False
 
 
 @dataclass(frozen=True)
@@ -489,6 +491,12 @@ class DeploymentConfig:
                 ),
                 entity_catalog=tuple(
                     str(item) for item in autonomy_data.get("entity_catalog", ()) or ()
+                ),
+                enable_auto_reobserve_once=bool(
+                    autonomy_data.get("enable_auto_reobserve_once", False)
+                ),
+                enable_no_progress_review=bool(
+                    autonomy_data.get("enable_no_progress_review", False)
                 ),
             ),
         )

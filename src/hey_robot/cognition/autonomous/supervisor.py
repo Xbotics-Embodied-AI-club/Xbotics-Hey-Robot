@@ -11,7 +11,9 @@ from contextlib import suppress
 from pathlib import Path
 
 from hey_robot.bus.factory import create_bus_client
+from hey_robot.cognition.autonomous.continuation_policy import decide_continuation
 from hey_robot.cognition.autonomous.policy import check_budget, dispatch_admission
+from hey_robot.cognition.autonomous.progress import assess_progress
 from hey_robot.cognition.autonomous.skill_gateway import SkillGateway
 from hey_robot.cognition.autonomous.store import AutonomyStore
 from hey_robot.cognition.runtime.trace import RunTraceWriter
@@ -113,6 +115,12 @@ class AutonomySupervisorService:
                     command.goal_id, command.command_id, command.envelope
                 )
             return
+        if command.action == "confirm":
+            if command.goal_id and command.condition_id:
+                await self._confirm(
+                    command.goal_id, command.condition_id, command.envelope
+                )
+            return
         robot_id = command.envelope.robot_id
         if not robot_id or not command.objective or not command.success_criteria:
             return
@@ -147,6 +155,10 @@ class AutonomySupervisorService:
             robot_id=robot_id,
             snapshot=to_payload(snapshot),
             budgets=to_payload(command.budgets),
+            owner_principal_id=command.envelope.user_id,
+            origin_interaction_id=command.command_id,
+            origin_channel=command.envelope.channel,
+            created_by=command.envelope.sender_id,
         ):
             self.trace.write("goal.created", goal_id=goal_id)
             await self._schedule(snapshot, command.envelope, command.command_id)
@@ -275,6 +287,15 @@ class AutonomySupervisorService:
         goal = self.store.goal(goal_id)
         if goal is None:
             return
+        owner = self.store.goal_owner(goal_id)
+        requester = envelope.user_id
+        if owner is not None and requester != owner:
+            self.trace.write(
+                "goal.cancel_rejected",
+                goal_id=goal_id,
+                details={"reason": "OWNER_MISMATCH", "requester": requester},
+            )
+            return
         if goal["status"] in {"pending", "active"}:
             self.store.cancel_goal(goal_id)
             self.trace.write("goal.cancelled", goal_id=goal_id)
@@ -284,6 +305,30 @@ class AutonomySupervisorService:
             self.store.cancel_goal(goal_id)
             return
         await self._interrupt_action(goal, active, command_id, envelope, "cancel")
+
+    async def _confirm(
+        self, goal_id: str, condition_id: str, envelope: Envelope
+    ) -> None:
+        goal = self.store.goal(goal_id)
+        if goal is None:
+            return
+        owner = self.store.goal_owner(goal_id)
+        if owner is not None and envelope.user_id != owner:
+            self.trace.write(
+                "goal.confirm_rejected",
+                goal_id=goal_id,
+                details={"reason": "OWNER_MISMATCH", "requester": envelope.user_id},
+            )
+            return
+        if not self.store.confirm_wake_condition(
+            condition_id=condition_id,
+            goal_id=goal_id,
+            principal_id=envelope.user_id,
+        ):
+            return
+        snapshot = from_payload(GoalSnapshot, goal["snapshot"])
+        await self._schedule(snapshot, envelope, f"confirmation:{condition_id}")
+        await self._publish_goal_event(goal_id, envelope)
 
     async def _emergency_stop(
         self, robot_id: str, command_id: str, envelope: Envelope
@@ -507,6 +552,80 @@ class AutonomySupervisorService:
             or goal["termination_reason"] is not None
         ):
             return
+        progress = assess_progress(
+            goal_status="active",
+            actions=self.store.actions_for_goal(goal_id),
+            evidence=self.store.evidence_for_goal(goal_id),
+        )
+        self.trace.write(
+            "goal.progress",
+            goal_id=goal_id,
+            details={
+                "state": progress.state,
+                "reason": progress.reason,
+                "repeated_action_count": progress.repeated_action_count,
+                "evidence_count": progress.evidence_count,
+            },
+        )
+        if (
+            self.config.autonomy.enable_auto_reobserve_once
+            and progress.state == "no_progress"
+            and intent.get("intent_kind") == "observation"
+            and intent.get("name") == "inspect_scene"
+            and self.store.reserve_auto_reobservation(goal_id=goal_id) is not None
+        ):
+            refreshed = self.store.goal(goal_id)
+            if refreshed is not None:
+                auto_deliberation_id = str(
+                    uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"{self.config.deployment.id}:{goal_id}:auto-reobserve",
+                    )
+                )
+                self.trace.write(
+                    "goal.auto_reobserve",
+                    goal_id=goal_id,
+                    details={"after_skill_id": result.skill_id},
+                )
+                await self._dispatch(
+                    refreshed,
+                    ActionProposal(
+                        "observation",
+                        "inspect_scene",
+                        "Re-observe the scene because the prior observation produced no trusted evidence.",
+                        {"question": "Re-observe the scene for fresh task evidence."},
+                    ),
+                    auto_deliberation_id,
+                    result.envelope,
+                )
+                return
+        continuation = decide_continuation(
+            goal_status="active",
+            progress=progress,
+            budget_allowed=True,
+            gate_ready=self.store.gate(goal["robot_id"]).state == "ready",
+            has_wake_trigger=True,
+        )
+        if continuation.decision == "needs_review" and (
+            self.config.autonomy.enable_no_progress_review
+            or self.config.autonomy.enable_auto_reobserve_once
+        ):
+            if self.store.mark_needs_review(
+                goal_id=goal_id,
+                reason="NO_PROGRESS",
+                details={
+                    "reason": progress.reason,
+                    "repeated_action_count": progress.repeated_action_count,
+                    "evidence_count": progress.evidence_count,
+                },
+            ):
+                self.trace.write(
+                    "goal.needs_review",
+                    goal_id=goal_id,
+                    details={"reason": progress.reason},
+                )
+                await self._publish_goal_event(goal_id, result.envelope)
+            return
         snapshot = from_payload(GoalSnapshot, goal["snapshot"])
         await self._schedule(
             snapshot, result.envelope, f"{result.skill_id}:{result.status}"
@@ -536,6 +655,14 @@ class AutonomySupervisorService:
             robot_id = observation.envelope.robot_id
             if robot_id:
                 self._latest_observation[robot_id] = observation
+                goal = self.store.active_goal_for_robot(robot_id)
+                if goal is not None:
+                    await self._wake_from_event(
+                        goal,
+                        observation.envelope,
+                        kind="observation",
+                        observed_payload={"frame_id": observation.frame_id},
+                    )
             return
         if _topic != self.topics.robot_status:
             return
@@ -562,6 +689,48 @@ class AutonomySupervisorService:
                 )
             ],
         )
+        await self._wake_from_event(
+            goal,
+            status.envelope,
+            kind="robot_status",
+            observed_payload={
+                "state": status.state,
+                "location_id": status.location_id,
+                "motion_state": status.motion_state,
+            },
+        )
+
+    async def _wake_from_event(
+        self,
+        goal: dict,
+        envelope: Envelope,
+        *,
+        kind: str,
+        observed_payload: dict[str, object],
+    ) -> None:
+        """Wake once from a trusted event; never reuse a prior SkillIntent."""
+        if goal["status"] != "waiting_condition":
+            return
+        condition = self.store.pending_wake_condition(
+            goal_id=goal["goal_id"], kind=kind
+        )
+        if condition is None:
+            return
+        if not self.store.satisfy_wake_condition(
+            condition_id=condition["condition_id"],
+            goal_id=goal["goal_id"],
+            kind=kind,
+            observed_payload=observed_payload,
+            fulfilled_by=f"{kind}:{envelope.robot_id or 'unknown'}",
+        ):
+            return
+        snapshot = from_payload(GoalSnapshot, goal["snapshot"])
+        await self._schedule(
+            snapshot,
+            envelope,
+            f"wake:{kind}:{condition['condition_id']}",
+        )
+        await self._publish_goal_event(goal["goal_id"], envelope)
 
     def _valid_evidence(
         self,
@@ -619,6 +788,8 @@ class AutonomySupervisorService:
         Does NOT wake models, republish messages, or select recovery actions.
         """
         now = time.time()
+        for goal_id in self.store.expire_wake_conditions(now=now):
+            self.trace.write("goal.wake_condition_expired", goal_id=goal_id)
         seen_robots: set[str] = set()
         for goal in self.store.goals_recent(limit=100):
             goal_id = goal["goal_id"]

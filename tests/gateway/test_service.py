@@ -13,6 +13,7 @@ from hey_robot.gateway import GatewayService
 from hey_robot.protocol import (
     AgentReply,
     Envelope,
+    GoalEvent,
     RobotStatus,
     SkillEvent,
     SkillResult,
@@ -161,6 +162,81 @@ def test_gateway_converts_model_goal_tool_call_to_goal_command(tmp_path) -> None
     fake_bus = cast(FakeBus, gateway.bus)
     assert any(topic == gateway.topics.goal_command for topic, _ in fake_bus.published)
     assert all(topic != gateway.topics.skill_intent for topic, _ in fake_bus.published)
+
+
+def test_gateway_does_not_inject_new_goal_into_active_task(tmp_path) -> None:
+    gateway = _gateway(tmp_path)
+    gateway._presentation_providers["main"] = GoalBuilderProvider()
+    assert gateway.autonomy_store.create_goal(
+        command_id="active-command",
+        goal_id="active-goal",
+        robot_id="mock0",
+        snapshot={"objective": "current task"},
+        budgets={},
+    )
+
+    asyncio.run(
+        gateway._on_user_turn(
+            UserTurn(Envelope(channel="web", sender_id="u1"), "actually inspect here")
+        )
+    )
+
+    fake_bus = cast(FakeBus, gateway.bus)
+    assert not any(
+        topic == gateway.topics.goal_command for topic, _ in fake_bus.published
+    )
+    reply = next(
+        payload
+        for topic, payload in fake_bus.published
+        if topic == gateway.topics.agent_reply
+    )
+    assert "Cancel that task" in reply["text"]
+
+
+def test_gateway_deduplicates_replayed_transport_message_before_model_routing(
+    tmp_path,
+) -> None:
+    gateway = _gateway(tmp_path)
+    gateway._presentation_providers["main"] = GoalBuilderProvider()
+    turn = UserTurn(
+        Envelope(channel="web", sender_id="u1", message_id="replayed-message"),
+        "look around",
+    )
+
+    asyncio.run(gateway._on_user_turn(turn))
+    asyncio.run(gateway._on_user_turn(turn))
+
+    fake_bus = cast(FakeBus, gateway.bus)
+    commands = [
+        payload
+        for topic, payload in fake_bus.published
+        if topic == gateway.topics.goal_command
+    ]
+    assert len(commands) == 1
+
+
+def test_gateway_routes_natural_language_emergency_stop_without_provider(
+    tmp_path,
+) -> None:
+    gateway = _gateway(tmp_path)
+
+    asyncio.run(
+        gateway._on_user_turn(
+            UserTurn(
+                Envelope(channel="web", sender_id="u1", message_id="stop-1"),
+                "emergency stop",
+            )
+        )
+    )
+
+    fake_bus = cast(FakeBus, gateway.bus)
+    commands = [
+        payload
+        for topic, payload in fake_bus.published
+        if topic == gateway.topics.goal_command
+    ]
+    assert len(commands) == 1
+    assert commands[0]["action"] == "emergency_stop"
 
 
 def test_gateway_deduplicates_own_runtime_event_echo(tmp_path) -> None:
@@ -611,6 +687,7 @@ def test_gateway_start_and_stop_publish_lifecycle_and_manage_channels(
         [gateway.topics.robot_status],
         [gateway.topics.skill_event],
         [gateway.topics.skill_result],
+        [gateway.topics.goal_event],
     ]
     assert {event["kind"] for event in stored} >= {"gateway.start", "gateway.ready"}
 
@@ -620,3 +697,73 @@ def test_gateway_start_and_stop_publish_lifecycle_and_manage_channels(
     assert fake_channels.stopped is True
     assert fake_bus.closed is True
     assert any(event["kind"] == "gateway.shutdown" for event in stopped)
+
+
+def test_gateway_delivers_goal_event_once_per_bound_channel(tmp_path) -> None:
+    gateway = _gateway(tmp_path)
+    assert gateway.autonomy_store.create_goal(
+        command_id="cmd-notify",
+        goal_id="goal-notify",
+        robot_id="mock0",
+        snapshot={"task_id": "task-notify", "objective": "inspect"},
+        budgets={},
+        owner_principal_id="owner",
+    )
+    delivered: list[AgentReply] = []
+
+    async def _send(reply: AgentReply) -> None:
+        delivered.append(reply)
+
+    gateway.channels.send = _send  # type: ignore[method-assign]
+    event = GoalEvent(
+        Envelope(channel="web", robot_id="mock0", user_id="owner"),
+        "event-notify",
+        "goal-notify",
+        "task-notify",
+        "active",
+    )
+    asyncio.run(gateway._on_goal_event(gateway.topics.goal_event, to_payload(event)))
+    asyncio.run(gateway._on_goal_event(gateway.topics.goal_event, to_payload(event)))
+
+    assert len(delivered) == 1
+    assert delivered[0].metadata["goal_id"] == "goal-notify"
+
+
+def test_gateway_routes_natural_confirmation_for_waiting_goal(tmp_path) -> None:
+    gateway = _gateway(tmp_path)
+    assert gateway.autonomy_store.create_goal(
+        command_id="cmd-confirm",
+        goal_id="goal-confirm",
+        robot_id="mock0",
+        snapshot={"task_id": "task-confirm", "objective": "inspect"},
+        budgets={},
+        owner_principal_id="owner",
+    )
+    gateway.autonomy_store._db.execute(
+        "UPDATE goals SET status='active' WHERE goal_id='goal-confirm'"
+    )
+    gateway.autonomy_store._db.commit()
+    assert gateway.autonomy_store.create_wake_condition(
+        condition_id="condition-confirm",
+        goal_id="goal-confirm",
+        kind="human_confirmation",
+        expected_payload={},
+        expires_at=__import__("time").time() + 60,
+    )
+
+    asyncio.run(
+        gateway._on_user_turn(
+            UserTurn(
+                Envelope(channel="web", sender_id="web-user", message_id="confirm-msg"),
+                "confirm",
+            )
+        )
+    )
+    fake_bus = cast(FakeBus, gateway.bus)
+    confirmations = [
+        payload
+        for topic, payload in fake_bus.published
+        if topic == gateway.topics.goal_command and payload["action"] == "confirm"
+    ]
+    assert len(confirmations) == 1
+    assert confirmations[0]["condition_id"] == "condition-confirm"

@@ -223,10 +223,10 @@ class EvidenceFact:
 class GoalCommand:
     envelope: Envelope
     command_id: str
-    action: Literal["create", "cancel", "emergency_stop"]
+    action: Literal["create", "cancel", "emergency_stop", "confirm"]
     goal_id: str | None = None
+    condition_id: str | None = None
     objective: str = ""
-    contract_template_id: str | None = None
     success_criteria: tuple[SuccessCriterion, ...] = ()
     budgets: GoalBudgets = field(default_factory=GoalBudgets)
 
@@ -241,7 +241,15 @@ class GoalSnapshot:
     objective: str
     success_criteria: tuple[SuccessCriterion, ...]
     status: Literal[
-        "pending", "active", "waiting", "blocked", "completed", "failed", "cancelled"
+        "pending",
+        "active",
+        "waiting",
+        "waiting_condition",
+        "needs_review",
+        "blocked",
+        "completed",
+        "failed",
+        "cancelled",
     ]
     termination_reason: Literal["cancel", "budget", "emergency"] | None = None
 
@@ -354,7 +362,15 @@ class GoalEvent:
     goal_id: str
     task_id: str
     status: Literal[
-        "pending", "active", "waiting", "blocked", "completed", "failed", "cancelled"
+        "pending",
+        "active",
+        "waiting",
+        "waiting_condition",
+        "needs_review",
+        "blocked",
+        "completed",
+        "failed",
+        "cancelled",
     ]
     active_skill_id: str | None = None
     active_control_id: str | None = None
