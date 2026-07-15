@@ -99,7 +99,7 @@ flowchart TD
 - Ubuntu / Linux
 - Python `3.12`
 - [uv](https://docs.astral.sh/uv/)
-- NATS server，或 Docker
+- NATS server
 - MuJoCo
 - 可用的大模型 API
 

@@ -1,9 +1,8 @@
-"""SkillGateway — sole validation boundary before SkillIntent publication.
+"""在发布 ``SkillIntent`` 前由 Supervisor 执行的调度预检。
 
-Only the AutonomySupervisor calls this gateway.  The gateway validates
-SkillSpec, safety, category, preconditions, objective, and arguments
-against the current RobotExecutionGate and RobotStatus.  It does NOT
-publish messages or write to the ActionLedger.
+该预检会基于当前 ``RobotExecutionGate`` 和 ``RobotStatus`` 校验技能规格、
+安全等级、类别、前置条件、目标和参数。它不发布消息，也不写入动作账本。
+Skill Controller 会在实际执行前再次进行最终准入。
 """
 
 from __future__ import annotations
@@ -20,12 +19,12 @@ class SkillCatalogView(Protocol):
 
 
 @dataclass(frozen=True)
-class SkillGateway:
+class DispatchPreflight:
     catalog: SkillCatalogView
 
     OBSERVE_CATEGORIES = frozenset({"observe", "perception"})
 
-    def validate(
+    def check(
         self,
         *,
         skill_name: str,
@@ -44,8 +43,6 @@ class SkillGateway:
             return PolicyDecision(False, "SKILL_REJECTED")
 
         category = getattr(spec, "category", "general")
-        # Only reject observation skills when called via request_skill entry point.
-        # request_observation is explicitly allowed to use inspect_scene.
         if intent_kind == "skill" and (
             skill_name == "inspect_scene" or category in self.OBSERVE_CATEGORIES
         ):
@@ -74,3 +71,10 @@ class SkillGateway:
             return PolicyDecision(False, "SAFETY_REJECTED")
 
         return PolicyDecision(True)
+
+    def validate(self, **kwargs: Any) -> PolicyDecision:
+        """为迁移到 ``check`` 的调用方保留的兼容别名。"""
+        return self.check(**kwargs)
+
+
+SkillGateway = DispatchPreflight

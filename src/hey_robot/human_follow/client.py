@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from hey_robot.bus.client import BusClient
+from hey_robot.bus.types import MessageBus
 from hey_robot.protocol import Topics
 from hey_robot.skill_os.base import SkillResult
 
@@ -20,7 +20,7 @@ class _PendingSession:
 
 
 class HumanFollowServiceClient:
-    def __init__(self, bus: BusClient, topics: Topics, robot_ids: list[str]) -> None:
+    def __init__(self, bus: MessageBus, topics: Topics, robot_ids: list[str]) -> None:
         self.bus = bus
         self.topics = topics
         self.robot_ids = robot_ids

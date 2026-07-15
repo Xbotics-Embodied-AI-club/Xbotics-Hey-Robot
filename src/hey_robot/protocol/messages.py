@@ -223,9 +223,10 @@ class EvidenceFact:
 class GoalCommand:
     envelope: Envelope
     command_id: str
-    action: Literal["create", "cancel", "emergency_stop", "confirm"]
+    action: Literal["create", "cancel", "emergency_stop", "confirm", "reconcile"]
     goal_id: str | None = None
     condition_id: str | None = None
+    skill_id: str | None = None
     objective: str = ""
     success_criteria: tuple[SuccessCriterion, ...] = ()
     budgets: GoalBudgets = field(default_factory=GoalBudgets)
@@ -533,6 +534,10 @@ def _validate_message(message: Any) -> None:
             raise ValueError("cancel GoalCommand requires goal_id")
         elif message.action == "emergency_stop" and not message.envelope.robot_id:
             raise ValueError("emergency_stop GoalCommand requires robot_id")
+        elif message.action == "reconcile" and (
+            not message.envelope.robot_id or not message.skill_id
+        ):
+            raise ValueError("reconcile GoalCommand requires robot_id and skill_id")
     if isinstance(message, SkillResult):
         if message.status == "completed" and message.success is not True:
             raise ValueError("completed SkillResult requires success=True")

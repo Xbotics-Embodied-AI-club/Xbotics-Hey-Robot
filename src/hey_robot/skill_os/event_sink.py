@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Literal
 
-from hey_robot.bus.client import BusClient
+from hey_robot.bus.types import MessageBus
 from hey_robot.contracts import SkillContract, SkillContractRuntime
 from hey_robot.events import RuntimeEvent
 from hey_robot.events.bus import EventPublisher
@@ -30,7 +30,7 @@ class SkillEventSink:
     def __init__(
         self,
         *,
-        bus: BusClient,
+        bus: MessageBus,
         events: EventPublisher,
         topics: Topics,
         contracts: SkillContractRuntime,

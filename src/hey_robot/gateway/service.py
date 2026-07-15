@@ -5,7 +5,6 @@ import hashlib
 import json
 import re
 import time
-import uuid
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -27,7 +26,10 @@ from hey_robot.events import EventKind, RuntimeEvent
 from hey_robot.events.bus import BusEventPublisher
 from hey_robot.events.store import RuntimeEventStore
 from hey_robot.gateway.identity import ClaimedBinding, IdentityResolver, PendingBinding
-from hey_robot.gateway.receipts import InteractionReceiptStore
+from hey_robot.gateway.receipts import (
+    GoalNotificationReceiptStore,
+    InteractionReceiptStore,
+)
 from hey_robot.health import HealthReportService
 from hey_robot.logging import HeyRobotLogger
 from hey_robot.protocol import (
@@ -49,7 +51,6 @@ from hey_robot.protocol.messages import (
 )
 from hey_robot.providers import ReasoningMessage, build_provider
 from hey_robot.skill_os import SkillStore
-from hey_robot.skill_os.command_store import SkillCommandStore
 
 logger = HeyRobotLogger(name="gateway")
 _BINDING_COMMAND = re.compile(
@@ -100,7 +101,7 @@ _ROUTE_INTERACTION_TOOL = {
 
 
 class GatewayService:
-    """Channel gateway that normalizes inbound turns and forwards outbound replies."""
+    """负责渠道输入输出标准化，但不修改任务状态的 Gateway。"""
 
     def __init__(
         self, config: DeploymentConfig, *, episode_dir: str | Path | None = None
@@ -126,13 +127,15 @@ class GatewayService:
             / "autonomy.sqlite3"
         )
         self.autonomy_store = AutonomyStore(autonomy_path)
-        self.skill_receipts = SkillCommandStore(
-            Path(config.resources.runtime_dir) / "skill_receipts.sqlite3"
-        )
         self.interaction_receipts = InteractionReceiptStore(
             Path(config.resources.runtime_dir)
             / config.deployment.id
             / "interaction_receipts.sqlite3"
+        )
+        self.goal_notification_receipts = GoalNotificationReceiptStore(
+            Path(config.resources.runtime_dir)
+            / config.deployment.id
+            / "goal_notification_receipts.sqlite3"
         )
         self.latest_robot_status: dict[str, RobotStatus] = {}
         self.identity = IdentityResolver(
@@ -186,6 +189,7 @@ class GatewayService:
         await self.channels.stop_all()
         await self.bus.close()
         self.interaction_receipts.close()
+        self.goal_notification_receipts.close()
 
     async def _on_user_turn(self, turn: UserTurn) -> None:
         if await self._try_handle_identity_binding_turn(turn):
@@ -408,24 +412,20 @@ class GatewayService:
                 or status is None
                 or status.state != "idle"
                 or status.skill_id is not None
-                or self.skill_receipts.is_active(skill_id)
             ):
                 await self._send_reply(
                     AgentReply(envelope=envelope, text="RECONCILE_IDLE_PROOF_REQUIRED")
                 )
                 return True
-            reconciled = self.autonomy_store.reconcile_unknown_action(
-                reconcile_id=str(uuid.uuid4()),
-                robot_id=robot_id,
+            command = GoalCommand(
+                envelope.child(robot_id=robot_id),
+                self._command_id(envelope, interaction_id, "reconcile"),
+                "reconcile",
                 skill_id=skill_id,
-                operator_id=envelope.user_id or envelope.sender_id or "anonymous",
-                status_payload=to_payload(status),
             )
+            await self.bus.publish(self.topics.goal_command, to_payload(command))
             await self._send_reply(
-                AgentReply(
-                    envelope=envelope,
-                    text="RECONCILE_COMPLETED" if reconciled else "RECONCILE_REJECTED",
-                )
+                AgentReply(envelope=envelope, text="RECONCILE_REQUESTED")
             )
             return True
         if parts[1] == "cancel":
@@ -648,7 +648,7 @@ class GatewayService:
             targets = [event.envelope]
         for target in targets:
             channel = str(target.channel or "")
-            if not channel or not self.autonomy_store.claim_goal_notification(
+            if not channel or not self.goal_notification_receipts.claim(
                 goal_id=event.goal_id,
                 goal_version=int(view["version"]),
                 status=event.status,

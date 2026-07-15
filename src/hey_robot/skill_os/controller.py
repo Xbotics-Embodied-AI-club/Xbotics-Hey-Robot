@@ -314,6 +314,11 @@ class SkillControllerService:
     async def _accept_skill(
         self, policy_id: str, state: _SkillControllerState, intent: SkillIntent
     ) -> None:
+        """在机器人执行前对技能意图进行最终准入。
+
+        Supervisor 的预检负责保护调度；此处仍必须再次校验，避免消息传输期间
+        机器人状态或资源占用变化造成检查时与使用时不一致（TOCTOU）。
+        """
         resolved_args = {**dict(intent.arguments), "objective": intent.objective}
         contract, decision = self.skill_runtime.validate(
             intent.name,

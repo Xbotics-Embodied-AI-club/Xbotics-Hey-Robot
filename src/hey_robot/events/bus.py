@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from hey_robot.bus.client import BusClient
+from hey_robot.bus.types import MessageBus
 from hey_robot.events.event import RuntimeEvent
 from hey_robot.protocol import Topics
 
@@ -12,7 +12,7 @@ class EventPublisher(Protocol):
 
 
 class BusEventPublisher:
-    def __init__(self, bus: BusClient, topics: Topics | None = None) -> None:
+    def __init__(self, bus: MessageBus, topics: Topics | None = None) -> None:
         self.bus = bus
         self.topics = topics or Topics()
 

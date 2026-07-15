@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from hey_robot.cognition.autonomous.policy import PolicyDecision
-from hey_robot.cognition.autonomous.skill_gateway import SkillGateway
+from hey_robot.cognition.autonomous.skill_gateway import DispatchPreflight, SkillGateway
 from hey_robot.protocol import Envelope, RobotExecutionGate, RobotStatus
 from hey_robot.skill_os.base import SkillCatalog, SkillSpec
 
@@ -37,6 +37,10 @@ def _gateway(catalog_skills=None) -> SkillGateway:
             ),
         ]
     return SkillGateway(SkillCatalog(tuple(catalog_skills)))
+
+
+def test_skill_gateway_is_named_dispatch_preflight() -> None:
+    assert SkillGateway is DispatchPreflight
 
 
 def _ready_gate() -> RobotExecutionGate:

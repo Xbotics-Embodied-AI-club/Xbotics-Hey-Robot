@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import ssl
-from collections.abc import Awaitable, Callable
 from typing import Any
+
+from hey_robot.bus.types import MessageHandler, RawMessageHandler
 
 
 class BusClient:
@@ -73,7 +74,7 @@ class BusClient:
             assert self._client is not None
             self._js = self._client.jetstream()
 
-    async def publish(self, topic: str, payload: dict):
+    async def publish(self, topic: str, payload: dict[str, Any]) -> None:
         if not self._connected or self._client is None:
             raise RuntimeError("BusClient 未连接。请先调用 connect()。")
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -94,8 +95,8 @@ class BusClient:
     async def subscribe(
         self,
         topics: list[str],
-        on_message: Callable[[str, dict], Awaitable[None]],
-    ):
+        on_message: MessageHandler,
+    ) -> None:
         if not self._connected or self._client is None:
             raise RuntimeError("BusClient 未连接。请先调用 connect()。")
 
@@ -124,7 +125,7 @@ class BusClient:
     async def subscribe_raw(
         self,
         topics: list[str],
-        on_message: Callable[[str, bytes], Awaitable[None]],
+        on_message: RawMessageHandler,
     ) -> None:
         if not self._connected or self._client is None:
             raise RuntimeError("BusClient is not connected")
@@ -136,7 +137,7 @@ class BusClient:
             sub = await self._client.subscribe(topic, cb=_handler)
             self._subscriptions[topic] = sub
 
-    async def unsubscribe(self, topics: list[str]):
+    async def unsubscribe(self, topics: list[str]) -> None:
         if not self._connected or self._client is None:
             return
         for topic in topics:
@@ -144,7 +145,7 @@ class BusClient:
             if sub is not None:
                 await sub.unsubscribe()
 
-    async def close(self):
+    async def close(self) -> None:
         if self._client is not None:
             await self._client.drain()
             await self._client.close()

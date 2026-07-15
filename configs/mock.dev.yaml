@@ -2,8 +2,9 @@
 deployment:
   id: mock-dev
   bus:
-    type: nats
-    url: nats://127.0.0.1:4222
+    # 仅限单进程开发，不能连接独立运行的服务。
+    type: in_memory
+    url: memory://mock-dev
 
     options:
       robot_publish_hz: 10.0

@@ -1,4 +1,4 @@
-"""The sole autonomous owner allowed to turn a proposal into SkillIntent."""
+"""唯一允许将提案转换为 ``SkillIntent`` 的自主调度所有者。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from hey_robot.bus.factory import create_bus_client
 from hey_robot.cognition.autonomous.continuation_policy import decide_continuation
 from hey_robot.cognition.autonomous.policy import check_budget, dispatch_admission
 from hey_robot.cognition.autonomous.progress import assess_progress
-from hey_robot.cognition.autonomous.skill_gateway import SkillGateway
+from hey_robot.cognition.autonomous.skill_gateway import DispatchPreflight
 from hey_robot.cognition.autonomous.store import AutonomyStore
 from hey_robot.cognition.runtime.trace import RunTraceWriter
 from hey_robot.cognition.task.contract import create_task_contract
@@ -58,7 +58,7 @@ class AutonomySupervisorService:
         self.store = AutonomyStore(path)
         self.trace = RunTraceWriter(path.with_name("autonomy.trace.jsonl"))
         skill_catalog = registry_from_config(config).catalog(semantic_only=False)
-        self.gateway = SkillGateway(skill_catalog)
+        self.preflight = DispatchPreflight(skill_catalog)
         self._watchdog_interval: float = 5.0
         self._deliberation_timeout: float = 300.0
         self._heartbeat_timeout: float = 60.0
@@ -119,6 +119,13 @@ class AutonomySupervisorService:
             if command.goal_id and command.condition_id:
                 await self._confirm(
                     command.goal_id, command.condition_id, command.envelope
+                )
+            return
+        if command.action == "reconcile":
+            robot_id = command.envelope.robot_id
+            if robot_id and command.skill_id:
+                await self._reconcile(
+                    robot_id, command.skill_id, command.command_id, command.envelope
                 )
             return
         robot_id = command.envelope.robot_id
@@ -345,6 +352,25 @@ class AutonomySupervisorService:
             return
         await self._interrupt_action(goal, active, command_id, envelope, "emergency")
 
+    async def _reconcile(
+        self, robot_id: str, skill_id: str, command_id: str, envelope: Envelope
+    ) -> None:
+        """在本地观测到空闲证据后，执行操作员发起的 reconcile。"""
+        status = self._latest_status.get(robot_id)
+        if status is None or status.state != "idle" or status.skill_id is not None:
+            return
+        if not self.store.reconcile_unknown_action(
+            reconcile_id=command_id,
+            robot_id=robot_id,
+            skill_id=skill_id,
+            operator_id=envelope.user_id or envelope.sender_id or "anonymous",
+            status_payload=to_payload(status),
+        ):
+            return
+        action = self.store.action(skill_id)
+        if action is not None:
+            await self._publish_goal_event(action["goal_id"], envelope)
+
     async def _interrupt_action(
         self,
         goal: dict,
@@ -440,7 +466,7 @@ class AutonomySupervisorService:
         if not admission.allowed:
             self.store.fail_goal(goal["goal_id"], admission.code or "STATE_UNKNOWN")
             return
-        validation = self.gateway.validate(
+        validation = self.preflight.check(
             skill_name=proposal.skill_name,
             objective=proposal.objective,
             arguments=proposal.arguments,

@@ -4,6 +4,8 @@ import os
 from typing import Any
 
 from hey_robot.bus.client import BusClient
+from hey_robot.bus.in_memory import InMemoryBusClient, InMemoryBusHub
+from hey_robot.bus.types import MessageBus
 from hey_robot.config import BusSpec
 
 _BUS_CLIENT_KEYS = {
@@ -19,9 +21,13 @@ _BUS_CLIENT_KEYS = {
     "use_jetstream",
     "js_stream",
 }
+_IN_MEMORY_HUBS: dict[str, InMemoryBusHub] = {}
 
 
-def create_bus_client(spec: BusSpec, *, role: str | None = None) -> BusClient:
+def create_bus_client(spec: BusSpec, *, role: str | None = None) -> MessageBus:
+    if spec.type == "in_memory":
+        hub = _IN_MEMORY_HUBS.setdefault(spec.url, InMemoryBusHub())
+        return InMemoryBusClient(hub)
     if spec.type != "nats":
         raise ValueError(f"unsupported bus type: {spec.type}")
     options: dict[str, Any] = {
