@@ -8,6 +8,9 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class Topics:
     user_turn: str = "user.turn"
+    conversation_turn: str = "conversation.turn"
+    conversation_result: str = "conversation.result"
+    short_operation_command: str = "short_operation.command"
     agent_reply: str = "agent.reply"
     skill_intent: str = "skill.intent"
     skill_event: str = "skill.event"

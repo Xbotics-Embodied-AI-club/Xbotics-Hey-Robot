@@ -1300,11 +1300,14 @@ class SkillControllerService:
         last_result = status.metrics.get("last_skill_result")
         if not isinstance(last_result, dict):
             return None
+        summary = str(last_result.get("summary") or "").strip()
         message = str(last_result.get("message") or "").strip()
         skill = last_result.get("skill")
         skill_name = (
             str(skill.get("name") or "").strip() if isinstance(skill, dict) else ""
         )
+        if summary:
+            return summary
         if message:
             return message
         if skill_name:

@@ -34,6 +34,7 @@ from hey_robot.protocol import (
     GoalSnapshot,
     RobotObservation,
     RobotStatus,
+    ShortOperationCommand,
     SkillControl,
     SkillControlResult,
     SkillIntent,
@@ -75,6 +76,9 @@ class AutonomySupervisorService:
             )
         await self.bus.connect()
         await self.bus.subscribe([self.topics.goal_command], self._on_goal_command)
+        await self.bus.subscribe(
+            [self.topics.short_operation_command], self._on_short_operation_command
+        )
         await self.bus.subscribe(
             [self.topics.agent_deliberation_result], self._on_deliberation_result
         )
@@ -136,7 +140,7 @@ class AutonomySupervisorService:
         gate = self.store.gate(robot_id)
         if gate.state != "ready":
             return
-        goal_id = str(uuid.uuid4())
+        goal_id = command.goal_id or str(uuid.uuid4())
         task_id = str(uuid.uuid4())
         contract_id = str(uuid.uuid4())
         contract = create_task_contract(
@@ -170,6 +174,67 @@ class AutonomySupervisorService:
             self.trace.write("goal.created", goal_id=goal_id)
             await self._schedule(snapshot, command.envelope, command.command_id)
             await self._publish_goal_event(goal_id, command.envelope)
+
+    async def _on_short_operation_command(self, _topic: str, payload: dict) -> None:
+        command = from_payload(ShortOperationCommand, payload)
+        robot_id = command.envelope.robot_id
+        if not robot_id:
+            await self._reject_short_operation(command, "ROBOT_OFFLINE")
+            return
+        gate = self.store.gate(robot_id)
+        status = self._latest_status.get(robot_id)
+        admission = dispatch_admission(gate=gate, status=status)
+        if not admission.allowed:
+            await self._reject_short_operation(
+                command, admission.code or "ROBOT_EXECUTION_UNCERTAIN"
+            )
+            return
+        proposal = command.proposal
+        decision = self.preflight.check(
+            skill_name=proposal.skill_name,
+            objective=proposal.objective,
+            arguments=proposal.arguments,
+            intent_kind=proposal.intent_kind,
+            gate=gate,
+            status=status,
+        )
+        if not decision.allowed:
+            await self._reject_short_operation(
+                command, decision.code or "SAFETY_REJECTED"
+            )
+            return
+        intent = SkillIntent(
+            envelope=command.envelope,
+            skill_id=command.operation_id,
+            goal_id=f"short:{command.operation_id}",
+            task_id=f"short:{command.operation_id}",
+            deliberation_id=f"short:{command.operation_id}",
+            intent_kind=proposal.intent_kind,
+            name=proposal.skill_name,
+            arguments=proposal.arguments,
+            objective=proposal.objective,
+            timeout_sec=command.timeout_sec,
+        )
+        await self.bus.publish(self.topics.skill_intent, to_payload(intent))
+
+    async def _reject_short_operation(
+        self, command: ShortOperationCommand, reason: str
+    ) -> None:
+        await self.bus.publish(
+            self.topics.skill_result,
+            to_payload(
+                SkillResult(
+                    envelope=command.envelope,
+                    skill_id=command.operation_id,
+                    name=command.proposal.skill_name,
+                    status="failed",
+                    success=False,
+                    summary="短操作未通过执行预检。",
+                    error=reason,
+                    failure_mode=reason,
+                )
+            ),
+        )
 
     def _valid_contract(self, command: GoalCommand, robot_id: str) -> bool:
         catalog = set(self.config.autonomy.entity_catalog)

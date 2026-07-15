@@ -141,6 +141,26 @@ async def test_robot_runtime_perception_skill_refreshes_camera_directly(
     assert status.metrics["last_skill_result"]["skill"] == "inspect_scene"
 
 
+async def test_robot_runtime_uses_scene_captioner_for_inspect_scene(tmp_path) -> None:
+    captioner = _FakeSceneCaptioner()
+    runtime = RobotRuntime(
+        _CountingCameraDriver("mock0"),
+        LocalMediaStore(tmp_path / "media"),
+        scene_captioner=captioner,
+    )
+    await runtime.start()
+    action = RobotSkillAction("inspect_scene", safety_level="observe").to_robot_action(
+        _intent("caption1", "inspect_scene", "describe scene")
+    )
+
+    status = await runtime.apply_action(action)
+
+    result = status.metrics["last_skill_result"]
+    assert result["semantic_available"] is True
+    assert result["summary"] == "scene=桌面中央有一个杯子"
+    assert captioner.observations[0].images
+
+
 async def test_robot_runtime_status_returns_driver_status_directly(tmp_path) -> None:
     driver = _CountingCameraDriver("mock0")
     runtime = RobotRuntime(driver, LocalMediaStore(tmp_path / "media"))
@@ -327,3 +347,14 @@ class _SquareMarkerDriver(_CountingCameraDriver):
                 )
             ],
         )
+
+
+class _FakeSceneCaptioner:
+    def __init__(self) -> None:
+        self.observations: list[RobotObservation] = []
+
+    async def caption(self, observation, _status):
+        from hey_robot.cognition.perception.scene import SceneUnderstanding
+
+        self.observations.append(observation)
+        return SceneUnderstanding(summary="桌面中央有一个杯子", confidence=0.9)

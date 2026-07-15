@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from hey_robot.protocol import (
     RobotAction,
@@ -19,6 +19,14 @@ from hey_robot.robot_runtime.observations import (
     PerceptionSnapshot,
 )
 from hey_robot.robot_runtime.safety import RobotSafetyError, RobotSafetySupervisor
+
+
+class SceneCaptioner(Protocol):
+    """Runtime port for optional semantic image captioning."""
+
+    async def caption(
+        self, observation: RobotObservation, status: RobotStatus | None = None
+    ) -> Any: ...
 
 
 @dataclass
@@ -44,6 +52,7 @@ class RobotRuntime:
         media_store: LocalMediaStore,
         *,
         safety: RobotSafetySupervisor | None = None,
+        scene_captioner: SceneCaptioner | None = None,
         image_save_every_n: int = 1,
     ) -> None:
         self.driver = driver
@@ -53,6 +62,7 @@ class RobotRuntime:
         )
         self.robot_id = driver.robot_id
         self.safety = safety or RobotSafetySupervisor()
+        self.scene_captioner = scene_captioner
         self.control_plane = RobotControlPlane()
         self._capabilities: RobotCapabilities | None = None
 
@@ -141,7 +151,7 @@ class RobotRuntime:
                 action, snapshot=snapshot, result=result
             )
         snapshot = await self._current_perception_snapshot(reason=skill_name)
-        result = self._inspect_scene(snapshot, dict(skill_action.arguments))
+        result = await self._inspect_scene(snapshot, dict(skill_action.arguments))
         return await self._perception_status(action, snapshot=snapshot, result=result)
 
     async def _current_perception_snapshot(self, *, reason: str) -> PerceptionSnapshot:
@@ -170,29 +180,58 @@ class RobotRuntime:
             metrics={**status.metrics, "last_skill_result": result},
         )
 
-    def _inspect_scene(
+    async def _inspect_scene(
         self, snapshot: PerceptionSnapshot, arguments: dict[str, Any]
     ) -> dict[str, Any]:
-        summary = _observation_summary(
-            snapshot.observation, question=arguments.get("question")
+        caption = await self._caption_scene(snapshot.observation)
+        summary = (
+            f"scene={caption}"
+            if caption
+            else _observation_summary(
+                snapshot.observation, question=arguments.get("question")
+            )
         )
         return {
             "success": snapshot.has_images,
             "skill": "inspect_scene",
-            "message": "scene inspected"
-            if snapshot.has_images
-            else "camera image unavailable",
+            "message": (
+                "scene recognized"
+                if caption
+                else "camera image captured but scene recognition unavailable"
+                if snapshot.has_images
+                else "camera image unavailable"
+            ),
             "summary": summary,
             "failure_mode": None if snapshot.has_images else "camera_unavailable",
+            "semantic_available": bool(caption),
             **snapshot.summary(),
         }
+
+    async def _caption_scene(self, observation: RobotObservation) -> str | None:
+        """Return a model-produced scene summary when a visual captioner is enabled.
+
+        Raw camera metadata is deliberately not presented as a scene description:
+        a successful frame capture does not establish what is visible in the frame.
+        """
+        if self.scene_captioner is None or not observation.images:
+            return None
+        try:
+            understanding = await self.scene_captioner.caption(
+                observation, await self.status()
+            )
+        except Exception:
+            return None
+        if understanding.metadata.get("error") or understanding.confidence <= 0.0:
+            return None
+        summary = understanding.summary.strip()
+        return summary or None
 
     async def _look_around(
         self, action: RobotAction, arguments: dict[str, Any]
     ) -> dict[str, Any]:
         observations: list[dict[str, Any]] = []
         first = await self._current_perception_snapshot(reason="look_around:start")
-        observations.append(self._inspect_scene(first, arguments))
+        observations.append(await self._inspect_scene(first, arguments))
         for direction, angle in (("left", 25.0), ("right", 50.0), ("left", 25.0)):
             motion = await self._apply_internal_skill(
                 action,
@@ -208,7 +247,7 @@ class RobotRuntime:
                     "observations": observations,
                 }
             snapshot = await self._current_perception_snapshot(reason="look_around")
-            observations.append(self._inspect_scene(snapshot, arguments))
+            observations.append(await self._inspect_scene(snapshot, arguments))
         ok = any(item.get("success") for item in observations)
         return {
             "success": ok,

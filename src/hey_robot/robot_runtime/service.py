@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Callable
 from typing import Any
 
 from hey_robot.bus.factory import create_bus_client
@@ -20,7 +21,7 @@ from hey_robot.protocol.messages import from_payload, to_payload
 from hey_robot.robot_runtime.manager import RobotManager
 from hey_robot.robot_runtime.media import LocalMediaStore
 from hey_robot.robot_runtime.observations.frame_stream import encode_frame_packet
-from hey_robot.robot_runtime.runtime import RobotRuntime
+from hey_robot.robot_runtime.runtime import RobotRuntime, SceneCaptioner
 from hey_robot.robot_runtime.safety import RobotSafetyError
 
 logger = HeyRobotLogger(name="robot")
@@ -34,6 +35,8 @@ class RobotService:
         config: DeploymentConfig,
         *,
         skill_catalog: SkillContractCatalog | None = None,
+        scene_captioner_factory: Callable[[LocalMediaStore], SceneCaptioner]
+        | None = None,
     ) -> None:
         self.config = config
         self.topics = Topics()
@@ -43,10 +46,16 @@ class RobotService:
         self.media_store = LocalMediaStore(
             config.resources.media_root, max_items=config.resources.media_max_items
         )
+        scene_captioner = (
+            scene_captioner_factory(self.media_store)
+            if scene_captioner_factory is not None
+            else None
+        )
         self.runtimes = {
             driver.robot_id: RobotRuntime(
                 driver,
                 self.media_store,
+                scene_captioner=scene_captioner,
                 image_save_every_n=config.resources.media_image_save_every_n,
             )
             for driver in self.manager.all()

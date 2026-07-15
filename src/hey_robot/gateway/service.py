@@ -34,6 +34,8 @@ from hey_robot.health import HealthReportService
 from hey_robot.logging import HeyRobotLogger
 from hey_robot.protocol import (
     AgentReply,
+    ConversationResult,
+    ConversationTurn,
     Envelope,
     GoalCommand,
     GoalEvent,
@@ -49,7 +51,6 @@ from hey_robot.protocol.messages import (
     from_payload,
     to_payload,
 )
-from hey_robot.providers import ReasoningMessage, build_provider
 from hey_robot.skill_os import SkillStore
 
 logger = HeyRobotLogger(name="gateway")
@@ -57,47 +58,6 @@ _BINDING_COMMAND = re.compile(
     r"^\s*(?:bind|绑定)\s+([A-Za-z0-9]{4,12})\s*$", re.IGNORECASE
 )
 _ROBOT_STATUS_PERSIST_INTERVAL_SEC = 5.0
-_ROUTE_INTERACTION_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "route_interaction",
-        "description": "Classify the user request as a text conversation or a physical robot goal.",
-        "parameters": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "kind": {"type": "string", "enum": ["conversation", "goal"]},
-                "response_text": {"type": ["string", "null"]},
-                "objective": {"type": "string"},
-                "success_criteria": {
-                    "type": "array",
-                    "minItems": 1,
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "criterion_id": {"type": "string"},
-                            "criterion_type": {"type": "string"},
-                            "subject_id": {"type": "string"},
-                            "predicate": {"type": "string"},
-                            "object_id": {"type": "string"},
-                            "max_age_sec": {"type": "number"},
-                        },
-                        "required": [
-                            "criterion_id",
-                            "criterion_type",
-                            "subject_id",
-                            "predicate",
-                            "object_id",
-                            "max_age_sec",
-                        ],
-                    },
-                },
-            },
-            "required": ["kind"],
-        },
-    },
-}
 
 
 class GatewayService:
@@ -146,7 +106,6 @@ class GatewayService:
         )
         self._ready = asyncio.Event()
         self._last_robot_status_persisted_at: dict[str, float] = {}
-        self._presentation_providers: dict[str, Any] = {}
         self._register_channels()
 
     async def start(self) -> None:
@@ -163,13 +122,16 @@ class GatewayService:
         await self.events.publish(event)
         self.event_store.append(event)
         await self.bus.subscribe([self.topics.agent_reply], self._on_agent_reply)
+        await self.bus.subscribe(
+            [self.topics.conversation_result], self._on_conversation_result
+        )
         await self.bus.subscribe([self.topics.runtime_event], self._on_runtime_event)
         await self.bus.subscribe([self.topics.robot_status], self._on_robot_status)
         await self.bus.subscribe([self.topics.skill_event], self._on_skill_event)
         await self.bus.subscribe([self.topics.skill_result], self._on_skill_result)
         await self.bus.subscribe([self.topics.goal_event], self._on_goal_event)
         logger.info(
-            f"gateway subscribed {self.topics.agent_reply}, {self.topics.runtime_event}, "
+            f"gateway subscribed {self.topics.agent_reply}, {self.topics.conversation_result}, {self.topics.runtime_event}, "
             f"{self.topics.robot_status}, {self.topics.skill_event}, {self.topics.skill_result}, "
             f"{self.topics.goal_event}"
         )
@@ -227,128 +189,30 @@ class GatewayService:
         if await self._handle_goal_command(turn.text, envelope, interaction_id):
             self.interaction_receipts.complete(interaction_id, "goal_command")
             return
-        await self._reply_to_presentation_turn(envelope, turn.text, interaction_id)
-        self.interaction_receipts.complete(interaction_id, "presentation")
-
-    async def _reply_to_presentation_turn(
-        self, envelope: Envelope, text: str, interaction_id: str
-    ) -> None:
-        """Handle chat directly or create a validated GoalCommand from one model tool call."""
-        agent_id = self._agent_id(envelope.agent_id)
-        try:
-            provider = self._presentation_providers.get(agent_id)
-            if provider is None:
-                provider = build_provider(self.config, agent_id, purpose="agent")
-                self._presentation_providers[agent_id] = provider
-            response = await asyncio.wait_for(
-                provider.chat(
-                    messages=[
-                        ReasoningMessage(
-                            role="system",
-                            content=(
-                                "Route every request by calling route_interaction exactly once. "
-                                "Use kind=conversation with response_text for non-physical requests. "
-                                "Use kind=goal for a request to physically observe or act with the robot, "
-                                "and provide a concrete immutable success contract. "
-                                "Provide complete success_criteria for every physical goal. "
-                                "A question about what the robot sees or what is in its environment is a "
-                                "physical observation request and must use kind=goal. "
-                                f"Allowed entity IDs: {sorted(self.config.autonomy.entity_catalog)}. "
-                                "Never claim that a physical task has completed. "
-                                "For a scene observation, use exactly this success criterion: "
-                                "criterion_id=scene_observed, criterion_type=evidence_present, "
-                                "subject_id=robot:sim_robot, predicate=observed, object_id=scene, "
-                                "max_age_sec=60. Every kind=goal result must contain at least one "
-                                "complete success_criteria item."
-                            ),
-                        ),
-                        ReasoningMessage(role="user", content=text),
-                    ],
-                    tools=[_ROUTE_INTERACTION_TOOL],
-                ),
-                timeout=60.0,
-            )
-            if response.tool_calls:
-                if (
-                    len(response.tool_calls) != 1
-                    or response.tool_calls[0].name != "route_interaction"
-                ):
-                    reply = "I could not form a safe autonomous goal from that request."
-                else:
-                    reply = await self._route_model_interaction(
-                        envelope, response.tool_calls[0].arguments, interaction_id
-                    )
-            else:
-                reply = (
-                    response.content or "I cannot provide a text response right now."
+        session_key = self._session_key(envelope)
+        await self.bus.publish(
+            self.topics.conversation_turn,
+            to_payload(
+                ConversationTurn(
+                    envelope.child(episode_id=allocation.episode_id),
+                    session_key,
+                    interaction_id,
+                    turn.text,
                 )
-        except Exception:
-            logger.exception("presentation request failed")
-            reply = "The text assistant is temporarily unavailable."
-        await self._send_reply(AgentReply(envelope=envelope, text=reply))
+            ),
+        )
+        self.interaction_receipts.complete(interaction_id, "conversation_turn")
 
-    async def _route_model_interaction(
-        self, envelope: Envelope, arguments: dict[str, Any], interaction_id: str
-    ) -> str:
-        if arguments.get("kind") == "conversation":
-            response_text = arguments.get("response_text")
-            return (
-                str(response_text).strip()
-                or "I cannot provide a text response right now."
-            )
-        if arguments.get("kind") != "goal":
-            return "I could not determine how to handle that request."
+    async def _on_conversation_result(self, _topic: str, payload: dict) -> None:
+        result = from_payload(ConversationResult, payload)
+        await self._send_reply(AgentReply(envelope=result.envelope, text=result.text))
 
-        try:
-            objective = str(arguments["objective"]).strip()
-            criteria = self._goal_criteria_from_arguments(arguments)
-            if not objective or not criteria:
-                raise ValueError("missing objective or criteria")
-            active = self.autonomy_store.active_goal_for_robot(
-                str(envelope.robot_id or "")
-            )
-            if active is not None:
-                # A new natural-language task must never be injected into an
-                # active physical loop. The owner can cancel at a safe
-                # boundary, then submit the replacement as a new immutable
-                # contract.
-                return (
-                    "The robot already has an active task. Cancel that task "
-                    "before creating a replacement; the current contract was not modified."
-                )
-            command = GoalCommand(
-                envelope,
-                self._command_id(envelope, interaction_id, "create"),
-                "create",
-                objective=objective,
-                success_criteria=criteria,
-                budgets=GoalBudgets(),
-            )
-            # Decode once here to enforce protocol validation before publication.
-            from_payload(GoalCommand, to_payload(command))
-        except (KeyError, TypeError, ValueError):
-            return "I need a clearer, verifiable success condition before creating that robot task."
-        await self.bus.publish(self.topics.goal_command, to_payload(command))
-        return f"Created autonomous goal: {objective}"
-
-    @staticmethod
-    def _goal_criteria_from_arguments(
-        arguments: dict[str, Any],
-    ) -> tuple[SuccessCriterion, ...]:
-        raw_criteria = arguments.get("success_criteria")
-        try:
-            if not isinstance(raw_criteria, list):
-                raise ValueError("criteria must be a list")
-            criteria = tuple(
-                SuccessCriterion(**item)
-                for item in raw_criteria
-                if isinstance(item, dict)
-            )
-            if criteria:
-                return criteria
-        except (TypeError, ValueError):
-            pass
-        return ()
+    def _session_key(self, envelope: Envelope) -> str:
+        principal = (
+            envelope.user_id
+            or f"{envelope.channel or 'unknown'}:{envelope.chat_id or envelope.sender_id or 'anonymous'}"
+        )
+        return f"{self.config.deployment.id}:{envelope.agent_id or self._agent_id(None)}:{principal}"
 
     async def _handle_goal_command(
         self, text: str, envelope: Envelope, interaction_id: str
@@ -662,10 +526,7 @@ class GatewayService:
                         robot_id=event.envelope.robot_id,
                         agent_id=event.envelope.agent_id,
                     ),
-                    text=(
-                        f"Goal {event.status}: {view['objective']} "
-                        f"(current_skill={view.get('current_skill_name') or 'none'})"
-                    ),
+                    text=_goal_status_text(str(event.status), str(view["objective"])),
                     metadata={
                         "notification": True,
                         "goal_id": event.goal_id,
@@ -1080,6 +941,23 @@ def _goal_payload(goal: dict[str, Any]) -> dict[str, Any]:
         "termination_reason": goal.get("termination_reason"),
         "created_at": goal.get("created_at"),
     }
+
+
+def _goal_status_text(status: str, objective: str) -> str:
+    templates = {
+        "pending": "已接收任务：{objective}。",
+        "active": "正在执行：{objective}。",
+        "waiting": "任务正在等待新的条件：{objective}。",
+        "waiting_condition": "任务需要你的确认或补充信息：{objective}。",
+        "completed": "任务已完成：{objective}。",
+        "failed": "任务未完成：{objective}。",
+        "cancelled": "任务已取消：{objective}。",
+        "needs_review": "任务需要人工检查：{objective}。",
+        "blocked": "任务暂时无法继续：{objective}。",
+    }
+    return templates.get(status, "任务状态已更新：{objective}。").format(
+        objective=objective
+    )
 
 
 def _compact_status_metrics(metrics: dict[str, Any]) -> dict[str, Any]:

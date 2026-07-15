@@ -116,7 +116,7 @@ def _gateway(tmp_path) -> GatewayService:
     return gateway
 
 
-def test_gateway_routes_ordinary_turn_as_text_only_and_publishes_explicit_goal_command(
+def test_gateway_publishes_ordinary_turn_to_conversation_agent_and_keeps_explicit_goal_command(
     tmp_path,
 ) -> None:
     gateway = _gateway(tmp_path)
@@ -135,7 +135,13 @@ def test_gateway_routes_ordinary_turn_as_text_only_and_publishes_explicit_goal_c
 
     fake_bus = cast(FakeBus, gateway.bus)
     assert all(topic != gateway.topics.user_turn for topic, _ in fake_bus.published)
-    assert any(topic == gateway.topics.agent_reply for topic, _ in fake_bus.published)
+    conversation = next(
+        payload
+        for topic, payload in fake_bus.published
+        if topic == gateway.topics.conversation_turn
+    )
+    assert conversation["text"] == "pick up the cup"
+    assert conversation["session_key"] == "d1:main:web:chat-1"
 
     create = UserTurn(
         envelope=turn.envelope,
@@ -151,22 +157,27 @@ def test_gateway_routes_ordinary_turn_as_text_only_and_publishes_explicit_goal_c
     assert command["envelope"]["robot_id"] == "mock0"
 
 
-def test_gateway_converts_model_goal_tool_call_to_goal_command(tmp_path) -> None:
+def test_gateway_never_routes_natural_language_directly_to_goal_command(
+    tmp_path,
+) -> None:
     gateway = _gateway(tmp_path)
-    gateway._presentation_providers["main"] = GoalBuilderProvider()
     asyncio.run(
         gateway._on_user_turn(
             UserTurn(Envelope(channel="web", sender_id="u1"), "look around")
         )
     )
     fake_bus = cast(FakeBus, gateway.bus)
-    assert any(topic == gateway.topics.goal_command for topic, _ in fake_bus.published)
+    assert any(
+        topic == gateway.topics.conversation_turn for topic, _ in fake_bus.published
+    )
+    assert not any(
+        topic == gateway.topics.goal_command for topic, _ in fake_bus.published
+    )
     assert all(topic != gateway.topics.skill_intent for topic, _ in fake_bus.published)
 
 
-def test_gateway_does_not_inject_new_goal_into_active_task(tmp_path) -> None:
+def test_gateway_keeps_natural_language_turn_out_of_active_goal_state(tmp_path) -> None:
     gateway = _gateway(tmp_path)
-    gateway._presentation_providers["main"] = GoalBuilderProvider()
     assert gateway.autonomy_store.create_goal(
         command_id="active-command",
         goal_id="active-goal",
@@ -185,19 +196,15 @@ def test_gateway_does_not_inject_new_goal_into_active_task(tmp_path) -> None:
     assert not any(
         topic == gateway.topics.goal_command for topic, _ in fake_bus.published
     )
-    reply = next(
-        payload
-        for topic, payload in fake_bus.published
-        if topic == gateway.topics.agent_reply
+    assert any(
+        topic == gateway.topics.conversation_turn for topic, _ in fake_bus.published
     )
-    assert "Cancel that task" in reply["text"]
 
 
 def test_gateway_deduplicates_replayed_transport_message_before_model_routing(
     tmp_path,
 ) -> None:
     gateway = _gateway(tmp_path)
-    gateway._presentation_providers["main"] = GoalBuilderProvider()
     turn = UserTurn(
         Envelope(channel="web", sender_id="u1", message_id="replayed-message"),
         "look around",
@@ -207,12 +214,12 @@ def test_gateway_deduplicates_replayed_transport_message_before_model_routing(
     asyncio.run(gateway._on_user_turn(turn))
 
     fake_bus = cast(FakeBus, gateway.bus)
-    commands = [
+    turns = [
         payload
         for topic, payload in fake_bus.published
-        if topic == gateway.topics.goal_command
+        if topic == gateway.topics.conversation_turn
     ]
-    assert len(commands) == 1
+    assert len(turns) == 1
 
 
 def test_gateway_routes_natural_language_emergency_stop_without_provider(
@@ -683,6 +690,7 @@ def test_gateway_start_and_stop_publish_lifecycle_and_manage_channels(
     ]
     assert fake_bus.subscriptions == [
         [gateway.topics.agent_reply],
+        [gateway.topics.conversation_result],
         [gateway.topics.runtime_event],
         [gateway.topics.robot_status],
         [gateway.topics.skill_event],

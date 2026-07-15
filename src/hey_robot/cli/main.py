@@ -7,6 +7,7 @@ from importlib import import_module
 
 CLI_ACTIONS: dict[str, str] = {
     "agent": "hey_robot.cli.agent:main",
+    "conversation-agent": "hey_robot.cli.conversation_agent:main",
     "model-service": "hey_robot.cli.model_service:main",
     "doctor": "hey_robot.cli.doctor:main",
     "gateway": "hey_robot.cli.gateway:main",

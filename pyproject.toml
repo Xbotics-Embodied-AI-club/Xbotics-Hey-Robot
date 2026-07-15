@@ -59,7 +59,10 @@ build-backend = "hatchling.build"
 
 [tool.uv]
 package = true
-environments = ["sys_platform == 'linux' and python_version == '3.12'"]
+environments = [
+    "sys_platform == 'linux' and python_version == '3.12'",
+    "sys_platform == 'win32' and python_version == '3.12'",
+]
 conflicts = [
     [
         { group = "vla" },

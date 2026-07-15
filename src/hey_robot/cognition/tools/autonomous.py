@@ -6,6 +6,7 @@ do not hold IO, a bus connection, or a skill gateway.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, ClassVar, Protocol
 
@@ -14,6 +15,8 @@ from hey_robot.protocol import ActionProposal
 
 class SkillCatalogView(Protocol):
     def get(self, name: str) -> Any: ...
+
+    def list(self) -> tuple[Any, ...]: ...
 
 
 @dataclass(frozen=True)
@@ -63,7 +66,7 @@ class RequestSkillTool:
                     "objective": {"type": "string"},
                     "slots": {"type": "object"},
                 },
-                "required": ["skill", "objective"],
+                "required": ["skill"],
                 "additionalProperties": False,
             },
         },
@@ -78,8 +81,6 @@ class RequestSkillTool:
         slots = arguments.get("slots", {})
         if not isinstance(skill, str) or not skill.strip():
             raise ValueError("skill must be a non-empty string")
-        if not isinstance(objective, str) or not objective.strip():
-            raise ValueError("objective must be a non-empty string")
         if not isinstance(slots, dict):
             raise ValueError("slots must be an object")
         try:
@@ -89,7 +90,43 @@ class RequestSkillTool:
         category = str(getattr(spec, "category", ""))
         if skill.strip() == "inspect_scene" or category in {"observe", "perception"}:
             raise ValueError("observation skills must use request_observation")
-        return ActionProposal("skill", skill.strip(), objective.strip(), dict(slots))
+        _validate_slots(dict(getattr(spec, "input_schema", {}) or {}), slots)
+        normalized_objective = (
+            objective.strip()
+            if isinstance(objective, str) and objective.strip()
+            else f"execute {skill.strip()}"
+        )
+        return ActionProposal("skill", skill.strip(), normalized_objective, dict(slots))
+
+
+def _validate_slots(schema: dict[str, Any], slots: dict[str, Any]) -> None:
+    """Small schema check at the tool boundary; the Supervisor checks again."""
+    required = schema.get("required", [])
+    for field in required if isinstance(required, list) else []:
+        if field not in slots:
+            raise ValueError(f"missing required slot: {field}")
+    properties = schema.get("properties", {})
+    if not isinstance(properties, dict):
+        return
+    for name, value in slots.items():
+        field = properties.get(name)
+        if not isinstance(field, dict):
+            continue
+        expected = field.get("type")
+        if expected == "string" and not isinstance(value, str):
+            raise ValueError(f"slot {name} must be a string")
+        if expected == "number" and (
+            not isinstance(value, int | float) or isinstance(value, bool)
+        ):
+            raise ValueError(f"slot {name} must be a number")
+        if expected == "integer" and (
+            not isinstance(value, int) or isinstance(value, bool)
+        ):
+            raise ValueError(f"slot {name} must be an integer")
+        if expected == "boolean" and not isinstance(value, bool):
+            raise ValueError(f"slot {name} must be a boolean")
+        if expected == "object" and not isinstance(value, dict):
+            raise ValueError(f"slot {name} must be an object")
 
 
 class ToolProtocol(Protocol):
@@ -113,6 +150,28 @@ class AutonomousToolRegistry:
     @property
     def names(self) -> frozenset[str]:
         return frozenset(self._tools)
+
+    @property
+    def instructions(self) -> str:
+        """Expose enabled skill contracts to the model without per-skill code."""
+        request_skill = self._tools[RequestSkillTool.name]
+        assert isinstance(request_skill, RequestSkillTool)
+        contracts = [
+            {
+                "name": spec.name,
+                "description": spec.description,
+                "category": spec.category,
+                "input_schema": spec.input_schema,
+            }
+            for spec in request_skill._catalog.list()
+            if spec.name != "inspect_scene"
+            and spec.category not in {"observe", "perception"}
+        ]
+        return (
+            "For request_skill, choose a skill from these contracts and put its "
+            "arguments exactly in slots. Ask the user to clarify if a required "
+            "slot is unknown.\n" + json.dumps(contracts, ensure_ascii=False)
+        )
 
     def proposal(self, name: str, arguments: dict[str, Any]) -> ActionProposal:
         tool = self._tools.get(name)

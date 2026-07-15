@@ -53,6 +53,7 @@ def test_runner_builds_local_services() -> None:
         "robot",
         "skill-controller",
         "autonomy-supervisor",
+        "conversation:main",
         "agent:main",
         "gateway",
     ]
@@ -94,6 +95,7 @@ def test_runner_builds_services_when_configured(tmp_path) -> None:
     service_names = [service.name for service in runner.services]
     assert "robot" in service_names
     assert "autonomy-supervisor" in service_names
+    assert "conversation:main" in service_names
     assert "agent:main" in service_names
     assert "gateway" in service_names
 

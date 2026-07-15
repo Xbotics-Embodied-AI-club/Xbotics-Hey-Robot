@@ -101,6 +101,43 @@ class UserTurn:
 
 
 @dataclass(frozen=True)
+class ConversationTurn:
+    envelope: Envelope
+    session_key: str
+    interaction_id: str
+    text: str
+
+
+@dataclass(frozen=True)
+class ConversationResult:
+    envelope: Envelope
+    interaction_id: str
+    text: str
+
+
+@dataclass(frozen=True)
+class ToolOutcome:
+    """Trusted structured result returned to a conversation tool loop."""
+
+    status: Literal["completed", "failed", "waiting", "accepted"]
+    user_summary: str | None = None
+    data: dict[str, Any] = field(default_factory=dict)
+    operation_id: str | None = None
+    goal_id: str | None = None
+    retryable: bool = False
+
+
+@dataclass(frozen=True)
+class ShortOperationCommand:
+    """Conversation request for one bounded operation, admitted by Supervisor."""
+
+    envelope: Envelope
+    operation_id: str
+    proposal: ActionProposal
+    timeout_sec: float = 45.0
+
+
+@dataclass(frozen=True)
 class AgentReply:
     envelope: Envelope
     text: str
@@ -524,8 +561,8 @@ def _validate_message(message: Any) -> None:
         if not message.command_id:
             raise ValueError("GoalCommand command_id must be non-empty")
         if message.action == "create":
-            if message.goal_id is not None or not message.envelope.robot_id:
-                raise ValueError("create GoalCommand requires robot_id and no goal_id")
+            if not message.envelope.robot_id:
+                raise ValueError("create GoalCommand requires robot_id")
             if not message.objective or not message.success_criteria:
                 raise ValueError(
                     "create GoalCommand requires objective and success_criteria"
