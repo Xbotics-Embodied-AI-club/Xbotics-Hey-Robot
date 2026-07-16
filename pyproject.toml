@@ -96,6 +96,9 @@ exclude = [
     "^src/hey_robot/foundation/contract/v1/model_service_pb2_grpc.py$",
 ]
 
+[tool.coverage.run]
+data_file = "artifacts/test/.coverage"
+
 [dependency-groups]
 sim = ["mujoco>=3.3.0"]
 

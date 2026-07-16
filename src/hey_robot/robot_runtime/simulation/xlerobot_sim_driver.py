@@ -26,6 +26,9 @@ from hey_robot.robot_runtime.base import (
     RobotHealth,
 )
 from hey_robot.robot_runtime.observations import DriverObservation, ObservationAsset
+from hey_robot.robot_runtime.simulation.mujoco_logging import (
+    configure_mujoco_warning_logging,
+)
 from hey_robot.robot_runtime.simulation.skill_adapter import XLeRobotSimSkillAdapter
 
 logger = HeyRobotLogger(name="xlerobot_sim")
@@ -183,6 +186,10 @@ class XLeRobotSimDriver:
         self.context = context
         self.robot_id = context.robot_id
         self.settings = dict(context.spec.settings or {})
+        # Configure before tests or callers manually construct MjModel/MjData
+        # through this driver instead of going through ``start``.
+        with contextlib.suppress(ImportError):
+            configure_mujoco_warning_logging(context.deployment_id)
 
         self._linear_speed = float(self.settings.get("linear_speed", 0.2))
         self._angular_speed = float(self.settings.get("angular_speed", 0.45))
@@ -243,6 +250,9 @@ class XLeRobotSimDriver:
         import mujoco
         import mujoco.viewer
 
+        configure_mujoco_warning_logging(
+            self.context.deployment_id, mujoco_module=mujoco
+        )
         mjcf_path = str(_resolve_mjcf_path(self.settings))
         logger.info(f"{self.robot_id} loading MuJoCo model from {mjcf_path}")
         # MuJoCo model loading is not safe on an arbitrary executor thread in

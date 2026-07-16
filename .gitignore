@@ -35,6 +35,10 @@ junit.xml
 coverage.xml
 cov.xml
 report.xml
+artifacts/*
+!artifacts/test/
+artifacts/test/*
+!artifacts/test/.gitkeep
 
 # Build and docs folder/files
 build/*
