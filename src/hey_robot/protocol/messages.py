@@ -147,6 +147,25 @@ class AgentReply:
 
 
 @dataclass(frozen=True)
+class SceneRelation:
+    """场景实体之间的一条开放式关系。"""
+
+    predicate: str
+    object_id: str
+
+
+@dataclass(frozen=True)
+class SceneEntity:
+    """仅用于目标解析的帧级视觉实体。"""
+
+    entity_id: str
+    entity_type: str
+    frame_id: int
+    attributes: dict[str, Any] = field(default_factory=dict)
+    relations: list[SceneRelation] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class RobotObservation:
     envelope: Envelope
     frame_id: int
@@ -154,6 +173,7 @@ class RobotObservation:
     artifacts: list[ArtifactRef] = field(default_factory=list)
     proprioception: list[float] = field(default_factory=list)
     task: str | None = None
+    entities: list[SceneEntity] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
 
 

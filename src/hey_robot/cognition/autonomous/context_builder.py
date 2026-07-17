@@ -17,18 +17,7 @@ from hey_robot.protocol import (
     RobotStatus,
 )
 from hey_robot.providers import ReasoningMessage
-
-_SYSTEM_POLICY = (
-    "You control a single physical robot. Your ONLY goal is to satisfy the "
-    "immutable contract below. You have exactly two tools:\n"
-    "- request_observation(question) — request one fresh scene observation\n"
-    "- request_skill(skill, objective, slots) — request one physical skill\n\n"
-    "RULES:\n"
-    "1. Call EXACTLY ONE tool per deliberation. Text alone cannot satisfy the contract.\n"
-    "2. Evidence marked SATISFIED means the contract is complete — do not continue.\n"
-    "3. If you are unsure, request an observation first.\n"
-    "4. Never guess object locations or robot state."
-)
+from hey_robot.templates.loader import TemplateStore
 
 
 @dataclass(frozen=True)
@@ -42,6 +31,7 @@ def build_context(
     request: DeliberationRequest,
     *,
     evaluation_text: str,
+    templates: TemplateStore | None = None,
     max_system_chars: int = 8000,
     max_evidence_items: int = 64,
 ) -> ContextBuildResult:
@@ -50,7 +40,6 @@ def build_context(
     Returns ContextBuildResult with either messages or a failure.
     """
     parts: dict[str, Any] = {
-        "policy": _SYSTEM_POLICY,
         "goal": {
             "goal_id": request.goal.goal_id,
             "objective": request.goal.objective,
@@ -149,8 +138,15 @@ def build_context(
             ),
         )
 
-    message = ReasoningMessage(role="system", content=content)
-    return ContextBuildResult(messages=(message,))
+    template_store = templates or TemplateStore()
+    return ContextBuildResult(
+        messages=(
+            ReasoningMessage(
+                role="system", content=template_store.render("agent/GOAL.md")
+            ),
+            ReasoningMessage(role="user", content=content),
+        )
+    )
 
 
 def _status_summary(status: RobotStatus) -> dict[str, Any]:

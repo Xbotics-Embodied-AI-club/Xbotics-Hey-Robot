@@ -31,6 +31,9 @@ class DeliberationStore:
             )
         self._db.commit()
 
+    def close(self) -> None:
+        self._db.close()
+
     def schedule(
         self,
         *,

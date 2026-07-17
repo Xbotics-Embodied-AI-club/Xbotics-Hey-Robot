@@ -16,8 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from hey_robot.cognition.autonomous.agent_service import AutonomousRobotAgentService
 from hey_robot.cognition.autonomous.supervisor import AutonomySupervisorService
+from hey_robot.cognition.robot_agent_service import RobotAgentService
 from hey_robot.config import DeploymentConfig
 from hey_robot.protocol import (
     ActionProposal,
@@ -122,7 +122,7 @@ class FakeBus:
 @dataclass
 class AutonomousTestHarness:
     supervisor: AutonomySupervisorService
-    agent: AutonomousRobotAgentService
+    agent: RobotAgentService
     bus: FakeBus
     topics: Topics
     config: DeploymentConfig
@@ -194,7 +194,7 @@ def build_harness(
     supervisor = AutonomySupervisorService(config)
     supervisor.bus = bus  # type: ignore[assignment]
 
-    agent = AutonomousRobotAgentService(config, agent_id=agent_id)
+    agent = RobotAgentService(config, agent_id=agent_id)
     agent.runner._provider = provider  # type: ignore[attr-defined]
     agent.bus = bus  # type: ignore[assignment]
 
@@ -273,7 +273,7 @@ async def run_deliberation_turn(h: AutonomousTestHarness) -> bool:
     request_payload = delibs[-1]
 
     # Agent processes the request
-    await h.agent._on_request(h.topics.agent_deliberation, request_payload)
+    await h.agent._on_deliberation(h.topics.agent_deliberation, request_payload)
     await asyncio.sleep(0.1)
 
     # Extract the deliberation result and route to supervisor

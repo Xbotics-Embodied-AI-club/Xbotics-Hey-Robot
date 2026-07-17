@@ -1,1 +1,0 @@
-"""Default agent prompt templates."""

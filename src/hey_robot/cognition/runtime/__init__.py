@@ -1,14 +1,17 @@
-"""Bounded autonomous deliberation runtime."""
+"""Bounded single-Agent runtime."""
 
+from hey_robot.cognition.runtime.agent_runner import (
+    AgentRunner,
+    AgentTurnRequest,
+    AgentTurnResult,
+)
 from hey_robot.cognition.runtime.deliberation_store import DeliberationStore
-from hey_robot.cognition.runtime.result import AgentRunRequest, AgentRunResult
-from hey_robot.cognition.runtime.strict_runner import StrictAgentRunner
 from hey_robot.cognition.runtime.trace import RunTraceWriter
 
 __all__ = [
-    "AgentRunRequest",
-    "AgentRunResult",
+    "AgentRunner",
+    "AgentTurnRequest",
+    "AgentTurnResult",
     "DeliberationStore",
     "RunTraceWriter",
-    "StrictAgentRunner",
 ]

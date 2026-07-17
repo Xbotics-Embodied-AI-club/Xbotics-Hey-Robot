@@ -3,6 +3,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from hey_robot.cognition.tools.robot import ToolDependencies, ToolRegistry
+from hey_robot.skill_os.base import SkillCatalog
+
 ROOT = Path(__file__).resolve().parents[2]
 COGNITION_ROOT = ROOT / "src" / "hey_robot" / "cognition"
 
@@ -11,15 +14,15 @@ def _cognition_source_files() -> list[Path]:
     return sorted(path for path in COGNITION_ROOT.rglob("*.py") if path.is_file())
 
 
-def test_autonomous_agent_tools_are_exactly_two() -> None:
-    """The autonomous agent surface must have exactly request_observation and request_skill."""
-    registry_path = COGNITION_ROOT / "tools" / "autonomous.py"
-    text = registry_path.read_text(encoding="utf-8")
-
-    found_tools = set(re.findall(r'name\s*(?::\s*\S+)?\s*=\s*"([^"]+)"', text))
-    assert found_tools == {"request_observation", "request_skill"}, (
-        f"autonomous tool surface must be exactly request_observation and request_skill, got: {sorted(found_tools)}"
-    )
+def test_robot_agent_has_one_canonical_tool_registry() -> None:
+    registry = ToolRegistry(ToolDependencies(SkillCatalog(())))
+    names = {definition["function"]["name"] for definition in registry.definitions}
+    assert names == {
+        "request_observation",
+        "request_skill",
+        "request_goal",
+        "control_goal",
+    }
 
 
 def test_autonomous_path_does_not_import_legacy_tools() -> None:
@@ -43,18 +46,18 @@ def test_autonomous_path_does_not_import_legacy_tools() -> None:
     assert offenders == [], f"autonomous path imports legacy tools: {offenders}"
 
 
-def test_strict_runner_does_not_import_task_contract() -> None:
-    """StrictAgentRunner must not import TaskContract or TaskEvaluator."""
-    runner_path = COGNITION_ROOT / "runtime" / "strict_runner.py"
+def test_agent_runner_does_not_import_task_contract() -> None:
+    """AgentRunner must not import TaskContract or TaskEvaluator."""
+    runner_path = COGNITION_ROOT / "runtime" / "agent_runner.py"
     text = runner_path.read_text(encoding="utf-8")
     forbidden = ("TaskContract", "TaskEvaluator", "EvidenceFact", "GoalSnapshot")
-    offenders = [f"strict_runner.py: {name}" for name in forbidden if name in text]
-    assert offenders == [], f"strict_runner imports task state: {offenders}"
+    offenders = [f"agent_runner.py: {name}" for name in forbidden if name in text]
+    assert offenders == [], f"agent_runner imports task state: {offenders}"
 
 
 def test_agent_service_does_not_publish_skill_intent() -> None:
     """RobotAgentService must never publish skill.intent directly."""
-    agent_path = COGNITION_ROOT / "autonomous" / "agent_service.py"
+    agent_path = COGNITION_ROOT / "robot_agent_service.py"
     text = agent_path.read_text(encoding="utf-8")
     assert "skill_intent" not in text, "agent_service references skill_intent"
     assert "SkillIntent(" not in text, "agent_service constructs SkillIntent"

@@ -6,6 +6,7 @@ from hey_robot.cognition.conversation_execution import (
     RobotExecutionAdapter,
     _trusted_observation_summary,
 )
+from hey_robot.cognition.conversation_goal import GoalProposal
 from hey_robot.cognition.runtime.conversation_store import ConversationStore
 from hey_robot.protocol import ActionProposal, Envelope, GoalCommand, Topics
 from hey_robot.protocol.messages import from_payload
@@ -20,21 +21,13 @@ class _Bus:
         self.published.append((topic, payload))
 
 
-def test_navigation_proposal_creates_linked_long_horizon_goal(tmp_path) -> None:
+def test_goal_proposal_creates_linked_long_horizon_goal(tmp_path) -> None:
     bus = _Bus()
     store = ConversationStore(tmp_path / "conversation.sqlite3")
     adapter = RobotExecutionAdapter(
         bus,
         Topics(),
-        SkillCatalog(
-            (
-                SkillSpec(
-                    name="navigate_to",
-                    description="navigate",
-                    category="navigation",
-                ),
-            )
-        ),
+        SkillCatalog((SkillSpec(name="navigate_to", description="navigate"),)),
         store,
         known_entities=("room:kitchen",),
     )
@@ -42,9 +35,7 @@ def test_navigation_proposal_creates_linked_long_horizon_goal(tmp_path) -> None:
 
     outcome = asyncio.run(
         adapter.execute(
-            ActionProposal(
-                "skill", "navigate_to", "去厨房", {"target": "room:kitchen"}
-            ),
+            GoalProposal("enter", "go to the kitchen", "room:kitchen"),
             envelope,
             "d1:main:web:chat",
         )
@@ -76,7 +67,7 @@ def test_short_operation_is_submitted_to_supervisor_for_preflight(tmp_path) -> N
 
     outcome = asyncio.run(
         adapter.execute(
-            ActionProposal("skill", "move_base", "向前移动", {"distance_cm": 20}),
+            ActionProposal("skill", "move_base", "move forward", {"distance_cm": 20}),
             Envelope(robot_id="mock0"),
             "d1:main:owner",
         )
@@ -87,8 +78,7 @@ def test_short_operation_is_submitted_to_supervisor_for_preflight(tmp_path) -> N
 
 
 def test_observation_summary_requires_runtime_semantic_scene_field() -> None:
-    assert (
-        _trusted_observation_summary("frame=4; images=2; scene=桌上有杯子")
-        == "桌上有杯子"
-    )
+    assert _trusted_observation_summary(
+        "frame=4; images=2; scene=a cup is on the table"
+    ) == ("a cup is on the table")
     assert _trusted_observation_summary("frame=4; images=2; camera=available") is None

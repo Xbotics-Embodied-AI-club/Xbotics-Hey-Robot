@@ -13,8 +13,6 @@ from hey_robot.vla.so101_schema import (
     state_from_arm_status,
 )
 
-_SO101_STATE_SCHEMA = "so101_single_arm_rad_gripper01"
-
 
 class SetArmPoseSkill(BaseSkill):
     spec = spec(

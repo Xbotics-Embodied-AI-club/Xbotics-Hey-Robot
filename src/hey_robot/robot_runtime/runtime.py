@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
 from hey_robot.protocol import (
@@ -8,6 +8,7 @@ from hey_robot.protocol import (
     RobotObservation,
     RobotSkillAction,
     RobotStatus,
+    SceneEntity,
     SkillIntent,
 )
 from hey_robot.robot_runtime.base import RobotCapabilities, RobotDriver, RobotHealth
@@ -65,6 +66,8 @@ class RobotRuntime:
         self.scene_captioner = scene_captioner
         self.control_plane = RobotControlPlane()
         self._capabilities: RobotCapabilities | None = None
+        self._scene_entities: tuple[SceneEntity, ...] = ()
+        self._scene_entities_frame_id: int | None = None
 
     async def start(self) -> RobotRuntimeSnapshot:
         await self.driver.start()
@@ -91,7 +94,9 @@ class RobotRuntime:
         return await self.driver.health()
 
     async def observe(self) -> RobotObservation:
-        return (await self.perception.refresh(reason="runtime.observe")).observation
+        return self._with_scene_entities(
+            (await self.perception.refresh(reason="runtime.observe")).observation
+        )
 
     async def latest_observation(
         self, *, max_age_ms: int | None = None
@@ -102,7 +107,10 @@ class RobotRuntime:
     async def refresh_observation(
         self, *, reason: str | None = None
     ) -> PerceptionSnapshot:
-        return await self.perception.refresh(reason=reason)
+        snapshot = await self.perception.refresh(reason=reason)
+        return replace(
+            snapshot, observation=self._with_scene_entities(snapshot.observation)
+        )
 
     async def status(self) -> RobotStatus:
         return await self.driver.status()
@@ -132,7 +140,7 @@ class RobotRuntime:
         return await self.driver.reset()
 
     def build_observation(self, observation: DriverObservation) -> RobotObservation:
-        return self.perception.build_observation(observation)
+        return self._with_scene_entities(self.perception.build_observation(observation))
 
     async def _apply_perception_skill(
         self, action: RobotAction, skill_name: str
@@ -183,7 +191,7 @@ class RobotRuntime:
     async def _inspect_scene(
         self, snapshot: PerceptionSnapshot, arguments: dict[str, Any]
     ) -> dict[str, Any]:
-        caption = await self._caption_scene(snapshot.observation)
+        caption, entities = await self._caption_scene(snapshot.observation)
         summary = (
             f"scene={caption}"
             if caption
@@ -204,27 +212,53 @@ class RobotRuntime:
             "summary": summary,
             "failure_mode": None if snapshot.has_images else "camera_unavailable",
             "semantic_available": bool(caption),
+            "entities": [_entity_payload(item) for item in entities],
             **snapshot.summary(),
         }
 
-    async def _caption_scene(self, observation: RobotObservation) -> str | None:
+    async def _caption_scene(
+        self, observation: RobotObservation
+    ) -> tuple[str | None, tuple[SceneEntity, ...]]:
         """Return a model-produced scene summary when a visual captioner is enabled.
 
         Raw camera metadata is deliberately not presented as a scene description:
         a successful frame capture does not establish what is visible in the frame.
         """
         if self.scene_captioner is None or not observation.images:
-            return None
+            return None, ()
         try:
             understanding = await self.scene_captioner.caption(
                 observation, await self.status()
             )
         except Exception:
-            return None
-        if understanding.metadata.get("error") or understanding.confidence <= 0.0:
-            return None
+            return None, ()
+        if (
+            not hasattr(understanding, "metadata")
+            or understanding.metadata.get("error")
+            or not getattr(understanding, "confidence", 0.0) > 0.0
+        ):
+            return None, ()
         summary = understanding.summary.strip()
-        return summary or None
+        entities = tuple(
+            entity
+            for entity in getattr(understanding, "entities", ())
+            if isinstance(entity, SceneEntity)
+            and entity.frame_id == observation.frame_id
+        )
+        if entities:
+            self._scene_entities = entities
+            self._scene_entities_frame_id = observation.frame_id
+        return summary or None, entities
+
+    def _with_scene_entities(self, observation: RobotObservation) -> RobotObservation:
+        cached_frame_id = self._scene_entities_frame_id
+        if cached_frame_id is not None and observation.frame_id > cached_frame_id + 6:
+            self._scene_entities = ()
+            self._scene_entities_frame_id = None
+        entities = {item.entity_id: item for item in observation.entities}
+        for item in self._scene_entities:
+            entities.setdefault(item.entity_id, item)
+        return replace(observation, entities=list(entities.values()))
 
     async def _look_around(
         self, action: RobotAction, arguments: dict[str, Any]
@@ -480,3 +514,16 @@ def _marker_detection(marker_id: int | None, pts: Any, shape: Any) -> dict[str, 
 
 def _marker_area_key(item: dict[str, Any]) -> float:
     return float(item.get("area", 0.0))
+
+
+def _entity_payload(entity: SceneEntity) -> dict[str, object]:
+    return {
+        "entity_id": entity.entity_id,
+        "type": entity.entity_type,
+        "attributes": entity.attributes,
+        "relations": [
+            {"predicate": relation.predicate, "object_id": relation.object_id}
+            for relation in entity.relations
+        ],
+        "frame_id": entity.frame_id,
+    }

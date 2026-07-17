@@ -4,17 +4,25 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from dataclasses import replace
 from typing import Any
 
+from hey_robot.cognition.conversation_entities import (
+    EntityResolutionError,
+    EntityResolver,
+)
+from hey_robot.cognition.conversation_goal import (
+    GoalContractBuilder,
+    GoalControlProposal,
+    GoalProposal,
+)
 from hey_robot.cognition.runtime.conversation_store import ConversationStore
 from hey_robot.protocol import (
     ActionProposal,
     Envelope,
-    GoalBudgets,
     GoalCommand,
     ShortOperationCommand,
     SkillResult,
-    SuccessCriterion,
     ToolOutcome,
     Topics,
 )
@@ -23,7 +31,7 @@ from hey_robot.skill_os.base import SkillCatalog
 
 
 class RobotExecutionAdapter:
-    """Maps proposals deterministically; the model never constructs SkillIntent."""
+    """确定性映射对话提案；模型永远不直接构造 SkillIntent。"""
 
     def __init__(
         self,
@@ -32,6 +40,8 @@ class RobotExecutionAdapter:
         catalog: SkillCatalog,
         store: ConversationStore,
         known_entities: tuple[str, ...] = (),
+        goal_contract_builder: GoalContractBuilder | None = None,
+        entity_resolver: EntityResolver | None = None,
         *,
         timeout_sec: float = 45.0,
     ) -> None:
@@ -40,31 +50,53 @@ class RobotExecutionAdapter:
         self._catalog = catalog
         self._store = store
         self._known_entities = frozenset(known_entities)
+        self._goal_contract_builder = goal_contract_builder or GoalContractBuilder(
+            known_entities
+        )
+        self._entity_resolver = entity_resolver or EntityResolver(known_entities)
         self._timeout_sec = timeout_sec
         self._waiters: dict[str, asyncio.Future[SkillResult]] = {}
 
     async def execute(
-        self, proposal: ActionProposal, envelope: Envelope, session_key: str
+        self,
+        proposal: ActionProposal | GoalProposal | GoalControlProposal,
+        envelope: Envelope,
+        session_key: str,
     ) -> ToolOutcome:
-        spec = self._catalog.get(proposal.skill_name)
-        if spec.category in {"navigation", "interaction", "manipulation"}:
+        if isinstance(proposal, GoalProposal):
             return await self._create_long_goal(proposal, envelope, session_key)
+        if isinstance(proposal, GoalControlProposal):
+            return await self._control_goal(proposal, envelope, session_key)
         return await self._execute_short_operation(proposal, envelope)
 
     async def _create_long_goal(
-        self, proposal: ActionProposal, envelope: Envelope, session_key: str
+        self, proposal: GoalProposal, envelope: Envelope, session_key: str
     ) -> ToolOutcome:
-        target = proposal.arguments.get("target")
-        if not isinstance(target, str) or not target.strip():
+        active = self._store.active_goal(session_key)
+        if active is not None:
             return ToolOutcome(
-                "failed", "我需要知道要前往或操作的具体目标。", retryable=True
+                "failed",
+                "An active task already exists; cancel or finish it before creating another.",
+                {"goal_id": active["goal_id"], "status": active["status"]},
             )
         if not envelope.robot_id:
             return ToolOutcome("failed", "当前没有可用的机器人。")
-        if target.strip() not in self._known_entities:
+        try:
+            resolved_target = self._entity_resolver.resolve(
+                proposal.target, robot_id=envelope.robot_id
+            )
+            proposal = replace(proposal, target=resolved_target.target_id)
+            success_criteria, budgets = self._goal_contract_builder.build(
+                proposal,
+                robot_id=envelope.robot_id,
+                target_entity=resolved_target.entity,
+            )
+        except EntityResolutionError as exc:
+            return ToolOutcome("failed", str(exc), retryable=True)
+        except ValueError as exc:
             return ToolOutcome(
                 "failed",
-                "我还不知道这个目标的位置，请告诉我更具体的位置或先让我观察。",
+                f"无法创建可验证任务：{exc}。请说明已知地点，或先让我观察。",
                 retryable=True,
             )
         goal_id = str(uuid.uuid4())
@@ -74,26 +106,43 @@ class RobotExecutionAdapter:
             action="create",
             goal_id=goal_id,
             objective=proposal.objective,
-            success_criteria=(
-                SuccessCriterion(
-                    criterion_id="target_reached",
-                    criterion_type="object_relation",
-                    subject_id=f"robot:{envelope.robot_id}",
-                    predicate="at",
-                    object_id=target.strip(),
-                    max_age_sec=300.0,
-                ),
-            ),
-            budgets=GoalBudgets(),
+            success_criteria=success_criteria,
+            budgets=budgets,
         )
-        self._store.link_goal(goal_id, session_key, envelope)
+        self._store.link_goal(
+            goal_id, session_key, envelope, objective=proposal.objective
+        )
         await self._bus.publish(self._topics.goal_command, to_payload(command))
         return ToolOutcome(
             "accepted",
             "任务已开始，完成或需要确认时我会告诉你。",
-            {"skill": proposal.skill_name, "target": target.strip()},
+            {"goal_kind": proposal.goal_kind, "target": proposal.target},
             goal_id=goal_id,
         )
+
+    async def _control_goal(
+        self,
+        proposal: GoalControlProposal,
+        envelope: Envelope,
+        session_key: str,
+    ) -> ToolOutcome:
+        active = self._store.active_goal(session_key)
+        if active is None and proposal.action != "emergency_stop":
+            return ToolOutcome("failed", "当前没有可控制的进行中任务。")
+        goal_id = None if active is None else active["goal_id"]
+        command = GoalCommand(
+            envelope=envelope,
+            command_id=f"conversation_goal_control_{uuid.uuid4().hex}",
+            action=proposal.action,
+            goal_id=goal_id,
+            condition_id=proposal.condition_id,
+        )
+        await self._bus.publish(self._topics.goal_command, to_payload(command))
+        if proposal.action == "cancel":
+            return ToolOutcome("accepted", "已请求取消当前任务。", goal_id=goal_id)
+        if proposal.action == "emergency_stop":
+            return ToolOutcome("accepted", "已请求紧急停止。", goal_id=goal_id)
+        return ToolOutcome("accepted", "已确认任务可以继续。", goal_id=goal_id)
 
     async def _execute_short_operation(
         self, proposal: ActionProposal, envelope: Envelope

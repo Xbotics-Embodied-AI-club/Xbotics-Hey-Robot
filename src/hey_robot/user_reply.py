@@ -1,6 +1,7 @@
+"""Present trusted runtime events to human-facing channels."""
+
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
@@ -10,31 +11,6 @@ _INTERNAL_TOOL_TEXTS = {
     "skill completed",
     "skill accepted",
 }
-
-
-def present_tool_result_for_user(
-    *,
-    tool: str,
-    args: dict[str, Any],
-    result: str,
-    success: bool | None,
-) -> str | None:
-    """Convert internal tool results into user-facing text."""
-
-    if tool == "request_skill":
-        return _present_skill_result(args=args, result=result, success=success)
-    if tool == "request_perception":
-        return _present_perception_result(result)
-    payload = _json_object(result)
-    if payload is not None:
-        summary = _clean_user_text(
-            str(payload.get("result") or payload.get("summary") or "")
-        )
-        return (
-            summary if summary and not looks_like_internal_user_reply(summary) else None
-        )
-    clean = _clean_user_text(result)
-    return clean if clean and not looks_like_internal_user_reply(clean) else None
 
 
 def looks_like_internal_user_reply(text: str) -> bool:
@@ -83,64 +59,6 @@ def present_runtime_event_for_user(*, kind: str, payload: dict[str, Any]) -> str
     return None
 
 
-def _present_skill_result(
-    *, args: dict[str, Any], result: str, success: bool | None
-) -> str | None:
-    skill = str(args.get("skill") or args.get("name") or "").strip()
-    payload = _json_object(result)
-    if skill == "inspect_scene":
-        if payload is not None:
-            return _present_inspect_scene_payload(payload, success=success)
-        clean = _clean_user_text(result)
-        if clean and not looks_like_internal_user_reply(clean):
-            return clean
-        if success is False:
-            return "我暂时没有拿到可用画面，不能可靠描述当前场景。"
-        return "我已经看了一下当前画面。"
-
-    clean = _clean_user_text(result)
-    if clean and not looks_like_internal_user_reply(clean):
-        return clean
-    if success is False:
-        return "这个动作没有成功完成。"
-    if skill:
-        return "动作已经完成。"
-    return None
-
-
-def _present_inspect_scene_payload(
-    payload: dict[str, Any], *, success: bool | None
-) -> str:
-    summary = _clean_user_text(str(payload.get("summary") or ""))
-    if summary and not looks_like_internal_user_reply(summary):
-        return summary
-    message = _clean_user_text(str(payload.get("message") or ""))
-    if message and not looks_like_internal_user_reply(message):
-        return message
-    if success is False or payload.get("success") is False:
-        return "我暂时没有拿到可用画面，不能可靠描述当前场景。"
-    return "我已经看了一下当前画面。"
-
-
-def _present_perception_result(result: str) -> str | None:
-    payload = _json_object(result)
-    if payload is None:
-        clean = _clean_user_text(result)
-        return clean if clean and not looks_like_internal_user_reply(clean) else None
-    evidence = payload.get("evidence")
-    if isinstance(evidence, dict):
-        summary = _clean_user_text(str(evidence.get("summary") or ""))
-        if summary:
-            return summary
-        status = str(evidence.get("status") or "")
-        if status in {"no_observation", "no_image", "stale", "caption_failed"}:
-            return "我暂时没有拿到可用的视觉证据，不能可靠描述当前画面。"
-    summary = _clean_user_text(
-        str(payload.get("result") or payload.get("summary") or "")
-    )
-    return summary or None
-
-
 def _human_follow_voice_text(phase: str, *, summary: str) -> str | None:
     mapping = {
         "starting": "我正在准备跟随，并检查相机和底盘状态。",
@@ -155,17 +73,6 @@ def _human_follow_voice_text(phase: str, *, summary: str) -> str | None:
     if phase in mapping:
         return mapping[phase]
     return summary if summary and not looks_like_internal_user_reply(summary) else None
-
-
-def _json_object(text: str) -> dict[str, Any] | None:
-    raw = (text or "").strip()
-    if not raw:
-        return None
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
 
 
 def _clean_user_text(text: str) -> str:

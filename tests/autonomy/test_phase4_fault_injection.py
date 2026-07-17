@@ -167,7 +167,7 @@ def test_duplicate_deliberation_request_idempotent(tmp_path: Path) -> None:
 
         # Re-send the same deliberation request
         delibs = [p for t, p in h.bus.published if t == h.topics.agent_deliberation]
-        await h.agent._on_request(h.topics.agent_deliberation, delibs[-1])
+        await h.agent._on_deliberation(h.topics.agent_deliberation, delibs[-1])
         await asyncio.sleep(0.1)
 
         assert len(h.provider.calls) == calls_before, (

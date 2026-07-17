@@ -1,13 +1,13 @@
-"""Autonomous cognition kernel public surface."""
+"""Cognition public surface."""
 
-from hey_robot.cognition.autonomous.agent_service import AutonomousRobotAgentService
 from hey_robot.cognition.autonomous.supervisor import AutonomySupervisorService
 from hey_robot.cognition.policy.task_evaluator import TaskEvaluator
-from hey_robot.cognition.runtime.strict_runner import StrictAgentRunner
+from hey_robot.cognition.robot_agent_service import RobotAgentService
+from hey_robot.cognition.runtime.agent_runner import AgentRunner
 
 __all__ = [
-    "AutonomousRobotAgentService",
+    "AgentRunner",
     "AutonomySupervisorService",
-    "StrictAgentRunner",
+    "RobotAgentService",
     "TaskEvaluator",
 ]

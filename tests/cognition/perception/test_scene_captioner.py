@@ -59,8 +59,8 @@ async def test_reasoning_scene_captioner_parses_structured_scene() -> None:
     assert result.summary == "桌面上有一个杯子"
     assert result.objects[0].name == "杯子"
     assert result.next_observation_hint == "靠近前保持目标居中"
-    assert "robot scene captioner" in provider.messages[0].content
-    assert "Robot observation frame: 4" in provider.messages[1].content
+    assert "机器人前视相机的场景理解器" in provider.messages[0].content
+    assert "frame_id: 4" in provider.messages[1].content
 
 
 def test_scene_understanding_accepts_string_risks() -> None:
@@ -69,3 +69,26 @@ def test_scene_understanding_accepts_string_risks() -> None:
     )
 
     assert result.risks == ["no visible hazard"]
+
+
+def test_scene_understanding_parses_open_entity_types_and_relations() -> None:
+    result = SceneUnderstanding.from_dict(
+        {
+            "summary": "passage observed",
+            "entities": [
+                {
+                    "entity_id": "passage:1",
+                    "type": "passage",
+                    "attributes": {"bearing": "front_right"},
+                    "relations": [
+                        {"predicate": "leads_to", "object_id": "room:kitchen"}
+                    ],
+                    "frame_id": 9,
+                },
+                {"entity_id": "broken", "type": "", "frame_id": 9},
+            ],
+        }
+    )
+
+    assert result.entities[0].relations[0].object_id == "room:kitchen"
+    assert len(result.entities) == 1

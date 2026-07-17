@@ -14,8 +14,8 @@ def test_no_fallback_provider_in_src() -> None:
 
 
 def test_no_text_fallback_in_runtime() -> None:
-    """StrictAgentRunner must not contain text fallback, synthesis, or repair."""
-    runner_path = COGNITION / "runtime" / "strict_runner.py"
+    """AgentRunner must not contain text fallback, synthesis, or repair."""
+    runner_path = COGNITION / "runtime" / "agent_runner.py"
     text = runner_path.read_text(encoding="utf-8")
 
     forbidden = (
@@ -31,7 +31,7 @@ def test_no_text_fallback_in_runtime() -> None:
     )
     for pattern in forbidden:
         assert pattern not in text, (
-            f"strict_runner.py contains forbidden fallback pattern: {pattern!r}"
+            f"agent_runner.py contains forbidden fallback pattern: {pattern!r}"
         )
 
 
@@ -71,6 +71,9 @@ def test_no_legacy_autonomy_in_cognition() -> None:
         COGNITION / "tool_binding.py",
         COGNITION / "memory_context.py",
         COGNITION / "skill_state.py",
+        COGNITION / "service" / "recovery_notifier.py",
+        COGNITION / "service" / "skill_result_handler.py",
+        COGNITION / "task" / "state.py",
     )
     offenders = [str(p.relative_to(ROOT)) for p in forbidden_paths if p.exists()]
     assert offenders == [], f"legacy autonomy files still exist: {offenders}"

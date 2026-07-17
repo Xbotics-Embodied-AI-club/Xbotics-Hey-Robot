@@ -1,17 +1,19 @@
-"""The two explicit proposal-only autonomous tools."""
+"""Proposal-only tools for the single Robot Agent."""
 
-from hey_robot.cognition.tools.autonomous import (
-    AgentToolDependencies,
-    AutonomousToolRegistry,
+from hey_robot.cognition.tools.robot import (
+    ControlGoalTool,
+    RequestGoalTool,
     RequestObservationTool,
     RequestSkillTool,
-    build_agent_tools,
+    ToolDependencies,
+    ToolRegistry,
 )
 
 __all__ = [
-    "AgentToolDependencies",
-    "AutonomousToolRegistry",
+    "ControlGoalTool",
+    "RequestGoalTool",
     "RequestObservationTool",
     "RequestSkillTool",
-    "build_agent_tools",
+    "ToolDependencies",
+    "ToolRegistry",
 ]

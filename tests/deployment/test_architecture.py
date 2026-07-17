@@ -132,26 +132,25 @@ def test_skill_os_does_not_keep_contract_forwarding_modules() -> None:
     assert offenders == []
 
 
-def test_autonomous_agent_service_replaces_removed_robot_agent_core() -> None:
+def test_single_agent_service_replaces_legacy_agent_cores() -> None:
     import importlib.util
 
-    from hey_robot.cognition.autonomous.agent_service import (
-        AutonomousRobotAgentService,
-    )
+    from hey_robot.cognition.robot_agent_service import RobotAgentService
 
     assert importlib.util.find_spec("hey_robot.cognition.core") is None
     assert importlib.util.find_spec("hey_robot.cognition.core_builder") is None
-    assert hasattr(AutonomousRobotAgentService, "_on_request")
+    assert hasattr(RobotAgentService, "_on_turn")
+    assert hasattr(RobotAgentService, "_on_deliberation")
 
 
-def test_strict_runner_replaces_removed_model_loop() -> None:
+def test_agent_runner_replaces_removed_model_loops() -> None:
     import importlib.util
 
-    from hey_robot.cognition.runtime.strict_runner import StrictAgentRunner
+    from hey_robot.cognition.runtime.agent_runner import AgentRunner
 
     assert importlib.util.find_spec("hey_robot.cognition.runtime.model_loop") is None
     assert importlib.util.find_spec("hey_robot.cognition.runtime.runner") is None
-    assert hasattr(StrictAgentRunner, "run")
+    assert hasattr(AgentRunner, "run")
 
 
 def test_robot_runtime_does_not_depend_on_skill_os() -> None:

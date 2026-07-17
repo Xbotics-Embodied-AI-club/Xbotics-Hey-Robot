@@ -48,8 +48,11 @@ def _base_request(**overrides) -> DeliberationRequest:
 def test_build_minimal_context() -> None:
     result = build_context(_base_request(), evaluation_text="INCONCLUSIVE")
     assert result.failure is None
-    assert len(result.messages) == 1
-    content = result.messages[0].content
+    assert len(result.messages) == 2
+    assert result.messages[0].role == "system"
+    assert "只能调用一个工具" in result.messages[0].content
+    assert result.messages[1].role == "user"
+    content = result.messages[1].content
     assert "test" in content
     assert "INCONCLUSIVE" in content
 
@@ -62,7 +65,7 @@ def test_build_context_with_status_and_observation() -> None:
         evaluation_text="INCONCLUSIVE",
     )
     assert result.failure is None
-    content = result.messages[0].content
+    content = result.messages[1].content
     assert "room:lab" in content
     assert "frame_id" in content
 
@@ -81,7 +84,7 @@ def test_build_context_with_actions() -> None:
         evaluation_text="INCONCLUSIVE",
     )
     assert result.failure is None
-    content = result.messages[0].content
+    content = result.messages[1].content
     assert "inspect_scene" in content
     assert "navigate_to" in content
 
@@ -93,7 +96,7 @@ def test_build_context_with_skill_result() -> None:
         evaluation_text="INCONCLUSIVE",
     )
     assert result.failure is None
-    content = result.messages[0].content
+    content = result.messages[1].content
     assert "done" in content
 
 
@@ -103,7 +106,7 @@ def test_build_context_satisfied_message() -> None:
         evaluation_text="CONTRACT SATISFIED: all done",
     )
     assert result.failure is None
-    assert "SATISFIED" in result.messages[0].content
+    assert "SATISFIED" in result.messages[1].content
 
 
 def test_build_context_rejects_evidence_over_budget() -> None:

@@ -8,6 +8,8 @@ from hey_robot.protocol import (
     RobotObservation,
     RobotSkillAction,
     RobotStatus,
+    SceneEntity,
+    SceneRelation,
     SkillIntent,
 )
 from hey_robot.robot_runtime import RobotManager, RobotRuntime
@@ -159,6 +161,42 @@ async def test_robot_runtime_uses_scene_captioner_for_inspect_scene(tmp_path) ->
     assert result["semantic_available"] is True
     assert result["summary"] == "scene=桌面中央有一个杯子"
     assert captioner.observations[0].images
+
+
+async def test_inspect_scene_publishes_frame_scoped_entities(tmp_path) -> None:
+    class Captioner:
+        async def caption(self, observation, _status):
+            from hey_robot.cognition.perception.scene import SceneUnderstanding
+
+            return SceneUnderstanding(
+                summary="passage visible",
+                entities=[
+                    SceneEntity(
+                        "passage:1",
+                        "passage",
+                        observation.frame_id,
+                        {"bearing": "front_right"},
+                        [SceneRelation("leads_to", "room:kitchen")],
+                    )
+                ],
+                confidence=0.9,
+            )
+
+    runtime = RobotRuntime(
+        _CountingCameraDriver("mock0"),
+        LocalMediaStore(tmp_path / "media"),
+        scene_captioner=Captioner(),
+    )
+    await runtime.start()
+    action = RobotSkillAction("inspect_scene", safety_level="observe").to_robot_action(
+        _intent("entities1", "inspect_scene", "inspect doorway")
+    )
+
+    await runtime.apply_action(action)
+    observation = await runtime.observe()
+
+    assert observation.entities[0].entity_id == "passage:1"
+    assert observation.entities[0].relations[0].object_id == "room:kitchen"
 
 
 async def test_robot_runtime_status_returns_driver_status_directly(tmp_path) -> None:

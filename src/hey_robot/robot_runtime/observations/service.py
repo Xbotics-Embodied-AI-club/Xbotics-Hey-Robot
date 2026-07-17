@@ -189,5 +189,6 @@ class PerceptionService:
             artifacts=observation.artifacts,
             proprioception=observation.proprioception,
             task=observation.task,
+            entities=observation.entities,
             raw={**observation.raw, "perception": perception},
         )

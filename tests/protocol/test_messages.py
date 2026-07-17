@@ -11,6 +11,8 @@ from hey_robot.protocol.messages import (
     RobotAction,
     RobotObservation,
     RobotStatus,
+    SceneEntity,
+    SceneRelation,
     SkillEvent,
     SkillIntent,
     SkillResult,
@@ -191,6 +193,25 @@ class TestRobotObservation:
         assert len(restored.artifacts) == 1
         assert isinstance(restored.artifacts[0], ArtifactRef)
         assert restored.task == "inspect"
+
+    def test_from_payload_with_frame_scoped_entities(self) -> None:
+        obs = RobotObservation(
+            envelope=Envelope(robot_id="r1"),
+            frame_id=42,
+            entities=[
+                SceneEntity(
+                    "passage:1",
+                    "passage",
+                    42,
+                    {"bearing": "front_right"},
+                    [SceneRelation("leads_to", "room:kitchen")],
+                )
+            ],
+        )
+
+        restored = from_payload(RobotObservation, to_payload(obs))
+
+        assert restored.entities == obs.entities
 
     def test_from_payload_empty_lists(self) -> None:
         env = Envelope()

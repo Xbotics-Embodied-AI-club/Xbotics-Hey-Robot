@@ -199,6 +199,7 @@ class AutonomySpec:
     hard_max_skills: int = 24
     min_battery_percentage: float = 20.0
     entity_catalog: tuple[str, ...] = ()
+    entity_aliases: dict[str, str] = field(default_factory=dict)
     enable_auto_reobserve_once: bool = False
     enable_no_progress_review: bool = False
 
@@ -492,6 +493,13 @@ class DeploymentConfig:
                 entity_catalog=tuple(
                     str(item) for item in autonomy_data.get("entity_catalog", ()) or ()
                 ),
+                entity_aliases={
+                    str(alias).strip(): str(entity_id).strip()
+                    for alias, entity_id in dict(
+                        autonomy_data.get("entity_aliases", {}) or {}
+                    ).items()
+                    if str(alias).strip() and str(entity_id).strip()
+                },
                 enable_auto_reobserve_once=bool(
                     autonomy_data.get("enable_auto_reobserve_once", False)
                 ),

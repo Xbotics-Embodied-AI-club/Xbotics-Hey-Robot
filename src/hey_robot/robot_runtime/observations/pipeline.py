@@ -5,7 +5,13 @@ from typing import Any
 
 import numpy as np
 
-from hey_robot.protocol import ArtifactRef, ImageRef, RobotObservation
+from hey_robot.protocol import (
+    ArtifactRef,
+    ImageRef,
+    RobotObservation,
+    SceneEntity,
+    SceneRelation,
+)
 from hey_robot.robot_runtime.media import LocalMediaStore
 from hey_robot.robot_runtime.observations.observation import (
     DriverObservation,
@@ -43,6 +49,7 @@ class ObservationPipeline:
         images = list(observation.images)
         artifacts: list[ArtifactRef] = []
         raw = dict(observation.metadata)
+        entities = _scene_entities(raw.get("entities"), observation.frame_id)
         image_quality: list[dict[str, Any]] = []
 
         for index, asset in enumerate(observation.assets):
@@ -74,6 +81,7 @@ class ObservationPipeline:
             artifacts=artifacts,
             proprioception=observation.proprioception,
             task=observation.task,
+            entities=entities,
             raw=_json_safe(raw),
         )
 
@@ -172,3 +180,43 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, np.generic):
         return value.item()
     return value
+
+
+def _scene_entities(value: Any, frame_id: int) -> list[SceneEntity]:
+    if not isinstance(value, list):
+        return []
+    entities: list[SceneEntity] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        entity_id = str(item.get("entity_id") or "").strip()
+        entity_type = str(item.get("type") or item.get("entity_type") or "").strip()
+        if not entity_id or not entity_type:
+            continue
+        item_frame_id = item.get("frame_id", frame_id)
+        if not isinstance(item_frame_id, int):
+            continue
+        entities.append(
+            SceneEntity(
+                entity_id,
+                entity_type,
+                item_frame_id,
+                dict(item.get("attributes") or {}),
+                _scene_relations(item.get("relations")),
+            )
+        )
+    return entities
+
+
+def _scene_relations(value: Any) -> list[SceneRelation]:
+    if not isinstance(value, list):
+        return []
+    relations: list[SceneRelation] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        predicate = str(item.get("predicate") or "").strip()
+        object_id = str(item.get("object_id") or "").strip()
+        if predicate and object_id:
+            relations.append(SceneRelation(predicate, object_id))
+    return relations
