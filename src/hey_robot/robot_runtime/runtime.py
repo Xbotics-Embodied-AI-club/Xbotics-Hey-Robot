@@ -23,7 +23,7 @@ from hey_robot.robot_runtime.safety import RobotSafetyError, RobotSafetySupervis
 
 
 class SceneCaptioner(Protocol):
-    """Runtime port for optional semantic image captioning."""
+    """可选语义图像描述能力的运行时端口。"""
 
     async def caption(
         self, observation: RobotObservation, status: RobotStatus | None = None
@@ -39,12 +39,11 @@ class RobotRuntimeSnapshot:
 
 
 class RobotRuntime:
-    """Runtime boundary around a concrete robot driver.
+    """围绕具体机器人驱动的运行时边界。
 
-    Drivers only talk to hardware or simulation. The runtime owns deployable
-    semantics that must be consistent across supported embodiments: lifecycle,
-    observation materialization, skill acceptance, action application, and
-    health/capability inspection.
+    驱动只与硬件或仿真交互。运行时拥有所有支持的机器人本体都必须保持一致的
+    可部署语义：生命周期、观测实体化、Skill 准入、动作应用，以及健康状态和
+    能力检查。
     """
 
     def __init__(
@@ -219,10 +218,10 @@ class RobotRuntime:
     async def _caption_scene(
         self, observation: RobotObservation
     ) -> tuple[str | None, tuple[SceneEntity, ...]]:
-        """Return a model-produced scene summary when a visual captioner is enabled.
+        """在启用视觉描述器时，返回模型生成的场景摘要。
 
-        Raw camera metadata is deliberately not presented as a scene description:
-        a successful frame capture does not establish what is visible in the frame.
+        原始相机元数据不会被当作场景描述：成功采集到一帧图像，并不能证明图像中
+        可见什么内容。
         """
         if self.scene_captioner is None or not observation.images:
             return None, ()

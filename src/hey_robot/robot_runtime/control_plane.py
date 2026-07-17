@@ -28,7 +28,7 @@ class ActionBufferEntry:
 
 
 class RobotControlPlane:
-    """Runtime-side control boundary for typed policy outputs and primitives."""
+    """运行时侧的控制边界，接收带类型的策略输出和原语。"""
 
     def __init__(self, *, max_buffer_size: int = 32) -> None:
         self.max_buffer_size = max(1, int(max_buffer_size))

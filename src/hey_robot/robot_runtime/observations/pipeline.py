@@ -30,11 +30,10 @@ class ObservationSchema:
 
 
 class ObservationPipeline:
-    """Converts driver-local observations into protocol observations.
+    """将驱动本地观测转换为协议观测。
 
-    Large arrays and binary-like assets are materialized into the media store.
-    The bus-facing RobotObservation carries only small metadata plus media and
-    artifact references.
+    大型数组和二进制类资源会实体化到媒体存储。面向总线的 `RobotObservation`
+    只携带少量元数据以及媒体和产物引用。
     """
 
     def __init__(

@@ -110,11 +110,10 @@ _DEFAULT_VLN_PROMPT_TEMPLATE = (
 
 
 class InternVLAN1System2Executor:
-    """Planner-only VLN executor for InternVLA-N1 System 2.
+    """InternVLA-N1 System 2 的纯规划型 VLN executor。
 
-    The first implementation intentionally supports a mock planner path so the
-    Hey Robot capability/skill plumbing can be validated before loading the
-    heavy InternNav dependency stack.
+    初版刻意支持 mock planner 路径，方便在加载较重的 InternNav 依赖栈之前，
+    先验证 Hey Robot 的能力声明和技能链路。
     """
 
     def __init__(self, service_id: str, spec: ModelServiceSpec) -> None:
@@ -331,12 +330,12 @@ class InternVLAN1System2Executor:
         return session_id
 
     def _apply_prompt_override(self, model: Any) -> None:
-        """Override the VLN prompt template without modifying third-party InternNav.
+        """在不修改第三方 InternNav 的情况下覆盖 VLN prompt 模板。
 
-        The conversation template is a list of [{"from": "human", "value": prompt}, ...]
-        set by InternNav's ``init_prompts()``.  We replace the human prompt so Hey Robot
-        controls the instruction format while still respecting the ``<instruction>.``
-        placeholder that ``s2_step()`` substitutes at call time.
+        conversation 模板由 InternNav 的 ``init_prompts()`` 设置，形如
+        [{"from": "human", "value": prompt}, ...]。这里替换 human prompt，让
+        Hey Robot 控制指令格式，同时保留 ``s2_step()`` 调用时替换的
+        ``<instruction>.`` 占位符。
         """
         settings = self.spec.settings
         custom_prompt = str(
@@ -364,8 +363,8 @@ class InternVLAN1System2Executor:
             InternVLAN1ForCausalLM,
         )
 
-        # InternNav hardcodes flash_attention_2; replace with sdpa on systems
-        # without a flash-attn build. sdpa is built into PyTorch >= 2.0.
+        # InternNav 硬编码使用 flash_attention_2；在没有 flash-attn 构建的系统上
+        # 替换为 sdpa。sdpa 从 PyTorch >= 2.0 起内置。
         _orig_from_pretrained = InternVLAN1ForCausalLM.from_pretrained
 
         @classmethod  # type: ignore[misc]
@@ -404,10 +403,10 @@ class InternVLAN1System2Executor:
         }
         model = policy_cls(config=config_cls(model_cfg={"model": model_settings}))
         n_query = int(settings.get("n_query", 4))
-        inner = model.model  # InternVLAN1ForCausalLM
+        inner = model.model  # 内部类型：InternVLAN1ForCausalLM
         if not hasattr(inner.config, "n_query"):
             inner.config.n_query = n_query
-        vlm = inner.get_model()  # InternVLAN1Model
+        vlm = inner.get_model()  # VLM 类型：InternVLAN1Model
         if not hasattr(vlm, "latent_queries") or vlm.latent_queries is None:
             vlm.latent_queries = torch.nn.Parameter(
                 torch.randn(1, n_query, vlm.config.hidden_size)
@@ -758,7 +757,7 @@ def _intrinsic_from_payload(
 def _to_float_list(value: Any) -> list[float]:
     if isinstance(value, (list, tuple)):
         return [float(v) for v in value]
-    # Handle protobuf ListValue (exposes items via __iter__ but not list/tuple check)
+    # 处理 protobuf ListValue：它通过 __iter__ 暴露元素，但不会通过 list/tuple 检查。
     try:
         return [float(v) for v in value]
     except (TypeError, ValueError):
@@ -766,11 +765,11 @@ def _to_float_list(value: Any) -> list[float]:
     return []
 
 
-# InternVLA-N1 System 2 direction action codes
+# InternVLA-N1 System 2 方向动作码
 _ACTION_HEADING: dict[int, float] = {
-    1: 0.0,  # ↑ → forward
-    2: -90.0,  # ← → left
-    3: 90.0,  # → → right
+    1: 0.0,  # ↑ → 前进
+    2: -90.0,  # ← → 左转
+    3: 90.0,  # → → 右转
 }
 
 

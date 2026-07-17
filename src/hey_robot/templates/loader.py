@@ -14,7 +14,7 @@ from jinja2.loaders import BaseLoader
 
 
 class TemplateStore:
-    """Resolve and render prompt templates from runtime overrides or packaged defaults."""
+    """从运行时覆盖项或随包默认值中解析并渲染 Prompt 模板。"""
 
     def __init__(
         self,

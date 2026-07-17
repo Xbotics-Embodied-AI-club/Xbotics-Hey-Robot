@@ -13,7 +13,7 @@ from hey_robot.robot_runtime.xlerobot.hardware.config import XLeRobotHardwareCon
 
 
 class NativeXLeRobotClient:
-    """Native hardware client for XLeRobot as SO101 arm + LeKiwi base composition."""
+    """将 XLeRobot 视为 SO101 机械臂加 LeKiwi 底盘组合时的原生硬件客户端。"""
 
     def __init__(
         self,

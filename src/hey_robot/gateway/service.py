@@ -217,7 +217,7 @@ class GatewayService:
     async def _handle_goal_command(
         self, text: str, envelope: Envelope, interaction_id: str
     ) -> bool:
-        """The gateway accepts only explicit, structured autonomous commands."""
+        """Gateway 仅接受明确且结构化的自主命令。"""
         stripped = text.strip()
         if not stripped.startswith("/goal "):
             return False
@@ -346,7 +346,7 @@ class GatewayService:
     async def _handle_safety_command(
         self, text: str, envelope: Envelope, interaction_id: str
     ) -> bool:
-        """Route high-priority controls without waiting for an LLM response."""
+        """路由高优先级控制，无需等待 LLM 回复。"""
         normalized = " ".join(str(text or "").lower().split())
         compact = normalized.replace(" ", "")
         emergency = {
@@ -452,9 +452,9 @@ class GatewayService:
 
     @staticmethod
     def _interaction_id(envelope: Envelope, payload_hash: str) -> str:
-        # A transport message_id/turn_id identifies a retried delivery.  Local
-        # inputs without one get a payload-scoped receipt so distinct commands
-        # sharing an Envelope in an in-process caller are not swallowed.
+        # transport message_id/turn_id 用于识别重试投递。本地输入如果没有该标识，
+        # 会获得一个按 payload 作用域生成的 receipt，避免同一进程调用方中共享 Envelope
+        # 的不同命令被误吞掉。
         source = envelope.message_id or envelope.turn_id
         if source is None:
             source = f"{envelope.trace_id}:{payload_hash}"
@@ -501,7 +501,7 @@ class GatewayService:
         await self.channels.send(reply)
 
     async def _on_goal_event(self, _topic: str, payload: dict) -> None:
-        """Deliver one durable Goal notification per linked output channel."""
+        """向每个关联输出渠道投递一条持久化 Goal 通知。"""
         event = from_payload(GoalEvent, payload)
         view = self.autonomy_store.goal_view(event.goal_id)
         if view is None:

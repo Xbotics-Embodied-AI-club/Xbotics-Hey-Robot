@@ -1,1 +1,1 @@
-"""Command-line entry points for Hey Robot services."""
+"""Hey Robot 服务的命令行入口。"""

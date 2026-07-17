@@ -1,4 +1,4 @@
-"""Single SQLite authority for goals, actions, evidence, and execution locks."""
+"""Goal、动作、证据和执行锁的唯一 SQLite 权威存储。"""
 
 from __future__ import annotations
 
@@ -158,7 +158,7 @@ class AutonomyStore:
         expires_at: float,
         policy: str = "manual_only",
     ) -> bool:
-        """Persist a wait boundary; it never resumes a physical action itself."""
+        """持久化等待边界；它本身绝不恢复物理动作。"""
         with self._db:
             goal = self._db.execute(
                 "SELECT status, termination_reason FROM goals WHERE goal_id=?",
@@ -209,7 +209,7 @@ class AutonomyStore:
         return None if row is None else self.wake_condition(str(row[0]))
 
     def expire_wake_conditions(self, *, now: float | None = None) -> list[str]:
-        """Move expired waits to review; expiry never resumes or retries work."""
+        """将超时等待转入人工审查；超时绝不恢复或重试工作。"""
         current = time.time() if now is None else now
         with self._db:
             rows = self._db.execute(
@@ -247,7 +247,7 @@ class AutonomyStore:
     def confirm_wake_condition(
         self, *, condition_id: str, goal_id: str, principal_id: str | None
     ) -> bool:
-        """Consume one valid human confirmation and reopen scheduling only."""
+        """消费一次有效人工确认，仅重新开放调度。"""
         with self._db:
             condition = self._db.execute(
                 "SELECT status, kind, expires_at FROM wake_conditions "
@@ -288,7 +288,7 @@ class AutonomyStore:
         observed_payload: dict[str, Any],
         fulfilled_by: str,
     ) -> bool:
-        """Consume a trusted non-human wake event and reopen scheduling."""
+        """消费可信的非人工唤醒事件，并重新开放调度。"""
         with self._db:
             condition = self._db.execute(
                 "SELECT status, kind, expected_payload, expires_at FROM wake_conditions "
@@ -388,10 +388,9 @@ class AutonomyStore:
         return result
 
     def goal_view(self, goal_id: str) -> dict[str, Any] | None:
-        """Return the channel-safe read model for one autonomous goal.
+        """返回单个自治目标面向通道安全暴露的只读模型。
 
-        This is a projection of durable facts only.  It never consults model
-        text and never makes a scheduling or execution decision.
+        这里只投影已经持久化的事实，不读取模型文本，也不做调度或执行决策。
         """
         goal = self.goal(goal_id)
         if goal is None:
@@ -454,7 +453,7 @@ class AutonomyStore:
         }
 
     def goal_timeline(self, goal_id: str) -> list[dict[str, Any]]:
-        """Return a compact, durable causal timeline for a single Goal."""
+        """返回单个 Goal 的紧凑、可持久化因果时间线。"""
         goal = self.goal(goal_id)
         if goal is None:
             return []
@@ -490,7 +489,7 @@ class AutonomyStore:
     def claim_goal_notification(
         self, *, goal_id: str, goal_version: int, status: str, channel: str
     ) -> bool:
-        """Return true only once for a Goal state delivery to a channel."""
+        """同一 Goal 状态向同一通道只允许确认投递一次。"""
         try:
             with self._db:
                 self._db.execute(
@@ -599,7 +598,7 @@ class AutonomyStore:
     def mark_needs_review(
         self, *, goal_id: str, reason: str, details: dict[str, Any]
     ) -> bool:
-        """Stop autonomous progression without claiming physical failure."""
+        """停止自主推进，但不宣称物理执行已失败。"""
         with self._db:
             cur = self._db.execute(
                 "UPDATE goals SET status='needs_review', version=version+1 "
@@ -615,7 +614,7 @@ class AutonomyStore:
             return True
 
     def reserve_auto_reobservation(self, *, goal_id: str, limit: int = 1) -> int | None:
-        """Reserve one safe, read-only re-observation and reopen dispatch once."""
+        """预留一次安全的只读重新观察，并仅重新开放一次派发。"""
         with self._db:
             goal = self._db.execute(
                 "SELECT status, termination_reason FROM goals WHERE goal_id=?",
@@ -671,7 +670,7 @@ class AutonomyStore:
         reason: str,
         payload: dict[str, Any],
     ) -> bool:
-        """Persist stop-pending gate and command before its bus publication."""
+        """在发布到总线前持久化待停止闸门和命令。"""
         with self._db:
             goal = self._db.execute(
                 "SELECT status FROM goals WHERE goal_id=?", (goal_id,)
@@ -795,7 +794,7 @@ class AutonomyStore:
         operator_id: str,
         status_payload: dict[str, Any],
     ) -> bool:
-        """Explicitly release an UNKNOWN execution lock after authoritative idle proof."""
+        """在获得权威空闲证明后，显式释放 UNKNOWN 执行锁。"""
         with self._db:
             action = self._db.execute(
                 "SELECT goal_id, status FROM actions WHERE skill_id=?", (skill_id,)
@@ -871,7 +870,7 @@ class AutonomyStore:
         evidence: list[dict[str, Any]],
         result: dict[str, Any] | None = None,
     ) -> str | None:
-        """Atomically record terminal action/evidence and reactivate its waiting goal."""
+        """原子记录终态动作和证据，并重新激活其等待中的 Goal。"""
         with self._db:
             action = self._db.execute(
                 "SELECT goal_id, status, terminal_hash, payload FROM actions WHERE skill_id=?",
@@ -911,7 +910,7 @@ class AutonomyStore:
             return str(action[0])
 
     def mark_skill_result_conflict(self, skill_id: str) -> str | None:
-        """A conflicting terminal payload makes physical execution uncertain."""
+        """冲突的终态载荷会使物理执行状态变得不确定。"""
         with self._db:
             row = self._db.execute(
                 "SELECT actions.goal_id, goals.robot_id FROM actions JOIN goals ON goals.goal_id=actions.goal_id WHERE actions.skill_id=?",
@@ -966,7 +965,7 @@ class AutonomyStore:
             return cur.rowcount == 1
 
     def mark_action_unknown(self, *, skill_id: str, expected: str, reason: str) -> bool:
-        """Atomically retain the execution lock when physical dispatch is uncertain."""
+        """物理派发不确定时，原子地保留执行锁。"""
         with self._db:
             row = self._db.execute(
                 "SELECT actions.goal_id, goals.robot_id FROM actions "

@@ -43,7 +43,7 @@ class XLeRobotClientProtocol(Protocol):
 
 
 class XLeRobotDriver:
-    """XLeRobot embodiment driver for the hey-robot runtime."""
+    """Hey Robot 运行时使用的 XLeRobot 具身驱动。"""
 
     def __init__(self, context: RobotDriverContext) -> None:
         self.context = context

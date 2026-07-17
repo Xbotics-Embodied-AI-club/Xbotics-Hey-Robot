@@ -1,4 +1,4 @@
-"""One bounded model decision shared by conversation and goal execution."""
+"""由对话和 Goal 执行共享的一次受限模型决策。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from hey_robot.providers import ReasoningMessage, ReasoningProvider
 
 
 class ToolRegistryLike(Protocol):
-    """Pure model-tool boundary; implementations perform no IO."""
+    """纯模型工具边界；实现不得执行 IO。"""
 
     @property
     def definitions(self) -> list[dict[str, object]]: ...
@@ -47,7 +47,7 @@ class AgentTurnResult:
 
 
 class AgentRunner:
-    """Return text or one typed proposal; never perform external IO."""
+    """返回文本或一个带类型的提案；绝不执行外部 IO。"""
 
     def __init__(self, provider: ReasoningProvider, tools: ToolRegistryLike) -> None:
         self._provider = provider

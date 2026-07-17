@@ -5,7 +5,7 @@ from hey_robot.providers.types import ReasoningMessage, ReasoningResponse
 
 
 class DeterministicExecutionFeedbackReasoner(BaseReasoningProvider):
-    """Fixed feedback provider for tests or explicit feedback-only deployments."""
+    """用于测试或显式反馈专用部署的固定反馈 provider。"""
 
     def __init__(self) -> None:
         super().__init__(generation=GenerationSettings(temperature=0.0, max_tokens=128))

@@ -1,4 +1,4 @@
-"""Foundation model service RPC contracts."""
+"""基础模型服务的 RPC 契约。"""
 
 from hey_robot.foundation.contract.v1 import (
     CancelSkillRequest,

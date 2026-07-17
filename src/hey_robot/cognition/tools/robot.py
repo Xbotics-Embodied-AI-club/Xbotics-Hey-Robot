@@ -1,4 +1,4 @@
-"""Canonical proposal-only tool surface for the single Robot Agent."""
+"""单一 Robot Agent 的规范化、仅提案式工具接口。"""
 
 from __future__ import annotations
 
@@ -192,7 +192,7 @@ class ControlGoalTool:
 
 
 class ToolRegistry:
-    """The only model-facing tool registry; tools return proposals and perform no IO."""
+    """唯一面向模型的工具注册表；工具只返回提案，不执行 IO。"""
 
     def __init__(self, deps: ToolDependencies) -> None:
         core_tools: dict[str, Any] = {

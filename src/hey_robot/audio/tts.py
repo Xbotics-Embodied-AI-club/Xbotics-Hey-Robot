@@ -20,7 +20,7 @@ from hey_robot.audio.tts_protocol import (
 
 
 class DoubaoTTSClient:
-    """Volcengine/Doubao bidirectional TTS client."""
+    """火山引擎／豆包双向 TTS 客户端。"""
 
     def __init__(self, config: TTSConfig) -> None:
         self.config = config
@@ -147,11 +147,10 @@ def _text_chunks(text: str, *, chunk_size: int = 2000) -> list[str]:
 
 
 class OpenAISpeechTTSClient:
-    """Local OpenAI-compatible /v1/audio/speech TTS (e.g. RDK S600 WeTTS).
+    """本地兼容 OpenAI 的 /v1/audio/speech TTS（例如 RDK S600 WeTTS）。
 
-    Returns raw PCM16 frames so it drops straight into the same playback path
-    as the cloud doubao client. Conforms to the same synthesize/synthesize_stream
-    interface.
+    返回原始 PCM16 帧，因此可直接进入与云端豆包客户端相同的播放链路；它遵循
+    相同的 `synthesize`／`synthesize_stream` 接口。
     """
 
     def __init__(self, config: TTSConfig) -> None:

@@ -32,7 +32,7 @@ class HealthReport:
 
 
 class HealthReportService:
-    """Builds user-facing health findings from existing read-only state."""
+    """根据已有只读状态构建面向用户的健康检查结果。"""
 
     def __init__(
         self,

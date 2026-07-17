@@ -275,7 +275,7 @@ class SkillControllerService:
     async def _publish_stop_motion(
         self, control: SkillControl, _state: _SkillControllerState
     ) -> None:
-        """Use the robot action path for a control-plane stop, never SkillIntent."""
+        """控制平面停止命令走 robot action 路径，绝不通过 SkillIntent。"""
         from hey_robot.protocol import RobotAction
 
         await self.bus.publish(
@@ -1265,7 +1265,7 @@ class SkillControllerService:
     async def _interrupt_active(
         self, policy_id: str, state: _SkillControllerState, interrupt: SkillIntent
     ) -> None:
-        del policy_id, state, interrupt  # deleted bypass, use skill.control instead
+        del policy_id, state, interrupt  # 已删除旁路，改用 skill.control
 
     @staticmethod
     def _precondition_block(

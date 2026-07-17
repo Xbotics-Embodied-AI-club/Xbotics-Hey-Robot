@@ -13,7 +13,7 @@ from hey_robot.robot_runtime.so101.client import _camera_probe, _service_probe
 
 
 class LeKiwiClient:
-    """Native client for a standalone LeKiwi mobile base."""
+    """独立 LeKiwi 移动底盘的原生客户端。"""
 
     def __init__(
         self,

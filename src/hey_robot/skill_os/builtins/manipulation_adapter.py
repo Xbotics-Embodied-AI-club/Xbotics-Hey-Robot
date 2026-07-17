@@ -12,11 +12,10 @@ class ArmPrimitive:
 
 
 def vla_output_to_primitives(vla_result: dict[str, Any]) -> list[ArmPrimitive]:
-    """Convert VLA inference output into robot arm primitives.
+    """把 VLA 推理输出转换为机器人机械臂 primitive。
 
-    Each VLA inference returns joint targets and a gripper action.
-    We produce 1-2 primitives: optionally a move_arm_joints, and optionally
-    a set_gripper.
+    每次 VLA 推理会返回关节目标和夹爪动作。这里最多生成两个 primitive：
+    一个可选的 move_arm_joints，以及一个可选的 set_gripper。
     """
     policy_result = vla_result.get("policy_result")
     if isinstance(policy_result, dict) and policy_result.get("kind") == "action_chunk":
@@ -69,9 +68,8 @@ def vla_output_to_primitives(vla_result: dict[str, Any]) -> list[ArmPrimitive]:
 
 
 def _action_chunk_to_primitives(actions: list[Any]) -> list[ArmPrimitive]:
-    # Only execute the first action from each chunk — the VLA control loop
-    # re-runs inference at every step, so executing subsequent actions
-    # without re-observing would be open-loop drift.
+    # 每个 chunk 只执行第一个动作。VLA 控制循环会在每一步重新推理；
+    # 如果不重新观测就继续执行后续动作，会变成开环漂移。
     if actions and isinstance(actions[0], dict):
         return _single_action_to_primitives(actions[0], action_index=0)
     return []

@@ -68,7 +68,7 @@ class RuntimeEventStore:
 
 
 def _tail_lines(path: Path, limit: int, *, block_size: int = 64 * 1024) -> list[str]:
-    """Read only enough data from the end of a JSONL file for ``limit`` lines."""
+    """仅从 JSONL 文件末尾读取取得 ``limit`` 行所需的数据。"""
     if limit <= 0:
         return []
     chunks: list[bytes] = []

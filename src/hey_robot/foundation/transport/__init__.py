@@ -1,1 +1,1 @@
-"""Foundation service transport adapters."""
+"""基础模型服务传输适配器。"""

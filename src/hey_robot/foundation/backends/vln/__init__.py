@@ -1,1 +1,1 @@
-"""VLN foundation backends."""
+"""VLN 基础模型后端。"""

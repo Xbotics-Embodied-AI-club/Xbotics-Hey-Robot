@@ -12,7 +12,7 @@ FeedbackMode = str
 
 @dataclass(frozen=True)
 class SkillContract:
-    """Canonical runtime contract for a robot skill."""
+    """机器人 Skill 的规范运行时契约。"""
 
     name: str
     description: str
@@ -65,7 +65,7 @@ class SkillContract:
 
 
 class SkillContractCatalog:
-    """Read-only runtime view of skill contracts."""
+    """Skill 契约的只读运行时视图。"""
 
     def __init__(self, specs: list[SkillContract] | tuple[SkillContract, ...]) -> None:
         self._specs = {spec.name: spec for spec in specs}
@@ -132,7 +132,7 @@ class SkillContractDecision:
 
 
 class SkillContractRuntime:
-    """Deterministic contract gate for skill scheduling and robot execution."""
+    """用于 Skill 调度和机器人执行的确定性契约闸门。"""
 
     SHARED_RESOURCES: ClassVar[set[str]] = {"camera"}
 

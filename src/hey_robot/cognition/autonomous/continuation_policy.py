@@ -1,4 +1,4 @@
-"""Pure continuation policy; it never publishes or retries an action."""
+"""纯续行策略；绝不发布或重试动作。"""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ def decide_continuation(
     gate_ready: bool,
     has_wake_trigger: bool,
 ) -> ContinuationAssessment:
-    """Return an explainable next-state recommendation from durable inputs."""
+    """根据持久化输入返回可解释的下一状态建议。"""
     if goal_status in {"completed", "failed", "cancelled"}:
         return ContinuationAssessment("stop", "goal is terminal")
     if not gate_ready:

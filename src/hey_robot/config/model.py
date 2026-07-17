@@ -187,7 +187,7 @@ class AgentSpec:
 class SkillSurfaceConfig:
     modules: tuple[str, ...] = ("hey_robot.skill_os.builtins",)
     enabled: tuple[str, ...] = ()
-    mode: str = "production"  # "production" | "bringup"
+    mode: str = "production"  # 可选值："production" | "bringup"
 
 
 @dataclass(frozen=True)

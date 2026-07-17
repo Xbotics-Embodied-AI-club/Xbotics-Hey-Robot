@@ -98,14 +98,14 @@ class SetGripperSkill(BaseSkill):
 
 
 class _ManipulateSkillBase(BaseSkill):
-    """Base class for VLA-driven manipulation skills.
+    """VLA 驱动操作技能的基类。
 
-    Runs a control loop in Skill OS:
-      1. Capture current observation
-      2. Call VLA model service (stateless, single-frame inference)
-      3. Parse VLA output → arm primitives
-      4. Execute primitives on robot
-      5. Repeat until task_done or max_steps reached
+    在 Skill OS 中运行控制循环：
+      1. 获取当前观测
+      2. 调用 VLA 模型服务（无状态、单帧推理）
+      3. 将 VLA 输出解析为机械臂 primitive
+      4. 在机器人上执行 primitive
+      5. 重复直到 task_done 或达到 max_steps
     """
 
     async def execute(self, ctx, arguments):
@@ -259,7 +259,7 @@ def _vla_payload(ctx: Any, arguments: dict[str, Any]) -> dict[str, Any]:
         resolve_images = getattr(ctx, "resolve_images", None)
         observation_payload = _observation_payload(
             observation,
-            camera=None,  # Send ALL cameras — VLA models need multiple views
+            camera=None,  # 发送所有相机；VLA 模型需要多视角
             resolve_images=resolve_images,
         )
         if observation_payload is not None:
@@ -330,7 +330,7 @@ def _encode_images(
             logging.getLogger(__name__).debug(
                 "Failed to resolve images via resolve_images", exc_info=True
             )
-    # Fallback: try to read from file URIs
+    # 回退：尝试从 file URI 读取
     result = []
     for ref in images:
         entry = asdict(ref)

@@ -1,4 +1,4 @@
-"""Durable idempotency receipts for skill and control messages."""
+"""Skill 与控制消息的持久化幂等回执。"""
 
 from __future__ import annotations
 

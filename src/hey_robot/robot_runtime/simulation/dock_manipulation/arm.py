@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 Vector Robotics
-# Modified for Xbotics Hey Robot: shared dock arm kernel.
+# 为 Xbotics Hey Robot 修改：共享 dock 机械臂 kernel。
 from __future__ import annotations
 
 import time
@@ -10,7 +10,7 @@ import numpy as np
 
 
 class DockSession(Protocol):
-    """Protocol for the dock session used by arm and gripper kernels."""
+    """机械臂和夹爪 kernel 共用的 dock session 协议。"""
 
     model: Any
     data: Any
@@ -48,7 +48,7 @@ IK_DAMPING = 1e-4
 
 
 class So101MobileArmKernel:
-    """5-DOF arm kernel for XLeRobot mobile manipulation."""
+    """用于 XLeRobot 移动操作的 5 自由度机械臂 kernel。"""
 
     def __init__(
         self,
@@ -109,7 +109,7 @@ class So101MobileArmKernel:
         data = self.session.data
         import mujoco
 
-        # Re-lock mobile base at origin before arm motion
+        # 机械臂运动前，把移动底盘重新锁定在原点
         self.session.lock_base()
 
         dt = float(model.opt.timestep)
@@ -132,8 +132,7 @@ class So101MobileArmKernel:
                 remaining = elapsed_sim - (time.monotonic() - wall_start)
                 if remaining > 0:
                     time.sleep(remaining)
-        # Snap actuator targets to actual joint positions to prevent
-        # residual-force drift in subsequent gripper motions.
+        # 将 actuator target 对齐到实际关节位置，避免后续夹爪运动时残余力导致漂移。
         for actuator_id, name in zip(
             self._actuator_ids, self._joint_names, strict=True
         ):
@@ -202,7 +201,7 @@ class So101MobileArmKernel:
             ):
                 return None
             axis_target = axis_target / axis_target_norm
-        # Re-lock mobile base at origin before IK
+        # IK 前把移动底盘重新锁定在原点
         self.session.lock_base()
         data = self.session.data
         model = self.session.model
@@ -242,8 +241,8 @@ class So101MobileArmKernel:
                 data.qpos[address] = float(value)
 
             for _ in range(IK_MAX_ITER):
-                # IK needs transforms and Jacobians, not collision or dynamics.
-                # This keeps solving fast in the complete home scene.
+                # IK 只需要变换和 Jacobian，不需要碰撞或动力学。
+                # 这样在完整 home 场景中求解也能保持快速。
                 mujoco.mj_kinematics(model, data)
                 mujoco.mj_comPos(model, data)
                 position_error = target - data.xpos[self._ee_body_id]

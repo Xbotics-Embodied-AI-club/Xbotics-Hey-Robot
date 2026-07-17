@@ -333,7 +333,7 @@ class FollowController:
         )
         vx = error_area * self.kp_linear
         if vx > 0.0:
-            # Do not drive toward a person until the chassis is substantially aligned.
+            # 底盘基本对齐前，不要向人体目标前进。
             alignment_scale = self._clamp(1.0 - abs(error_x) / 0.5, 0.0, 1.0)
             vx *= alignment_scale
         if self.allow_backward:
@@ -367,11 +367,10 @@ class FollowController:
 
 
 class HumanFollowRunner:
-    """Shared human-follow control loop — frame source and velocity sink agnostic.
+    """共享的人体跟随控制循环，与帧来源和速度输出方式无关。
 
-    Both the NATS service and the local skill use this single implementation.
-    The caller injects *get_frame*, *apply_velocity*, *emit_progress* and
-    *is_stopped* callables that adapt the runner to their specific transport.
+    NATS 服务和本地技能都使用这一套实现。调用方注入 get_frame、apply_velocity、
+    emit_progress 和 is_stopped 等回调，把 runner 适配到各自的传输方式。
     """
 
     def __init__(
@@ -412,7 +411,7 @@ class HumanFollowRunner:
         )
 
     async def run(self) -> dict[str, Any]:
-        """Execute the human-follow control loop. Returns a result dict."""
+        """执行人体跟随控制循环，并返回结果字典。"""
         import asyncio
 
         duration_raw = self._args.get("duration_sec")
@@ -494,7 +493,7 @@ class HumanFollowRunner:
                         },
                     )
 
-                # Early exit when already in the follow window
+                # 已经处于跟随窗口内时提前退出
                 if (
                     target is not None
                     and abs(current.vx) < 0.02

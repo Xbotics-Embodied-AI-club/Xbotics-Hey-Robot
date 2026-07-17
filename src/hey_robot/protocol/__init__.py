@@ -1,4 +1,4 @@
-"""Stable protocol surface shared by channels, agents, policies, and robots."""
+"""渠道、Agent、策略和机器人共用的稳定协议接口。"""
 
 from hey_robot.protocol.messages import (
     ActionProposal,

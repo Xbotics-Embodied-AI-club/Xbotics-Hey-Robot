@@ -1,4 +1,4 @@
-"""Present trusted runtime events to human-facing channels."""
+"""将可信运行时事件呈现给面向人的渠道。"""
 
 from __future__ import annotations
 

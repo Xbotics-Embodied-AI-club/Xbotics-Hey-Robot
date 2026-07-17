@@ -23,7 +23,7 @@ class StreamingASRTurn:
 
 
 class SherpaStreamingVoiceEngine:
-    """HomeBot-style local wakeup + streaming ASR adapted to hey-robot."""
+    """适配 Hey Robot 的 HomeBot 风格本地唤醒与流式 ASR。"""
 
     def __init__(self, recorder: RecorderConfig, asr: ASRConfig) -> None:
         self.recorder = recorder

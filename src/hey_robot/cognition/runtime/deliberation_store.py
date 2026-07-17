@@ -1,4 +1,4 @@
-"""Persistent receipt store. Interrupted model work is never resumed."""
+"""持久化回执存储；中断的模型工作绝不恢复。"""
 
 from __future__ import annotations
 

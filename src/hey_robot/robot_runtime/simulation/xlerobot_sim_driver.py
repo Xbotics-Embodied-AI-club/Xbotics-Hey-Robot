@@ -56,7 +56,7 @@ _DEFAULT_SIM_CAMERA_LAYOUT: dict[str, dict[str, Any]] = {
     },
 }
 
-# SDK joint names (in the canonical order used by arm_status / arm_joints).
+# SDK 关节名（arm_status / arm_joints 使用的标准顺序）。
 _ARM_JOINT_NAMES = (
     "shoulder_pan",
     "shoulder_lift",
@@ -72,7 +72,7 @@ _EGL_CONTEXT: Any = None
 
 
 class _DockSessionAdapter:
-    """Expose an XLeRobotSimDriver through the proven dock-kernel session API."""
+    """通过已验证的 dock-kernel session API 暴露 XLeRobotSimDriver。"""
 
     def __init__(self, driver: XLeRobotSimDriver) -> None:
         self.driver = driver
@@ -105,7 +105,7 @@ class _DockSessionAdapter:
         return object_id
 
     def lock_base(self) -> None:
-        """Snapshot the chassis and inactive right arm for left-arm manipulation."""
+        """为左臂操作快照底盘和非活动右臂状态。"""
         import mujoco
 
         self._base_qpos.clear()
@@ -180,14 +180,13 @@ def _resolve_mjcf_path(settings: dict[str, Any]) -> Path:
 
 
 class XLeRobotSimDriver:
-    """MuJoCo simulation driver implementing the RobotDriver protocol."""
+    """实现 RobotDriver 协议的 MuJoCo 仿真驱动。"""
 
     def __init__(self, context: RobotDriverContext) -> None:
         self.context = context
         self.robot_id = context.robot_id
         self.settings = dict(context.spec.settings or {})
-        # Configure before tests or callers manually construct MjModel/MjData
-        # through this driver instead of going through ``start``.
+        # 在测试或调用方绕过 ``start``、直接通过该驱动构造 MjModel/MjData 前完成配置。
         with contextlib.suppress(ImportError):
             configure_mujoco_warning_logging(context.deployment_id)
 
@@ -243,7 +242,7 @@ class XLeRobotSimDriver:
         self._dock_arm_side = "left"
         self._dock_manipulation_active = False
 
-    # RobotDriver protocol
+    # RobotDriver 协议
 
     async def start(self) -> None:
         _configure_mujoco_gl_backend()
@@ -255,9 +254,8 @@ class XLeRobotSimDriver:
         )
         mjcf_path = str(_resolve_mjcf_path(self.settings))
         logger.info(f"{self.robot_id} loading MuJoCo model from {mjcf_path}")
-        # MuJoCo model loading is not safe on an arbitrary executor thread in
-        # headless EGL deployments. The scene load is short and must share the
-        # driver's GL-owning thread with data and renderer initialization.
+        # 在 headless EGL 部署中，MuJoCo 模型加载不能安全地放到任意 executor 线程。
+        # 场景加载时间很短，并且必须和数据、renderer 初始化共享驱动持有 GL 的线程。
         self.model = mujoco.MjModel.from_xml_path(mjcf_path)
         logger.info(f"{self.robot_id} MuJoCo model loaded; creating simulation data")
         self.data = mujoco.MjData(self.model)
@@ -274,13 +272,13 @@ class XLeRobotSimDriver:
         self._initialize_dock_manipulation()
         logger.info(f"{self.robot_id} simulation data initialized")
 
-        # Linux headless rendering needs an EGL context before Renderer creation.
-        # Windows uses WGL; importing mujoco.egl there fails if EGL.dll is absent.
+        # Linux headless 渲染在创建 Renderer 前需要 EGL context。
+        # Windows 使用 WGL；如果缺少 EGL.dll，导入 mujoco.egl 会失败。
         if _needs_egl_context():
             logger.info(f"{self.robot_id} initializing EGL context")
             _ensure_egl_context(self._render_width, self._render_height)
 
-        # Renderer must be created on the calling thread (owns the GL context).
+        # Renderer 必须在调用线程创建，因为该线程持有 GL context。
         logger.info(f"{self.robot_id} creating MuJoCo renderer")
         self.renderer = mujoco.Renderer(
             self.model, self._render_height, self._render_width
@@ -466,9 +464,9 @@ class XLeRobotSimDriver:
             self.last_error = result.message
             return self._status_for_action(action, success=False)
 
-        # MuJoCo model/data and the passive viewer are owned by this thread.
-        # Running these primitives in asyncio's worker pool can deadlock the
-        # native viewer/context even when the operation itself is short.
+        # MuJoCo model/data 和 passive viewer 都归这个线程所有。
+        # 即使操作本身很短，把这些 primitive 放到 asyncio worker pool 中运行也可能
+        # 让原生 viewer/context 死锁。
         dock_result = self._execute_dock_primitive(skill)
         if dock_result is not None:
             self.last_skill_result = dock_result
@@ -556,8 +554,8 @@ class XLeRobotSimDriver:
         elif cmd.arm_targets or cmd.jaw_left is not None or cmd.jaw_right is not None:
             self._emergency_stop_active = False
             base_qpos = self.data.qpos[:3].copy()
-            # Pure gripper commands need longer settle time to show visible jaw motion,
-            # while arm commands remain short to avoid destabilizing the current model.
+            # 纯夹爪命令需要更长 settle 时间才能看到明显夹爪运动；
+            # 机械臂命令保持较短，以免当前模型不稳定。
             settle_sec = (
                 0.35
                 if not cmd.arm_targets
@@ -661,15 +659,14 @@ class XLeRobotSimDriver:
         self.model = None
         self.state = "closed"
 
-    # Simulation helpers
+    # 仿真辅助方法
 
     async def stream_camera_frames(
         self, *, timeout_ms: int = 100
     ) -> dict[str, dict[str, Any]]:
-        """Stream rendered frames from all scene cameras.
+        """从所有场景相机流式输出渲染帧。
 
-        Returns same shape as XLeRobotDriver.stream_camera_frames so the
-        NATS camera-stream loop works for simulation.
+        返回结构与 XLeRobotDriver.stream_camera_frames 一致，使 NATS 相机流循环也能用于仿真。
         """
         del timeout_ms
         rendered = self._render_frames()
@@ -679,10 +676,10 @@ class XLeRobotSimDriver:
             if img is not None
         }
 
-    # ---- public VLA API ----
+    # ---- 公共 VLA API ----
 
     def render_camera_frames(self, camera_names: list[str]) -> dict[str, np.ndarray]:
-        """Render frames from named cameras for VLA observation."""
+        """从指定相机渲染用于 VLA 观测的图像帧。"""
         previous = self._scene_camera
         frames: dict[str, np.ndarray | None] = {}
         try:
@@ -698,7 +695,7 @@ class XLeRobotSimDriver:
             self._scene_camera = previous
 
     def read_arm_state(self, arm: str) -> dict[str, float]:
-        """Read arm joint positions for a specific side as a name->rad dict."""
+        """读取指定手臂侧的关节位置，返回 name->rad 字典。"""
         indices = self.adapter.arm_actuator_indices(arm)
         joint_order = self.adapter.arm_joint_order()
         result: dict[str, float] = {}
@@ -710,7 +707,7 @@ class XLeRobotSimDriver:
         return result
 
     def read_arm_state_vector(self, arm: str) -> np.ndarray:
-        """Read arm joint positions as a 6D ndarray in canonical joint order."""
+        """按标准关节顺序读取 6D ndarray 形式的手臂关节位置。"""
         state = self.read_arm_state(arm)
         joint_order = self.adapter.arm_joint_order()
         return np.array(
@@ -718,7 +715,7 @@ class XLeRobotSimDriver:
         )
 
     def write_arm_targets(self, arm: str, targets_rad: np.ndarray) -> None:
-        """Write actuator targets for one arm side with ctrlrange clamping."""
+        """为指定手臂侧写入 actuator 目标，并按 ctrlrange 裁剪。"""
         if self.model is None or self.data is None:
             return
         indices = self.adapter.arm_actuator_indices(arm)
@@ -732,7 +729,7 @@ class XLeRobotSimDriver:
         self._update_arm_status()
 
     def step_control(self, dt: float) -> None:
-        """Advance MuJoCo by dt seconds, keeping base still."""
+        """让 MuJoCo 前进 dt 秒，同时保持底盘静止。"""
         import mujoco
 
         if self.model is None or self.data is None:
@@ -745,7 +742,7 @@ class XLeRobotSimDriver:
             self._sync_viewer()
 
     def vla_readiness(self) -> dict[str, Any]:
-        """Return VLA-specific readiness for capability gating."""
+        """返回用于能力门控的 VLA 专用就绪状态。"""
         base = self.readiness()
         base["vla"] = {
             "ok": self.state not in {"closed", "failed"},
@@ -754,10 +751,10 @@ class XLeRobotSimDriver:
         }
         return base
 
-    # ---- internal simulation helpers ----
+    # ---- 内部仿真辅助方法 ----
 
     def _initialize_dock_manipulation(self) -> None:
-        """Bind the dock kernels when the active scene contains a wand."""
+        """当活动场景包含 wand 时绑定 dock kernel。"""
         import mujoco
 
         if (
@@ -814,7 +811,7 @@ class XLeRobotSimDriver:
     def _execute_dock_primitive(
         self, skill: RobotSkillAction
     ) -> RobotSkillResult | None:
-        """Execute dock manipulation primitives in home scenes."""
+        """在 home 场景中执行 dock 操作 primitive。"""
         if self._dock_session is None:
             return None
         name = skill.name
@@ -961,7 +958,7 @@ class XLeRobotSimDriver:
         return None
 
     def _move_dock_left_arm(self, positions: list[float], duration: float) -> None:
-        """Move the left arm with deterministic kinematic interpolation."""
+        """使用确定性的运动学插值移动左臂。"""
         if self._dock_session is None:
             return
         import mujoco
@@ -998,7 +995,7 @@ class XLeRobotSimDriver:
         self._sync_active_dock_welds()
 
     def _set_dock_left_gripper(self, *, opened: bool) -> None:
-        """Set the dock gripper kinematically and update the grasp weld."""
+        """以运动学方式设置 dock 夹爪，并更新抓取 weld。"""
         import mujoco
 
         from hey_robot.robot_runtime.simulation.dock_manipulation.gripper import (
@@ -1027,7 +1024,7 @@ class XLeRobotSimDriver:
             self._activate_dock_grip_weld()
 
     def _activate_dock_grip_weld(self) -> None:
-        """Attach the wand to the active dock gripper when within reach."""
+        """当 wand 在可达范围内时，将其附着到活动 dock 夹爪。"""
         import mujoco
 
         grasp_site_id = mujoco.mj_name2id(
@@ -1066,7 +1063,7 @@ class XLeRobotSimDriver:
         self._sync_active_dock_welds()
 
     def _sync_active_dock_welds(self) -> None:
-        """Apply active weld poses for free dock objects during kinematic motion."""
+        """在运动学运动期间，为自由 dock 物体应用活动 weld 位姿。"""
         import mujoco
 
         for equality_name in ("dock_weld", "grip_weld"):
@@ -1187,7 +1184,7 @@ class XLeRobotSimDriver:
         return self._world_vector_to_base(axis_world / norm)
 
     def _dock_target_base(self) -> tuple[float, float, float]:
-        """Return the gripper target that restores the wand's docked pose."""
+        """返回可恢复 wand 停靠位姿的夹爪目标。"""
         import mujoco
 
         dock_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "wand_dock")
@@ -1216,8 +1213,8 @@ class XLeRobotSimDriver:
     def _step_velocity(self, steps: int, vx: float, vy: float, vw: float) -> None:
         import mujoco
 
-        # Official XLeRobot exposes world-frame root joints. Convert the public
-        # body-frame command to root X/Y using the official yaw joint only.
+        # 官方 XLeRobot 暴露的是世界坐标系 root joints。
+        # 这里只使用官方 yaw joint，将公开的机体坐标系命令转换为 root X/Y。
         phi = float(self.data.qpos[2])
         qvel_x = math.cos(phi) * vy - math.sin(phi) * vx
         qvel_y = math.sin(phi) * vy + math.cos(phi) * vx
@@ -1237,16 +1234,15 @@ class XLeRobotSimDriver:
             self.data.qacc[1] = 0.0
             self.data.qacc[2] = 0.0
             mujoco.mj_step2(self.model, self.data)
-            # Base motion is kinematic in this simulator. Keep both arms
-            # kinematic as well so chassis teleportation cannot inject
-            # impulses into their dynamic joints.
+            # 该仿真器中的底盘运动是运动学方式。双臂也保持运动学方式，
+            # 避免底盘瞬移向动态关节注入冲量。
             self._restore_arm_locks(arm_locks, arm_ctrl)
             mujoco.mj_kinematics(self.model, self.data)
             self._sync_viewer()
         self._stop_base_motion()
 
     def _arm_joint_locks(self) -> list[tuple[int, int, int, float]]:
-        """Snapshot actuator, qpos and dof addresses for both arms."""
+        """快照双臂的 actuator、qpos 和 dof 地址。"""
         locks: list[tuple[int, int, int, float]] = []
         actuator_indices: set[int] = set()
         for arm in ("left", "right"):
@@ -1275,7 +1271,7 @@ class XLeRobotSimDriver:
         locks: list[tuple[int, int, int, float]],
         controls: dict[int, float],
     ) -> None:
-        """Restore arm targets and eliminate base-induced joint motion."""
+        """恢复机械臂目标，并消除底盘引入的关节运动。"""
         for actuator_idx, qpos_addr, dof_addr, position in locks:
             self.data.ctrl[actuator_idx] = controls[actuator_idx]
             self.data.qpos[qpos_addr] = position
@@ -1287,8 +1283,8 @@ class XLeRobotSimDriver:
             return
         import mujoco
 
-        # Zero both actuator targets and simulated base state so later arm/gripper
-        # settle steps do not integrate residual chassis motion.
+        # 同时清零 actuator target 和仿真底盘状态，避免后续机械臂/夹爪 settle 步骤
+        # 积分残余底盘运动。
         for lock_name in ("base_x_lock", "base_y_lock", "base_yaw_lock"):
             lock_id = mujoco.mj_name2id(
                 self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, lock_name
@@ -1444,7 +1440,7 @@ class XLeRobotSimDriver:
             indices = self.adapter.joint_to_actuators(name)
             if indices is None:
                 continue
-            # Pick the first actuator index that is within bounds.
+            # 选择第一个在范围内的 actuator 索引。
             valid = next((idx for idx in indices if idx < num_ctrl), None)
             joint_states[name] = (
                 float(self.data.ctrl[valid]) if valid is not None else 0.0
@@ -1567,8 +1563,8 @@ class XLeRobotSimDriver:
         body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, _ROBOT_BODY)
         xpos = self.data.xpos[body_id]
         xmat = self.data.xmat[body_id]
-        # Extract yaw from rotation matrix: atan2(xmat[3], xmat[0])
-        # xmat is 3x3 stored flat: [xx, xy, xz, yx, yy, yz, zx, zy, zz]
+        # 从旋转矩阵中提取 yaw：atan2(xmat[3], xmat[0])
+        # xmat 是按 flat 形式存储的 3x3：[xx, xy, xz, yx, yy, yz, zx, zy, zz]
         yaw = math.atan2(float(xmat[3]), float(xmat[0]))
         return {
             "x_cm": float(xpos[0]) * 100.0,
@@ -1663,8 +1659,8 @@ class XLeRobotSimDriver:
             return self.state
         if self.state in {"failed", "closed"}:
             return "offline" if self.state == "closed" else "error"
-        # Internal lifecycle states such as created and skill_completed are not
-        # transport states. They never imply a still-running physical action.
+        # created、skill_completed 等内部生命周期状态不是 transport 状态；
+        # 它们不表示物理动作仍在运行。
         return "idle"
 
     def _location_id(self) -> str | None:

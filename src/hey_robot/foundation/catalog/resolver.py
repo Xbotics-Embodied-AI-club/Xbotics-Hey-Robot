@@ -51,7 +51,7 @@ class ToolPolicyResolution:
 
 
 class ToolPolicyResolver:
-    """Resolve whether a runtime tool may be used in the current context."""
+    """判定运行时工具是否可在当前上下文中使用。"""
 
     def __init__(
         self, registry: ToolRegistryLike, *, policy: ToolPolicy | None = None

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 Vector Robotics
-# Modified for Xbotics Hey Robot.
+# 为 Xbotics Hey Robot 修改。
 from __future__ import annotations
 
 import asyncio
@@ -454,7 +454,7 @@ class PlaceSkill(BaseSkill):
 
 
 class DriverPrimitiveSkill(BaseSkill):
-    """Internal contract proxy for a primitive implemented by the robot driver."""
+    """机器人驱动实现的 primitive 在 Skill OS 内部的 contract 代理。"""
 
     def __init__(self, name: str, *, category: str, resources: tuple[str, ...]) -> None:
         self.spec = spec(

@@ -19,7 +19,7 @@ class OpenCVCameraConfig:
 
 
 class OpenCVCamera:
-    """OpenCV camera component that can be attached to any local robot body."""
+    """可挂接到任意本地机器人本体的 OpenCV 相机组件。"""
 
     def __init__(self, config: OpenCVCameraConfig) -> None:
         self.config = config

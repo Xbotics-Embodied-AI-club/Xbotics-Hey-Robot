@@ -1,1 +1,1 @@
-"""Layer 3: model services for foundation models."""
+"""第 3 层：基础模型的模型服务。"""

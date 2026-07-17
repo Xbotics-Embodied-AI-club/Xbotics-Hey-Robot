@@ -131,7 +131,7 @@ class ASRMessage:
 
 
 class DoubaoASRClient:
-    """Volcengine/Doubao WebSocket ASR client."""
+    """火山引擎／豆包 WebSocket ASR 客户端。"""
 
     def __init__(self, config: ASRConfig) -> None:
         self.config = config
@@ -231,7 +231,7 @@ class DoubaoASRClient:
 
 
 class SherpaONNXASRClient:
-    """Local sherpa-onnx offline transcription using transducer models."""
+    """使用 transducer 模型的本地 sherpa-onnx 离线转写客户端。"""
 
     def __init__(self, config: ASRConfig) -> None:
         self.config = config
@@ -304,11 +304,11 @@ class SherpaONNXASRClient:
 
 
 class OpenAIASRClient:
-    """Transcribe via an OpenAI-compatible /v1/audio/transcriptions endpoint.
+    """通过兼容 OpenAI 的 /v1/audio/transcriptions 端点执行转写。
 
-    Routes speech recognition to a locally deployed whisper served behind an
-    OpenAI-compatible API (e.g. the RDK S600 on-device whisper-medium) instead
-    of the cloud doubao service. Conforms to the same ASRClient protocol.
+    语音识别请求会路由到通过 OpenAI 兼容 API 提供服务的本地 Whisper（例如
+    RDK S600 设备端的 whisper-medium），而非云端豆包服务；它遵循相同的
+    `ASRClient` 协议。
     """
 
     def __init__(self, config: ASRConfig) -> None:

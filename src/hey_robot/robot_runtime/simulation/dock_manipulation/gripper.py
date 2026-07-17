@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 Vector Robotics
-# Modified for Xbotics Hey Robot: shared dock gripper kernel.
+# 为 Xbotics Hey Robot 修改：共享 dock 夹爪 kernel。
 from __future__ import annotations
 
 import numpy as np
@@ -18,7 +18,7 @@ SETTLE_STEPS = 400
 
 
 class WandGripperKernel:
-    """Weld-based gripper for XLeRobot right jaw (Jaw_R)."""
+    """基于 weld 约束的 XLeRobot 夹爪 kernel。"""
 
     def __init__(
         self,
@@ -88,7 +88,7 @@ class WandGripperKernel:
 
         data = self.session.data
         model = self.session.model
-        # Freeze arm joints (position + velocity) so only the jaw moves.
+        # 冻结机械臂关节（位置和速度），确保只有夹爪运动。
         arm_qpos_addresses = [
             int(model.jnt_qposadr[jid]) for jid in self.arm._joint_ids
         ]
@@ -99,7 +99,7 @@ class WandGripperKernel:
             alpha = (index + 1) / SETTLE_STEPS
             data.ctrl[self._actuator_id] = start + alpha * (target - start)
             self.session.clamp_base()
-            # Freeze arm in place — kp=50 is too weak to hold against gravity
+            # 将机械臂冻结在原位；kp=50 抵抗重力不够
             for adr, value in zip(arm_qpos_addresses, frozen_qpos, strict=True):
                 data.qpos[adr] = float(value)
             for adr in arm_dof_addresses:
@@ -125,7 +125,7 @@ class WandGripperKernel:
 
         model = self.session.model
         data = self.session.data
-        # Find the grip weld (body1=Fixed_Jaw_2 or gripper link, body2=target)
+        # 查找 grip weld（body1=Fixed_Jaw_2 或 gripper link，body2=target）
         grip_eq_id = -1
         dock_eq_id = -1
         for equality_id in range(model.neq):
@@ -143,11 +143,11 @@ class WandGripperKernel:
                 grip_eq_id = equality_id
         if grip_eq_id < 0:
             return
-        # Activate grip weld, deactivate dock weld
+        # 激活 grip weld，停用 dock weld
         data.eq_active[grip_eq_id] = 1
         if dock_eq_id >= 0:
             data.eq_active[dock_eq_id] = 0
-        # Compute relative transform for grip weld
+        # 计算 grip weld 的相对变换
         body1_id = int(model.eq_obj1id[grip_eq_id])
         body2_id = int(model.eq_obj2id[grip_eq_id])
         position1 = data.xpos[body1_id]

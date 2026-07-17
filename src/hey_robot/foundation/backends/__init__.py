@@ -1,1 +1,1 @@
-"""Foundation backend implementations."""
+"""基础模型后端实现。"""

@@ -355,7 +355,7 @@ class HumanFollowSkill(BaseSkill):
                 progress=getattr(ctx, "progress", None),
             )
 
-        # Local mode: use shared HumanFollowRunner with camera frames from bus.
+        # 本地模式：使用共享 HumanFollowRunner，并从 bus 获取相机帧。
         if ctx.get_camera_frame is None:
             return SkillResult(
                 success=False,
@@ -458,7 +458,7 @@ class HumanFollowSkill(BaseSkill):
 
 
 def _vln_payload(ctx: Any, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Build a stable VLN policy payload from explicit args and current observation."""
+    """根据显式参数和当前观测构造稳定的 VLN policy payload。"""
     payload = {
         key: value
         for key, value in dict(arguments).items()

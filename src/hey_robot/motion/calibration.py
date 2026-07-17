@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 Vector Robotics
-# Modified for Xbotics Hey Robot.
+# 为 Xbotics Hey Robot 修改。
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,7 +10,7 @@ import yaml
 
 
 def load_transform(path: str | Path | None = None) -> np.ndarray:
-    """Load a homogeneous camera-to-base transform, or identity in simulation."""
+    """加载相机到机座的齐次变换；仿真中缺省返回单位矩阵。"""
     if path is None:
         return np.eye(4, dtype=np.float64)
     resolved = Path(path).expanduser()

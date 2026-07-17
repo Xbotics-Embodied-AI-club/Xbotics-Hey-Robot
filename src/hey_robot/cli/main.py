@@ -1,4 +1,4 @@
-"""Unified Hey Robot CLI entry point."""
+"""统一的 Hey Robot CLI 入口。"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Cognition public surface."""
+"""认知层的公开接口。"""
 
 from hey_robot.cognition.autonomous.supervisor import AutonomySupervisorService
 from hey_robot.cognition.policy.task_evaluator import TaskEvaluator

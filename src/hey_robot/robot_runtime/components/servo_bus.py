@@ -50,7 +50,7 @@ class _PacketHandlerProtocol(Protocol):
 
 
 class ServoBus:
-    """Thread-safe Feetech STS servo bus shared by SO101 and LeKiwi components."""
+    """由 SO101 和 LeKiwi 组件共享的线程安全 Feetech STS 舵机总线。"""
 
     def __init__(self, port: str, baudrate: int) -> None:
         self.port = port

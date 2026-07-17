@@ -1,4 +1,4 @@
-"""Route MuJoCo native warnings into the project's diagnostic log tree."""
+"""把 MuJoCo 原生 warning 路由到项目诊断日志目录。"""
 
 from __future__ import annotations
 
@@ -13,10 +13,10 @@ _callback: Any = None
 def configure_mujoco_warning_logging(
     deployment_id: str, *, mujoco_module: Any | None = None
 ) -> Path:
-    """Install MuJoCo's global warning callback for one deployment.
+    """为单个 deployment 安装 MuJoCo 全局 warning 回调。
 
-    Without this callback MuJoCo writes ``MUJOCO_LOG.TXT`` to the process
-    working directory. Diagnostic text belongs in ``logs/``, never ``runtime/``.
+    如果没有这个回调，MuJoCo 会把 ``MUJOCO_LOG.TXT`` 写到进程工作目录。
+    诊断文本应进入 ``logs/``，而不是 ``runtime/``。
     """
     global _callback
     path = Path("logs") / deployment_id / "mujoco.log"

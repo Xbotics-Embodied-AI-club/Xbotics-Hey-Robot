@@ -43,7 +43,7 @@ def planner_output_to_primitive(
 
     pixel = planner.get("pixel_goal")
     if isinstance(pixel, (list, tuple)) and len(pixel) >= 2:
-        # InternNav stores output_pixel as [row, col] / [y, x].
+        # InternNav 将 output_pixel 存为 [row, col] / [y, x]。
         x = float(pixel[1])
         center_x = image_width / 2.0
         half_band = image_width * center_band_ratio / 2.0

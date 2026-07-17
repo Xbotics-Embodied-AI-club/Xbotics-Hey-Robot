@@ -19,7 +19,7 @@ class SafetyDecision:
 
 
 class RobotSafetySupervisor:
-    """Deterministic runtime safety gate before actions reach a driver."""
+    """动作到达驱动前的确定性运行时安全闸门。"""
 
     def evaluate_action(
         self,

@@ -1,4 +1,4 @@
-"""Best-effort append-only trace for autonomous control decisions."""
+"""自主控制决策的尽力而为、仅追加追踪记录。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 
 
 class RunTraceWriter:
-    """Trace failures never change authoritative goal or action state."""
+    """追踪失败绝不改变权威 Goal 或动作状态。"""
 
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)

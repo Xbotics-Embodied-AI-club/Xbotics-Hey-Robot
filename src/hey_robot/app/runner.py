@@ -49,7 +49,7 @@ class DeploymentInspection(TypedDict):
 
 
 class DeploymentRunner:
-    """Run a complete local deployment in one asyncio process."""
+    """在一个 asyncio 进程中运行完整的本地部署。"""
 
     def __init__(
         self, config: DeploymentConfig, *, episode_dir: str | Path | None = None

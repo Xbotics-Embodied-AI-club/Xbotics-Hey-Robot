@@ -10,7 +10,7 @@ from hey_robot.robot_runtime.so101.config import SO101HardwareConfig
 
 
 class SO101Client:
-    """Native client for a standalone SO101 arm."""
+    """独立 SO101 机械臂的原生客户端。"""
 
     def __init__(self, config: SO101HardwareConfig) -> None:
         self.config = config

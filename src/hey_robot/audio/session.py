@@ -40,7 +40,7 @@ class VoiceRouteDecision:
 
 
 class VoiceSessionRouter:
-    """Routes ASR text through wake-word activation and a short voice session."""
+    """通过唤醒词激活和短语音会话路由 ASR 文本。"""
 
     def __init__(
         self,

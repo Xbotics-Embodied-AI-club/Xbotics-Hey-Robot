@@ -20,8 +20,8 @@ from typing import Any
 
 from hey_robot.logging.styles import COLORS, FORMATS
 
-# On Windows, sys.stdout defaults to the system locale encoding (e.g. cp936).
-# Force UTF-8 so that Chinese log messages survive output capture (uv run, CI, etc.).
+# Windows 上 sys.stdout 默认使用系统区域编码（例如 cp936）。
+# 强制使用 UTF-8，确保中文日志在输出捕获中不乱码（uv run、CI 等）。
 _stream = sys.stdout
 if hasattr(_stream, "buffer"):
     try:
@@ -318,12 +318,12 @@ class HeyRobotLogger:
 
         self.timer_lock = threading.Lock()
 
-        # File handler (plain text)
+        # 文件 handler（纯文本）
         self._file_handler: RotatingFileHandler | None = None
         if file_path:
             self._add_file_handler(file_path, level)
 
-        # JSON handlers
+        # JSON 处理器
         self._json_file_handler: RotatingFileHandler | None = None
         self._json_stdout_handler: logging.StreamHandler | None = None
         if json_file_path:

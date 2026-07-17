@@ -1,4 +1,4 @@
-"""Foundation service clients."""
+"""基础模型服务客户端。"""
 
 from hey_robot.foundation.clients.manager import ModelServiceRegistry
 from hey_robot.foundation.clients.mock import MockModelServiceClient

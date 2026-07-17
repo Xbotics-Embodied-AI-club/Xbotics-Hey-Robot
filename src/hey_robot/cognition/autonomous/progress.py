@@ -1,4 +1,4 @@
-"""Pure, conservative progress assessment for sustained autonomous goals."""
+"""用于持续自主 Goal 的纯函数、保守进度评估。"""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def assess_progress(
     evidence: list[dict[str, Any]],
     repeat_limit: int = 2,
 ) -> ProgressAssessment:
-    """Assess durable facts without making a scheduling or retry decision."""
+    """评估持久化事实，但不作调度或重试决定。"""
     if goal_status == "blocked":
         return ProgressAssessment("blocked", "robot execution state is blocked")
     if goal_status in {"waiting", "waiting_condition"}:
@@ -57,9 +57,8 @@ def assess_progress(
 def _action_signature(action: dict[str, Any]) -> str:
     raw_payload = action.get("payload")
     payload: dict[str, Any] = raw_payload if isinstance(raw_payload, dict) else {}
-    # An inspect_scene question is prompt context, not a distinct physical
-    # operation.  Treat reworded scene observations as the same action so an
-    # automatic re-observe cannot evade the no-progress circuit breaker.
+    # inspect_scene 的 question 属于 prompt 上下文，不是不同的物理操作。
+    # 将改写后的场景观测视为同一动作，避免自动重新观测绕过无进展断路器。
     arguments = payload.get("arguments")
     if (
         payload.get("intent_kind") == "observation"

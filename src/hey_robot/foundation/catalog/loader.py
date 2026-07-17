@@ -23,7 +23,7 @@ class RobotSkillRegistryLike(Protocol):
 
 
 class SkillSurfaceLoader:
-    """Build the current agent tool and skill surface from runtime components."""
+    """根据运行时组件构建当前 Agent 的工具和 Skill 接口。"""
 
     def __init__(
         self,

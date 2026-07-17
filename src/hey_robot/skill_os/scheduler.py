@@ -51,7 +51,7 @@ class SkillRun:
 
 
 class SkillScheduler:
-    """Owns active runs and deterministic resource-conflict decisions."""
+    """拥有活动运行实例，并作出确定性的资源冲突决策。"""
 
     def __init__(self, contracts: SkillContractRuntime) -> None:
         self.contracts = contracts

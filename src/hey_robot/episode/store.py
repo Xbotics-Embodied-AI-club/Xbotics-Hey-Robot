@@ -41,11 +41,10 @@ class _Meta:
 
 
 class JsonlEpisodeStore:
-    """Append-only episode store with sidecar metadata.
+    """带旁路元数据的仅追加 Episode 存储。
 
-    This mirrors the deployable shape used by gateway systems: a canonical key
-    owns durable history and aliases can be resolved without coupling callers to
-    storage paths.
+    它采用 Gateway 系统使用的可部署形态：规范键拥有持久历史，调用方无需依赖
+    存储路径即可解析别名。
     """
 
     def __init__(self, root: str | Path) -> None:

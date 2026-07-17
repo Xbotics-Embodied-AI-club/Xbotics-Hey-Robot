@@ -1,4 +1,4 @@
-"""Goal contracts are immutable and deliberately contain no execution plan."""
+"""Goal 契约不可变，并且有意不包含执行计划。"""
 
 from __future__ import annotations
 

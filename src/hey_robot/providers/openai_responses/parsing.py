@@ -1,7 +1,7 @@
-"""Parse OpenAI Responses API response objects.
+"""解析 OpenAI Responses API 的响应对象。
 
-Ported from nanobot's provider layer and adjusted to hey-robot's native
-ReasoningResponse / ReasoningToolCall types.
+代码移植自 nanobot 的 provider 层，并按 hey-robot 原生的
+ReasoningResponse / ReasoningToolCall 类型调整。
 """
 
 from __future__ import annotations
@@ -29,12 +29,12 @@ FINISH_REASON_MAP = {
 
 
 def map_finish_reason(status: str | None) -> str:
-    """Map a Responses API status string to a Chat-Completions-style finish_reason."""
+    """把 Responses API 状态字符串映射为 Chat Completions 风格的 finish_reason。"""
     return FINISH_REASON_MAP.get(status or "completed", "stop")
 
 
 def parse_response_output(response: Any) -> ReasoningResponse:
-    """Parse an SDK ``Response`` object into a ReasoningResponse."""
+    """把 SDK ``Response`` 对象解析为 ReasoningResponse。"""
     if not isinstance(response, dict):
         dump = getattr(response, "model_dump", None)
         response = dump() if callable(dump) else vars(response)

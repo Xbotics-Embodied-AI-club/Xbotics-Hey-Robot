@@ -25,7 +25,7 @@ from hey_robot.robot_runtime.observations import DriverObservation, ObservationA
 
 
 class MockRobotDriver:
-    """Deterministic xlerobot simulator for system validation without hardware."""
+    """用于无硬件系统验证的确定性 XLeRobot 模拟器。"""
 
     _JOINT_LIMITS: ClassVar[dict[str, tuple[float, float]]] = {
         "shoulder_pan": (-180.0, 180.0),

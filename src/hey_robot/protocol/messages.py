@@ -1,8 +1,7 @@
-"""Canonical message types for the deployable Hey Robot runtime.
+"""可部署 Hey Robot 运行时的规范消息类型。
 
-These dataclasses are the boundary between independently deployed services.
-Channels, agents, policies, and robot drivers exchange these shapes instead of
-ad hoc dictionaries.
+这些数据类是可独立部署服务之间的边界。渠道、Agent、策略和机器人驱动交换
+这些结构，而不是临时拼接的字典。
 """
 
 from __future__ import annotations
@@ -117,7 +116,7 @@ class ConversationResult:
 
 @dataclass(frozen=True)
 class ToolOutcome:
-    """Trusted structured result returned to a conversation tool loop."""
+    """返回给对话工具循环的可信结构化结果。"""
 
     status: Literal["completed", "failed", "waiting", "accepted"]
     user_summary: str | None = None
@@ -129,7 +128,7 @@ class ToolOutcome:
 
 @dataclass(frozen=True)
 class ShortOperationCommand:
-    """Conversation request for one bounded operation, admitted by Supervisor."""
+    """一项受限操作的对话请求，由 Supervisor 准入。"""
 
     envelope: Envelope
     operation_id: str
@@ -473,7 +472,7 @@ def to_payload(message: DataclassInstance) -> dict[str, Any]:
 
 
 def from_payload[T](cls: type[T], payload: dict[str, Any]) -> T:
-    """Decode a protocol message without accepting unknown or malformed fields."""
+    """解码协议消息，拒绝未知或格式错误的字段。"""
     if not isinstance(payload, dict):
         raise TypeError(f"{cls.__name__} payload must be an object")
     known = {item.name for item in fields(cls)}  # type: ignore[arg-type]

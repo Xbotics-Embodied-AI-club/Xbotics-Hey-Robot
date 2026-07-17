@@ -44,7 +44,7 @@ _JOINT_TO_ACTUATORS: dict[str, tuple[int, int]] = {
     "gripper": (14, 8),
 }
 
-# Canonical joint order for VLA observation/action vectors.
+# VLA 观测/动作向量使用的标准关节顺序。
 _ARM_JOINT_ORDER: tuple[str, ...] = (
     "shoulder_pan",
     "shoulder_lift",
@@ -54,9 +54,9 @@ _ARM_JOINT_ORDER: tuple[str, ...] = (
     "gripper",
 )
 
-# Per-side actuator index lists derived from xlerobot.xml actuator order.
-# Right arm: Rotation_R(3), Pitch_R(4), Elbow_R(5), Wrist_Pitch_R(6), Wrist_Roll_R(7), Jaw_R(8)
-# Left arm:  Rotation_L(9), Pitch_L(10), Elbow_L(11), Wrist_Pitch_L(12), Wrist_Roll_L(13), Jaw_L(14)
+# 每侧 actuator 索引列表来自 xlerobot.xml 的 actuator 顺序。
+# 右臂：Rotation_R(3), Pitch_R(4), Elbow_R(5), Wrist_Pitch_R(6), Wrist_Roll_R(7), Jaw_R(8)
+# 左臂：Rotation_L(9), Pitch_L(10), Elbow_L(11), Wrist_Pitch_L(12), Wrist_Roll_L(13), Jaw_L(14)
 _ARM_ACTUATOR_INDICES: dict[str, list[int]] = {
     "right": [3, 4, 5, 6, 7, 8],
     "left": [9, 10, 11, 12, 13, 14],
@@ -130,11 +130,10 @@ class _XLeRobotSimBackend(ClassicPrimitiveBackend[SimSkillCommand]):
         return 0.0
 
     def arm_actuator_indices(self, arm: str) -> list[int]:
-        """Return the 6 actuator indices for a given arm side.
+        """返回指定手臂侧的 6 个 actuator 索引。
 
-        If the embodiment defines a custom joint_actuator_pair mapping,
-        derive the indices from it. Otherwise use the default mapping
-        from xlerobot.xml actuator order.
+        如果 embodiment 定义了自定义 joint_actuator_pair 映射，则从该映射推导；
+        否则使用 xlerobot.xml actuator 顺序中的默认映射。
         """
         arm_key = arm.strip().lower()
         if arm_key not in {"left", "right"}:
@@ -150,7 +149,7 @@ class _XLeRobotSimBackend(ClassicPrimitiveBackend[SimSkillCommand]):
         return list(_ARM_ACTUATOR_INDICES[arm_key])
 
     def arm_joint_order(self) -> tuple[str, ...]:
-        """Return the canonical joint name order for VLA vectors."""
+        """返回 VLA 向量使用的标准关节名称顺序。"""
         return _ARM_JOINT_ORDER
 
     def on_stop_motion(
@@ -176,7 +175,7 @@ class _XLeRobotSimBackend(ClassicPrimitiveBackend[SimSkillCommand]):
                 message=f"base moved {direction} {abs(distance) * 100:.1f}cm",
             )
         sign = -1.0 if direction == "backward" else 1.0
-        # vx鈫抴orld Y, vy鈫抴orld X. Table is on X, so use vy for forward.
+        # vx 对应 world Y，vy 对应 world X。桌子在 X 方向，因此前进使用 vy。
         return SimSkillCommand(
             skill_name=skill_name,
             vy=sign * self.linear_speed,
@@ -291,7 +290,7 @@ class _XLeRobotSimBackend(ClassicPrimitiveBackend[SimSkillCommand]):
         )
 
     def arm_rest_positions(self) -> dict[int, float]:
-        """Return the default rest (home) positions for all arm actuators."""
+        """返回所有机械臂 actuator 的默认静止位（home 位）。"""
         targets: dict[int, float] = {}
         home = self._named_pose("home")
         if home is None:

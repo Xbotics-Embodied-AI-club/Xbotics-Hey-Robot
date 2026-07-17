@@ -33,11 +33,11 @@ logger = logging.getLogger("hey_robot.providers.openai_compat")
 
 
 class OpenAICompatReasoningProvider(BaseReasoningProvider):
-    """OpenAI-compatible model provider with nanobot-style protocol handling.
+    """兼容 OpenAI 接口的模型 provider，并采用 nanobot 风格的协议处理。
 
-    Chat Completions is used for generic OpenAI-compatible gateways. Direct
-    OpenAI GPT-5/o-series and explicit reasoning-effort requests use the
-    Responses API so tool calls are emitted through the provider protocol.
+    通用 OpenAI 兼容网关使用 Chat Completions。直连 OpenAI GPT-5/o 系列，
+    或显式请求 reasoning_effort 时，使用 Responses API，让工具调用按
+    provider 协议输出。
     """
 
     def __init__(
@@ -414,11 +414,11 @@ def _to_openai_tool(tool: dict[str, Any], *, strict: bool = False) -> dict[str, 
 
 
 def _to_strict_tool_schema(schema: Any) -> dict[str, Any]:
-    """Return a DeepSeek/OpenAI strict-compatible schema copy.
+    """返回兼容 DeepSeek/OpenAI strict 模式的 schema 副本。
 
-    DeepSeek strict mode requires object schemas to set all properties as
-    required and additionalProperties=false. We do this only at provider
-    serialization time so local tool validation/defaults stay unchanged.
+    DeepSeek strict 模式要求 object schema 把所有属性列为 required，并设置
+    additionalProperties=false。这里只在 provider 序列化阶段处理，避免影响
+    本地工具校验和默认值。
     """
     if not isinstance(schema, dict):
         return {

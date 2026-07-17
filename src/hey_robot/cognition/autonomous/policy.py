@@ -1,4 +1,4 @@
-"""Pure admission and budget decisions for the autonomy supervisor."""
+"""自治监督器使用的纯准入判断和预算判断。"""
 
 from __future__ import annotations
 

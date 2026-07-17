@@ -15,10 +15,9 @@ class ToolPolicyDecision:
 
 @dataclass(frozen=True)
 class ToolPolicy:
-    """Declarative guardrails for runtime tools.
+    """运行时工具的声明式护栏。
 
-    The policy is intentionally small and explicit. It governs tool use before
-    lower-level permission checks and safety hooks run.
+    这层策略刻意保持小而明确，在更底层的权限检查和安全 hook 运行前决定工具是否可用。
     """
 
     mode: str = "agent"

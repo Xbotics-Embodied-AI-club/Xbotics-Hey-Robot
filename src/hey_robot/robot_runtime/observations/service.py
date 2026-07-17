@@ -18,7 +18,7 @@ class ObservationDriver(Protocol):
 
 @dataclass(frozen=True)
 class PerceptionSnapshot:
-    """Current perception state exposed by the robot runtime."""
+    """机器人运行时暴露的当前感知状态。"""
 
     robot_id: str
     observation: RobotObservation
@@ -59,12 +59,10 @@ class PerceptionSnapshot:
 
 
 class PerceptionService:
-    """Single runtime entry point for current robot perception.
+    """获取当前机器人感知的单一运行时入口。
 
-    Drivers acquire raw observations from hardware or simulation. This service
-    materializes those observations, keeps the latest runtime snapshot, and
-    gives agents, policies, VLA, VLN, and future consumers one stable interface
-    for the current world state.
+    驱动从硬件或仿真获取原始观测。本服务将观测实体化、保留最新运行时快照，
+    并为 Agent、策略、VLA、VLN 和未来的消费者提供当前世界状态的稳定接口。
     """
 
     def __init__(

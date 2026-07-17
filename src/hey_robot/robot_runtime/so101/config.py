@@ -36,7 +36,7 @@ class SO101ArmConfig:
     )
     rest_position: dict[str, float] = field(
         default_factory=lambda: {
-            # Low forward-facing center pose.
+            # 低位、朝前的中心姿态。
             "base": 0.0,
             "shoulder": 10.0,
             "elbow": 140.0,

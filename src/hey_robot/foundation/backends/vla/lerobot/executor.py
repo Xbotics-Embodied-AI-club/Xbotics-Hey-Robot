@@ -1,7 +1,7 @@
-"""LeRobot VLA executor — runs a single-arm manipulation policy.
+"""LeRobot VLA 执行器，用于运行单臂操作 policy。
 
-Current form: bundles inference + control loop + hardware access.
-Target form (VLA Step 2): stateless inference only, control loop moves to Skill OS.
+当前形态：推理、控制循环和硬件访问打包在一起。
+目标形态（VLA Step 2）：这里只保留无状态推理，控制循环移动到 Skill OS。
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from hey_robot.foundation.clients.models import PolicyStepResult
 
 DEFAULT_ARM_CALIBRATION_DIR = "~/.cache/hey_robot/calibrations/robots/so_follower/"
 
-# ── Shared policy utilities ─────────────────────────────────────────────────
+# ── 共享 policy 工具 ────────────────────────────────────────────────────────
 
 _RAD_TO_DEG = 180.0 / 3.141592653589793
 _DEG_TO_RAD = 3.141592653589793 / 180.0
@@ -40,13 +40,13 @@ _CAMERA_KEY_MAP: dict[str, str] = {
     "left_wrist": "observation.images.handeye",
 }
 
-# Camera names that should follow whatever wrist key the policy declares.
+# 这些相机名应跟随 policy 声明的 wrist key。
 _WRIST_CAMERA_NAMES = {"handeye", "right_wrist", "left_wrist", "wrist"}
 
 
-_DEFAULT_IMAGE_SIZE = (256, 256)  # smolvla / pi0 standard input
+_DEFAULT_IMAGE_SIZE = (256, 256)  # smolvla / pi0 标准输入尺寸
 
-# Joint order used by SO101 arm; policies may use a subset.
+# SO101 机械臂使用的关节顺序；policy 可以只使用其中一部分。
 _SO101_JOINT_NAMES = (
     "shoulder_pan",
     "shoulder_lift",
@@ -71,7 +71,7 @@ class _NormalizationStats:
 def _extract_input_stats(
     state_dict: dict[str, torch.Tensor],
 ) -> dict[str, _NormalizationStats]:
-    """Extract per-feature input normalization stats from a LeRobot policy checkpoint."""
+    """从 LeRobot policy checkpoint 中提取各输入特征的归一化统计量。"""
     stats: dict[str, _NormalizationStats] = {}
     for key, tensor in state_dict.items():
         if not key.startswith("normalize_inputs.buffer_"):
@@ -94,7 +94,7 @@ def _extract_input_stats(
 
 
 class LeRobotVLAExecutor:
-    """Runs a LeRobot single-arm VLA as a model service."""
+    """把 LeRobot 单臂 VLA 作为模型服务运行。"""
 
     def __init__(self, service_id: str, spec: ModelServiceSpec) -> None:
         self.service_id = service_id
@@ -365,12 +365,12 @@ def _infer_arm_side(arm_port: Any) -> str | None:
 
 
 class LeRobotVLAPolicyExecutor:
-    """Stateless VLA inference executor — one image in, one action out.
+    """无状态 VLA 推理执行器：输入一帧图像，输出一个动作。
 
-    Supports:
-      - mock mode (returns fake joint actions) for testing
-      - direct ACT model loading/inference (no external HTTP server needed)
-      - legacy HTTP endpoint fallback (action_chunk_endpoint)
+    支持：
+      - mock 模式：返回假的关节动作，用于测试
+      - 直接加载和推理 ACT 模型：不需要外部 HTTP server
+      - 旧版 HTTP endpoint fallback：action_chunk_endpoint
     """
 
     def __init__(self, service_id: str, spec: ModelServiceSpec) -> None:
@@ -436,7 +436,7 @@ class LeRobotVLAPolicyExecutor:
     def cancel(self) -> None:
         pass
 
-    # -- mock mode ----------------------------------------------------------
+    # -- mock 模式 ----------------------------------------------------------
 
     def _mock_mode(self) -> bool:
         settings = self.spec.settings
@@ -458,10 +458,9 @@ class LeRobotVLAPolicyExecutor:
 
     @staticmethod
     def _mock_inference(payload: dict[str, Any]) -> dict[str, Any]:
-        """Return fake VLA inference: a reach-then-grasp action sequence.
+        """返回假的 VLA 推理结果：先伸手再抓取的动作序列。
 
-        The control loop in Skill OS drives multi-step execution.
-        Each single call returns one set of joint targets.
+        多步执行由 Skill OS 中的控制循环驱动；每次调用只返回一组关节目标。
         """
         arguments = dict(payload.get("arguments", {}) or {})
         task = str(
@@ -473,10 +472,10 @@ class LeRobotVLAPolicyExecutor:
             or 0
         )
 
-        # Simulated 3-phase action: reach → grasp → lift
+        # 模拟三阶段动作：伸手 → 抓取 → 抬升
         if "pick" in task or "grasp" in task or "拿" in task or "抓" in task:
             if step == 0:
-                # Reach toward object
+                # 伸向物体
                 return _vla_result(
                     joint_angles={
                         "shoulder_lift": 0.3,
@@ -485,11 +484,11 @@ class LeRobotVLAPolicyExecutor:
                         "wrist_flex": 0.2,
                         "wrist_roll": 0.0,
                     },
-                    gripper_action=1.0,  # open
+                    gripper_action=1.0,  # 打开
                     task_done=False,
                 )
             if step == 1:
-                # Grasp
+                # 抓取
                 return _vla_result(
                     joint_angles={
                         "shoulder_lift": 0.35,
@@ -498,10 +497,10 @@ class LeRobotVLAPolicyExecutor:
                         "wrist_flex": 0.2,
                         "wrist_roll": 0.0,
                     },
-                    gripper_action=0.2,  # close
+                    gripper_action=0.2,  # 闭合
                     task_done=False,
                 )
-            # Lift
+            # 抬升
             return _vla_result(
                 joint_angles={
                     "shoulder_lift": 0.1,
@@ -672,15 +671,13 @@ class LeRobotVLAPolicyExecutor:
             }
         return _action_chunk_policy_result(decoded, observation=observation)
 
-    # -- direct LeRobot policy inference --------------------------------------
+    # -- 直接 LeRobot policy 推理 -------------------------------------------
 
     def _load_policy(self, model_path: str) -> None:
-        """Lazy-load any LeRobot policy and extract action normalization stats.
+        """懒加载任意 LeRobot policy，并提取动作归一化统计量。
 
-        All LeRobot policies output normalized actions from
-        ``predict_action_chunk`` — we always denormalize manually.
-        Stats are extracted from ``normalize_inputs`` buffers (old format)
-        or from the preprocessor safetensors file (new format).
+        LeRobot policy 的 ``predict_action_chunk`` 输出都是归一化动作，这里统一手动反归一化。
+        统计量来自 ``normalize_inputs`` buffer（旧格式），或 preprocessor safetensors 文件（新格式）。
         """
         if self._policy is not None:
             return
@@ -697,7 +694,7 @@ class LeRobotVLAPolicyExecutor:
         )
         self._policy_type = policy_type
 
-        # Resolve image size: pi05 declares image_resolution, others use settings or input_features.
+        # 解析图像尺寸：pi05 声明 image_resolution，其他 policy 使用 settings 或 input_features。
         if (
             isinstance(config.get("image_resolution"), list)
             and len(config["image_resolution"]) == 2
@@ -720,10 +717,9 @@ class LeRobotVLAPolicyExecutor:
                 if sizes:
                     self._image_size = sizes[0]
 
-        # Extract action stats before loading policy weights (may need
-        # separate safetensors files depending on format).
+        # 加载 policy 权重前先提取 action 统计量；不同格式可能需要单独的 safetensors 文件。
         self._extract_action_stats(model_dir, config, device)
-        # Pi05 needs state stats for the discretised-text tokenisation pipeline.
+        # Pi05 的离散文本 tokenize 流水线需要 state 统计量。
         if policy_type == "pi05":
             self._extract_state_stats(model_dir, device)
 
@@ -732,22 +728,22 @@ class LeRobotVLAPolicyExecutor:
         self._policy.to(device)
         self._policy.eval()
 
-        # Build dynamic camera key map from policy input features.
+        # 根据 policy 输入特征构建动态相机 key 映射。
         self._build_camera_key_map(config)
 
     def _extract_action_stats(
         self, model_dir: Path, config: dict[str, Any], device: str
     ) -> None:
-        """Extract action mean/std for denormalization.
+        """提取用于反归一化的 action mean/std。
 
-        Tries the new-format preprocessor safetensors first (smolvla, pi0
-        etc.), then falls back to old-format normalize_inputs buffers.
+        优先尝试新格式 preprocessor safetensors（smolvla、pi0 等），再回退到旧格式
+        normalize_inputs buffer。
         """
         from safetensors.torch import load_file as load_safetensors
 
         logger = __import__("logging").getLogger(__name__)
 
-        # New format: preprocessor safetensors in model directory.
+        # 新格式：模型目录里的 preprocessor safetensors。
         preprocessor_stats: dict[str, torch.Tensor] | None = None
         for fname in sorted(
             model_dir.glob(
@@ -771,7 +767,7 @@ class LeRobotVLAPolicyExecutor:
             )
             return
 
-        # Old format: normalize_inputs buffers in model.safetensors.
+        # 旧格式：model.safetensors 里的 normalize_inputs buffer。
         model_file = model_dir / "model.safetensors"
         if model_file.exists():
             try:
@@ -789,13 +785,13 @@ class LeRobotVLAPolicyExecutor:
             except Exception as exc:
                 logger.debug(f"Failed to extract normalize_inputs stats: {exc}")
 
-        # Fallback: identity (no denormalization).
+        # 回退：单位变换（不做反归一化）。
         logger.debug(f"No action stats found for {config.get('type')}, using identity")
         self._action_mean = torch.zeros(6, device=device)
         self._action_std = torch.ones(6, device=device)
 
     def _extract_state_stats(self, model_dir: Path, device: str) -> None:
-        """Extract observation.state normalisation stats from preprocessor safetensors."""
+        """从 preprocessor safetensors 中提取 observation.state 的归一化统计量。"""
         from safetensors.torch import load_file as load_safetensors
 
         logger = __import__("logging").getLogger(__name__)
@@ -824,11 +820,11 @@ class LeRobotVLAPolicyExecutor:
         self._state_std = torch.ones(6, device=device)
 
     def _build_camera_key_map(self, config: dict[str, Any]) -> None:
-        """Override default camera key mappings based on policy config input features.
+        """根据 policy config 的输入特征覆盖默认相机 key 映射。
 
-        When a policy declares e.g. ``observation.images.wrist`` instead of the
-        default ``observation.images.handeye``, all wrist-like camera names
-        (handeye, right_wrist, left_wrist, wrist) are remapped to that key.
+        例如 policy 声明 ``observation.images.wrist`` 而不是默认
+        ``observation.images.handeye`` 时，所有 wrist 类相机名（handeye、
+        right_wrist、left_wrist、wrist）都会重映射到该 key。
         """
         input_features = config.get("input_features")
         if not isinstance(input_features, dict):
@@ -940,10 +936,10 @@ class LeRobotVLAPolicyExecutor:
     def _preprocess_observation(
         self, observation: dict[str, Any], payload: dict[str, Any]
     ) -> dict[str, Any]:
-        """Convert observation dict into a LeRobot policy batch (no manual normalization).
+        """把 observation 字典转换为 LeRobot policy batch，不做手动归一化。
 
-        Policy-internal ``normalize_inputs`` handles mean/std scaling, so this method
-        only converts images to tensors (BCHW, [0,1]) and state to degree tensors.
+        policy 内部的 ``normalize_inputs`` 会处理 mean/std 缩放，因此这里只把图像转换为
+        tensor（BCHW，[0,1]），并把 state 转为角度 tensor。
         """
         device = str(self.spec.settings.get("policy_device") or "cuda")
         w, h = self._image_size
@@ -985,7 +981,7 @@ class LeRobotVLAPolicyExecutor:
                 [[float(state)]], dtype=torch.float32, device=device
             )
 
-        # Language-conditioned policies (smolvla, pi0, pi0.5) need a task prompt.
+        # 语言条件 policy（smolvla、pi0、pi0.5）需要 task prompt。
         task = (
             payload.get("task")
             or payload.get("task_prompt")
@@ -994,17 +990,17 @@ class LeRobotVLAPolicyExecutor:
         )
         batch["task"] = [str(task)]
 
-        # Tokenize task for policies that expect language tokens directly.
+        # 为直接接收语言 token 的 policy 对 task 做 tokenize。
         self._tokenize_task(batch, device)
 
         return batch
 
     def _tokenize_task(self, batch: dict[str, Any], device: str) -> None:
-        """Tokenize the task prompt for language-conditioned policies.
+        """为语言条件 policy 对任务 prompt 做 tokenize。
 
-        Supports two paths:
-        - smolvla: internal vlm_with_expert.processor.tokenizer
-        - pi05: PaliGemma tokenizer with state discretisation embedded in prompt
+        支持两条路径：
+        - smolvla：内部 vlm_with_expert.processor.tokenizer
+        - pi05：PaliGemma tokenizer，并把离散化 state 嵌入 prompt
         """
         if self._policy is None:
             return
@@ -1037,14 +1033,14 @@ class LeRobotVLAPolicyExecutor:
         )
 
     def _tokenize_pi05_task(self, batch: dict[str, Any], device: str) -> None:
-        """Pi05-specific tokenisation: discretise state, embed in text prompt.
+        """Pi05 专用 tokenize：离散化 state，并嵌入文本 prompt。
 
-        Pi05 embeds robot state into the language prompt rather than as a
-        separate ``observation.state`` tensor. The pipeline is:
-        1. Normalise state to [-1, 1] with dataset stats
-        2. Discretise into 256 bins (0–255)
-        3. Build prompt: "Task: {task}, State: {bins};\\nAction: "
-        4. Tokenise with PaliGemma tokenizer (max_length=200)
+        Pi05 把机器人 state 放进语言 prompt，而不是单独使用 ``observation.state`` tensor。
+        流程为：
+        1. 用数据集统计量把 state 归一化到 [-1, 1]
+        2. 离散化到 256 个 bin（0-255）
+        3. 构造 prompt："Task: {task}, State: {bins};\\nAction: "
+        4. 用 PaliGemma tokenizer 处理（max_length=200）
         """
         if self._tokenizer is None:
             from transformers import AutoTokenizer
@@ -1070,16 +1066,16 @@ class LeRobotVLAPolicyExecutor:
             state_str = ""
             if state is not None:
                 state_row = state[i].to(device, dtype=torch.float32)
-                # Normalise to [-1, 1]
+                # 归一化到 [-1, 1]
                 if self._state_mean is not None and self._state_std is not None:
                     s_mean = self._state_mean.to(device)
                     s_std = self._state_std.to(device).clamp(min=1e-8)
                     state_row = (state_row - s_mean) / s_std
                 state_row = state_row.clamp(-1, 1)
-                # Discretise into 256 bins
+                # 离散化到 256 个 bin
                 bins = np.linspace(-1, 1, 257)[:-1]
                 discretised = np.digitize(state_row.cpu().numpy(), bins=bins) - 1
-                # Pad to max_state_dim (32) with zeros
+                # 用 0 填充到 max_state_dim（32）
                 max_dim = 32
                 padded = np.zeros(max_dim, dtype=np.int64)
                 padded[: len(discretised)] = discretised[:max_dim]
@@ -1099,7 +1095,7 @@ class LeRobotVLAPolicyExecutor:
         )
 
     def _run_policy_inference(self, batch: dict[str, Any]) -> dict[str, Any]:
-        """Run a generic LeRobot policy and convert output to joint/gripper dicts."""
+        """运行通用 LeRobot policy，并把输出转换为关节/夹爪字典。"""
         assert self._policy is not None, "Policy not loaded"
         assert self._action_mean is not None, "Action stats not loaded"
         assert self._action_std is not None, "Action stats not loaded"
@@ -1109,7 +1105,7 @@ class LeRobotVLAPolicyExecutor:
             if action_chunk.ndim == 3:
                 action_chunk = action_chunk.squeeze(0)
 
-        # All LeRobot policies output normalized actions — denormalize.
+        # 所有 LeRobot policy 都输出归一化动作；这里执行反归一化。
         num_actions = action_chunk.shape[-1]
         action_mean = self._action_mean[:num_actions]
         action_std = self._action_std[:num_actions].clamp(min=1e-8)

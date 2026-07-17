@@ -346,7 +346,7 @@ class AutonomySupervisorService:
             self.store.fail_goal(goal.goal_id, "DELIBERATION_DISPATCH_INTERRUPTED")
 
     def _latest_skill_result_for_goal(self, goal_id: str) -> SkillResult | None:
-        """Return the most recent terminal SkillResult for the goal, if any."""
+        """返回该目标最近一次终态 SkillResult；如果没有则返回 None。"""
         actions = self.store.actions_for_goal(goal_id)
         for action in reversed(actions):
             payload = action.get("payload") or {}
@@ -799,7 +799,7 @@ class AutonomySupervisorService:
         kind: str,
         observed_payload: dict[str, object],
     ) -> None:
-        """Wake once from a trusted event; never reuse a prior SkillIntent."""
+        """由可信事件唤醒一次；绝不复用之前的 SkillIntent。"""
         if goal["status"] != "waiting_condition":
             return
         condition = self.store.pending_wake_condition(
@@ -874,9 +874,9 @@ class AutonomySupervisorService:
             self._watchdog_tick()
 
     def _watchdog_tick(self) -> None:
-        """Check deadlines, heartbeat, and budget for all non-terminal goals.
+        """检查所有非终态目标的截止时间、心跳和预算。
 
-        Does NOT wake models, republish messages, or select recovery actions.
+        这里不唤醒模型、不重新发布消息，也不选择恢复动作。
         """
         now = time.time()
         for goal_id in self.store.expire_wake_conditions(now=now):
@@ -890,7 +890,7 @@ class AutonomySupervisorService:
                 continue
             seen_robots.add(robot_id)
 
-            # Check deliberation timeout
+            # 检查 deliberation 超时
             active_delib = goal.get("active_deliberation_id")
             if active_delib and status == "active":
                 latest = self._latest_status.get(robot_id)
@@ -917,7 +917,7 @@ class AutonomySupervisorService:
                         self.trace.write("watchdog.budget_exhausted", goal_id=goal_id)
                         continue
 
-            # Check skill wait timeout for WAITING goals
+            # 检查 WAITING 目标的 skill 等待超时
             if status == "waiting":
                 active_action = self.store.active_action_for_goal(goal_id)
                 if active_action is not None:
@@ -960,7 +960,7 @@ class AutonomySupervisorService:
                             details={"skill_id": active_action["skill_id"]},
                         )
 
-        # Check robot heartbeat for robots with active goals
+        # 检查有活动目标的机器人心跳
         for robot_id in seen_robots:
             status = self._latest_status.get(robot_id)
             if (

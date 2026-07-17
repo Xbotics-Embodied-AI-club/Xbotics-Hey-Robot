@@ -22,7 +22,7 @@ from hey_robot.robot_runtime.so101.config import hardware_config_from_settings
 
 
 class SO101Driver:
-    """Standalone SO101 arm driver for Hey Robot."""
+    """Hey Robot 使用的独立 SO101 机械臂驱动。"""
 
     def __init__(self, context: RobotDriverContext) -> None:
         self.context = context

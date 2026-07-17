@@ -1,4 +1,4 @@
-"""Deterministic all-of evaluator; it never reads model text or summaries."""
+"""确定性的 all-of 任务评估器；它不读取模型文本或摘要。"""
 
 from __future__ import annotations
 

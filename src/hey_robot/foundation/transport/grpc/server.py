@@ -247,7 +247,7 @@ def _dict_to_struct(value: dict[str, Any]) -> Struct:
 
 
 def _struct_to_dict(value: Struct) -> dict[str, Any]:
-    """Recursively convert a protobuf Struct into plain Python values."""
+    """递归地将 protobuf Struct 转换为普通 Python 值。"""
     if value is None:
         return {}
     return MessageToDict(value, preserving_proto_field_name=True)  # type: ignore[no-any-return]

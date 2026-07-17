@@ -1,7 +1,7 @@
-"""Context construction from DeliberationRequest.
+"""从 DeliberationRequest 构造模型上下文。
 
-No repair, no auto-cropping, no summarization.  Failure to build a valid
-context is a structured MODEL_REQUEST / CONTEXT_BUILD failure.
+这里不做修复、自动裁剪或摘要；如果无法构造有效上下文，会返回结构化的
+MODEL_REQUEST / CONTEXT_BUILD 失败。
 """
 
 from __future__ import annotations
@@ -35,9 +35,9 @@ def build_context(
     max_system_chars: int = 8000,
     max_evidence_items: int = 64,
 ) -> ContextBuildResult:
-    """Build the structured model context from a DeliberationRequest.
+    """从 DeliberationRequest 构造结构化模型上下文。
 
-    Returns ContextBuildResult with either messages or a failure.
+    返回的 ContextBuildResult 要么包含 messages，要么包含失败信息。
     """
     parts: dict[str, Any] = {
         "goal": {

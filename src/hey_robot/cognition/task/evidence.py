@@ -1,4 +1,4 @@
-"""Typed evidence projection.  Raw observations never prove object relations."""
+"""带类型的证据投影；原始观测绝不能证明物体关系。"""
 
 from __future__ import annotations
 

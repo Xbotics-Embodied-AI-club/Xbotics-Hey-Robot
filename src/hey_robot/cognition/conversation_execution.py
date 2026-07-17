@@ -1,4 +1,4 @@
-"""Controlled bridge from conversation tools to Skill OS or Supervisor."""
+"""将对话工具提案受控地桥接到 Skill OS 或 Supervisor。"""
 
 from __future__ import annotations
 
@@ -209,7 +209,7 @@ class RobotExecutionAdapter:
 
 
 def _trusted_observation_summary(value: str | None) -> str | None:
-    """Accept only semantic fields emitted by Runtime, never execution metadata."""
+    """仅接收 Runtime 产生的语义字段，绝不接收执行元数据。"""
     text = (value or "").strip()
     for part in text.split(";"):
         item = part.strip()

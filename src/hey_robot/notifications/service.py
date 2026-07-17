@@ -14,7 +14,7 @@ LinkedTargetProvider = Callable[[str, str | None], list[Envelope]]
 
 
 class NotificationService:
-    """Small notification router for proactive operator/user updates."""
+    """用于主动发送操作者／用户更新的小型通知路由器。"""
 
     def __init__(
         self,

@@ -25,7 +25,7 @@ from hey_robot.skill_os.scheduler import SkillRun
 
 
 class SkillEventSink:
-    """Publishes skill protocol events and persists scheduler diagnostics."""
+    """发布 Skill 协议事件并持久化调度器诊断信息。"""
 
     def __init__(
         self,
@@ -248,7 +248,7 @@ class SkillEventSink:
 def _evidence_from_data(
     intent: SkillIntent, evidence_data: object, frame_id: int | None
 ) -> tuple[EvidenceFact, ...]:
-    """Accept only explicit semantic facts emitted by a trusted skill adapter."""
+    """只接受可信 skill adapter 显式发出的语义事实。"""
     if not isinstance(evidence_data, list):
         return ()
     facts: list[EvidenceFact] = []

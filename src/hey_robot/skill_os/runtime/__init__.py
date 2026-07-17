@@ -23,7 +23,7 @@ SkillContextFactory = Callable[[SkillInvoke], SkillContext]
 
 
 class SkillRuntime:
-    """The single execution boundary for top-level and nested skills."""
+    """顶层技能和嵌套技能共用的唯一执行边界。"""
 
     def __init__(self, registry: SkillRegistry) -> None:
         self.registry = registry

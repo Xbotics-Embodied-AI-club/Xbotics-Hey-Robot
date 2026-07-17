@@ -1,4 +1,4 @@
-"""Topic names for the new service-oriented runtime."""
+"""新面向服务运行时的 Topic 名称。"""
 
 from __future__ import annotations
 

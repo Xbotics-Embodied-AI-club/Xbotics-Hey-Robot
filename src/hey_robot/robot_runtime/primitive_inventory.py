@@ -25,7 +25,7 @@ XLEROBOT_SIM_PRIMITIVES = tuple(
 
 
 def supported_driver_primitives(robot: RobotSpec) -> tuple[str, ...]:
-    """Return canonical Skill primitive names supported by a deployment robot."""
+    """返回部署机器人支持的规范 Skill 原语名称。"""
 
     configured = robot.settings.get("supported_driver_primitives")
     if configured:

@@ -22,7 +22,7 @@ VoiceTextHandler = Callable[[str, dict], Awaitable[None]]
 
 
 class VoiceInteractionLoop:
-    """Local microphone -> ASR -> text handler, plus optional reply TTS."""
+    """本地麦克风 → ASR → 文本处理器，并可选播报回复 TTS。"""
 
     def __init__(self, config: VoiceAudioConfig) -> None:
         self.config = config
@@ -145,10 +145,9 @@ class VoiceInteractionLoop:
                         **self.config.metadata,
                         "voice": {
                             **_route_metadata(decision),
-                            # This identifies one captured utterance, rather
-                            # than its text. Gateway uses it as a durable
-                            # receipt key, so two identical spoken commands
-                            # remain two commands while transport retries do not.
+                            # 这里标识的是一次捕获到的语音，而不是语音文本本身。
+                            # Gateway 用它作为持久 receipt key，因此两次相同口令仍是两条命令，
+                            # 但传输重试不会被重复处理。
                             "utterance_id": str(uuid.uuid4()),
                         },
                         "audio": {

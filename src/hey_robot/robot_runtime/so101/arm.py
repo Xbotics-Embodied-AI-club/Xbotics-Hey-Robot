@@ -5,7 +5,7 @@ from hey_robot.robot_runtime.so101.config import SO101ArmConfig
 
 
 class SO101Arm:
-    """SO101 arm and gripper component."""
+    """SO101 机械臂和夹爪组件。"""
 
     def __init__(self, bus: ServoBus, config: SO101ArmConfig) -> None:
         self.bus = bus

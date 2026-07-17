@@ -30,7 +30,7 @@ RuntimeSummaryProvider = Callable[[int], RuntimeSummaryPayload | Any]
 
 
 class WebChannel:
-    """HTTP/WebSocket channel for direct interaction only."""
+    """仅用于直接交互的 HTTP/WebSocket 渠道。"""
 
     def __init__(
         self,
@@ -91,7 +91,7 @@ class WebChannel:
         async def chat_page() -> HTMLResponse:
             return self._chat_html_response()  # type: ignore[no-any-return]
 
-        # Legacy routes — redirect to new chat
+        # 旧路由：重定向到新聊天入口
         @app.get("/console", response_class=RedirectResponse)
         async def console_page() -> RedirectResponse:
             return RedirectResponse(url="/chat")

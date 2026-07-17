@@ -1,4 +1,4 @@
-"""Single Agent service for conversation turns and goal deliberations."""
+"""同时处理对话轮次和 Goal 审议的单一 Agent 服务。"""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ _GOAL_TOOLS = frozenset({"request_observation", "request_skill"})
 
 
 class RobotAgentService:
-    """Own exactly one Provider, Runner and tool registry per configured Agent."""
+    """每个已配置 Agent 只拥有一个 Provider、Runner 和工具注册表。"""
 
     def __init__(self, config: DeploymentConfig, *, agent_id: str) -> None:
         self.config = config

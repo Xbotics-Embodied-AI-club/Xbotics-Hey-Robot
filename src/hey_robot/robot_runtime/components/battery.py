@@ -38,7 +38,7 @@ class BatteryState:
 
 
 class ServoBusBattery:
-    """Battery monitor based on voltage telemetry exposed by a shared servo bus."""
+    """基于共享舵机总线电压遥测数据的电池监视器。"""
 
     def __init__(self, bus: ServoBus, config: ServoBusBatteryConfig) -> None:
         self.bus = bus

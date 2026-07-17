@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 Vector Robotics
-# Modified for Xbotics Hey Robot: dock wand pick and place.
+# 为 Xbotics Hey Robot 修改：dock wand 抓取和放置。
 #
-# Supports two localisation modes:
-#   "oracle"     — sim_locate_object reads MuJoCo ground truth (sim only)
-#   "perception" — camera + bbox → ray-plane intersection → 3D (sim + real)
+# 支持两种定位模式：
+#   "oracle"     — sim_locate_object 读取 MuJoCo 真值（仅仿真）
+#   "perception" — camera + bbox → ray-plane intersection → 3D（仿真和真实硬件）
 from __future__ import annotations
 
 import asyncio
@@ -73,10 +73,10 @@ def _ik_args(
 
 
 class PickWandSkill(BaseSkill):
-    """Pick the wand from the dock.
+    """从 dock 中抓取 wand。
 
-    Mode "oracle" (default): uses sim_locate_object (MuJoCo ground truth).
-    Mode "perception": camera → bbox → ray-plane intersection → 3D.
+    ``oracle`` 模式（默认）使用 sim_locate_object 读取 MuJoCo 真值。
+    ``perception`` 模式走相机、bbox、射线平面交点到 3D 点的流程。
     """
 
     spec = spec(
@@ -160,12 +160,12 @@ class PickWandSkill(BaseSkill):
         return result
 
     async def _attempt_oracle(self, ctx, label, transform):
-        """Locate wand via MuJoCo ground truth (simulation only)."""
-        # 1. Open gripper
+        """通过 MuJoCo 真值定位 wand，仅用于仿真。"""
+        # 1. 打开夹爪
         await _primitive(ctx, "set_gripper", {"action": "open"})
         await asyncio.sleep(0.2)
 
-        # 2. Locate wand via oracle
+        # 2. 通过 oracle 定位 wand
         located = await _primitive(
             ctx,
             "sim_locate_object",
@@ -181,7 +181,7 @@ class PickWandSkill(BaseSkill):
         if not samples:
             return _failure("no 3D samples obtained", "no_3d_samples")
 
-        # 3. Cluster samples
+        # 3. 聚类样本
         try:
             point = density_cluster_mean(np.asarray(samples, dtype=float), 0.015)
         except (ValueError, IndexError):
@@ -194,12 +194,12 @@ class PickWandSkill(BaseSkill):
         )
 
     async def _attempt_perception(self, ctx, label, transform, camera, plane_z):
-        """Locate wand via bbox → ray-plane intersection (sim + real hardware)."""
-        # 1. Open gripper
+        """通过 bbox 到射线平面交点定位 wand，可用于仿真和真实硬件。"""
+        # 1. 打开夹爪
         await _primitive(ctx, "set_gripper", {"action": "open"})
         await asyncio.sleep(0.2)
 
-        # 2. Locate wand via perception pipeline
+        # 2. 通过感知流水线定位 wand
         perceive_args: dict[str, Any] = {
             "query": label,
             "camera": camera,
@@ -229,9 +229,9 @@ class PickWandSkill(BaseSkill):
         )
 
     async def _execute_pick(self, ctx, target_xyz, source, target_axis=None):
-        """Execute the pick motion from a computed target_xyz (shared tail)."""
+        """基于已计算的 target_xyz 执行抓取动作，作为两种定位方式共享的后半段。"""
 
-        # 4. Validate workspace
+        # 4. 校验工作空间
         xy = float(np.linalg.norm(target_xyz[:2]))
         z = float(target_xyz[2])
         if xy < WORKSPACE_MIN_XY or xy > WORKSPACE_MAX_XY:
@@ -239,7 +239,7 @@ class PickWandSkill(BaseSkill):
         if z < WORKSPACE_MIN_Z or z > WORKSPACE_MAX_Z:
             return _failure(f"wand out of Z workspace z={z:.3f}", "out_of_workspace")
 
-        # 5. IK for pre-grasp (above wand)
+        # 5. 计算预抓取位（wand 上方）的 IK
         pre_grasp = [target_xyz[0], target_xyz[1], target_xyz[2] + PRE_GRASP_HEIGHT]
         pre_ik = await _primitive(
             ctx,
@@ -249,7 +249,7 @@ class PickWandSkill(BaseSkill):
         if not pre_ik.get("operation_success"):
             return _failure("IK unreachable for pre-grasp", "ik_unreachable")
 
-        # 6. IK for grasp (at wand grasp point)
+        # 6. 计算抓取位（wand 抓取点）的 IK
         grasp_ik = await _primitive(
             ctx,
             "arm_solve_position_ik",
@@ -262,7 +262,7 @@ class PickWandSkill(BaseSkill):
         if not grasp_ik.get("operation_success"):
             return _failure("IK unreachable for grasp", "ik_unreachable")
 
-        # 7. Move to pre-grasp
+        # 7. 移动到预抓取位
         await _primitive(
             ctx,
             "move_arm_joints",
@@ -272,7 +272,7 @@ class PickWandSkill(BaseSkill):
             },
         )
 
-        # 8. Move to grasp
+        # 8. 移动到抓取位
         await _primitive(
             ctx,
             "move_arm_joints",
@@ -282,11 +282,11 @@ class PickWandSkill(BaseSkill):
             },
         )
 
-        # 9. Close gripper (weld activates)
+        # 9. 闭合夹爪（激活 weld）
         await _primitive(ctx, "set_gripper", {"action": "close"})
         await asyncio.sleep(0.3)
 
-        # 10. Lift to pre-grasp
+        # 10. 抬升回预抓取位
         await _primitive(
             ctx,
             "move_arm_joints",
@@ -296,10 +296,10 @@ class PickWandSkill(BaseSkill):
             },
         )
 
-        # 11. Return home
+        # 11. 返回 home 位
         await _primitive(ctx, "reset_posture", {})
 
-        # 12. Verify grasp
+        # 12. 校验抓取结果
         state = await _primitive(ctx, "sim_get_object_state", {})
         held = state.get("held_object")
         welds = state.get("welds", {})
@@ -322,7 +322,7 @@ class PickWandSkill(BaseSkill):
 
 
 class PlaceWandSkill(BaseSkill):
-    """Place the wand back into the dock."""
+    """把 wand 放回 dock。"""
 
     spec = spec(
         "place_wand_to_dock",
@@ -358,13 +358,13 @@ class PlaceWandSkill(BaseSkill):
     )
 
     async def execute(self, ctx, arguments=None):  # noqa: ARG002
-        # 1. Verify holding wand
+        # 1. 校验当前持有 wand
         state = await _primitive(ctx, "sim_get_object_state", {})
         held = state.get("held_object")
         if held != "wand":
             return _failure("gripper is empty", "gripper_empty")
 
-        # 2. Get wand current position and dock position
+        # 2. 获取 wand 当前位置和 dock 位置
         object_positions = state.get("objects", {})
         wand_pos = object_positions.get("wand")
         if wand_pos is None:
@@ -374,10 +374,10 @@ class PlaceWandSkill(BaseSkill):
         if isinstance(dock_target, (list, tuple)) and len(dock_target) == 3:
             dock_x, dock_y, dock_z = (float(value) for value in dock_target)
         else:
-            # Backward-compatible target used by the original single-arm scene.
+            # 兼容原始单臂场景使用的目标位。
             dock_x, dock_y, dock_z = 0.04, 0.133, 0.72
 
-        # 3. Compute approach above dock
+        # 3. 计算 dock 上方的接近位
         approach_xyz = [dock_x, dock_y, dock_z + PLACE_APPROACH_HEIGHT]
         approach_ik = await _primitive(
             ctx,
@@ -387,8 +387,8 @@ class PlaceWandSkill(BaseSkill):
         if not approach_ik.get("operation_success"):
             return _failure("IK unreachable for dock approach", "ik_unreachable")
 
-        # 4. Compute insert at dock
-        insert_xyz = [dock_x, dock_y, dock_z + 0.02]  # slightly above insertion point
+        # 4. 计算插入 dock 的位置
+        insert_xyz = [dock_x, dock_y, dock_z + 0.02]  # 略高于插入点
         insert_ik = await _primitive(
             ctx,
             "arm_solve_position_ik",
@@ -400,7 +400,7 @@ class PlaceWandSkill(BaseSkill):
         if not insert_ik.get("operation_success"):
             return _failure("IK unreachable for dock insert", "ik_unreachable")
 
-        # 5. Move to approach
+        # 5. 移动到接近位
         await _primitive(
             ctx,
             "move_arm_joints",
@@ -410,7 +410,7 @@ class PlaceWandSkill(BaseSkill):
             },
         )
 
-        # 6. Move to insert
+        # 6. 移动到插入位
         await _primitive(
             ctx,
             "move_arm_joints",
@@ -420,11 +420,11 @@ class PlaceWandSkill(BaseSkill):
             },
         )
 
-        # 7. Release
+        # 7. 释放
         await _primitive(ctx, "set_gripper", {"action": "open"})
         await asyncio.sleep(0.5)
 
-        # 8. Retract
+        # 8. 撤回
         await _primitive(
             ctx,
             "move_arm_joints",
@@ -434,10 +434,10 @@ class PlaceWandSkill(BaseSkill):
             },
         )
 
-        # 9. Return home
+        # 9. 返回 home 位
         await _primitive(ctx, "reset_posture", {})
 
-        # 10. Verify release
+        # 10. 校验释放结果
         state2 = await _primitive(ctx, "sim_get_object_state", {})
         welds = state2.get("welds", {})
         wand_weld = welds.get("wand", False)

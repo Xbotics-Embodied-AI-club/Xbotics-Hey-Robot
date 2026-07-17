@@ -49,7 +49,7 @@ class ClaimedBinding:
 
 
 class IdentityResolver:
-    """Resolve a stable internal user_id from channel-facing envelope fields."""
+    """从渠道侧信封字段解析稳定的内部 user_id。"""
 
     def __init__(
         self, spec: IdentitySpec, *, state_path: str | Path | None = None

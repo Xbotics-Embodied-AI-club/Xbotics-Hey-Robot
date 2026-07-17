@@ -146,9 +146,9 @@ def build_scene_captioner(
             if isinstance(scene, dict):
                 cfg = scene
                 template_root = cfg.get("template_root") or template_root
-        # A configured provider is an explicit request for scene captioning.
-        # Keep the runtime configuration single-sourced under ``providers``;
-        # deployments do not need a duplicate perception switch.
+        # 配置了 provider 就表示显式请求场景 caption。
+        # runtime 配置统一以 ``providers`` 为单一来源；
+        # deployment 不需要重复的 perception 开关。
         if not cfg:
             providers = agent.settings.get("providers")
             if isinstance(providers, dict) and isinstance(

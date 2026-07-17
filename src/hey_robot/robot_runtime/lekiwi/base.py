@@ -9,7 +9,7 @@ from hey_robot.robot_runtime.lekiwi.config import LeKiwiBaseConfig
 
 
 class LeKiwiBase:
-    """LeKiwi three-wheel mobile base component."""
+    """LeKiwi 三轮移动底盘组件。"""
 
     def __init__(self, bus: ServoBus, config: LeKiwiBaseConfig) -> None:
         self.bus = bus

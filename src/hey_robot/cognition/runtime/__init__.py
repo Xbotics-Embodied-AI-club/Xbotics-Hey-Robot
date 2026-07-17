@@ -1,4 +1,4 @@
-"""Bounded single-Agent runtime."""
+"""受限的单 Agent 运行时。"""
 
 from hey_robot.cognition.runtime.agent_runner import (
     AgentRunner,

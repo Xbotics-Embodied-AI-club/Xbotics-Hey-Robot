@@ -24,7 +24,7 @@ class RecordedUtterance:
 
 
 class AudioRecorder:
-    """Blocking microphone recorder with simple energy VAD."""
+    """带简单能量 VAD 的阻塞式麦克风录音器。"""
 
     def __init__(self, config: RecorderConfig) -> None:
         self.config = config

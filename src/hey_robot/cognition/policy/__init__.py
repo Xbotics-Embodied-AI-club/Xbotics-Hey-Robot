@@ -1,1 +1,1 @@
-"""Pure policies used by the autonomous supervisor."""
+"""自主 Supervisor 使用的纯策略。"""

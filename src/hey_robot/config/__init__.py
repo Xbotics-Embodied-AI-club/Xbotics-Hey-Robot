@@ -1,4 +1,4 @@
-"""Configuration models for the new deployable runtime."""
+"""新可部署运行时的配置模型。"""
 
 from hey_robot.config.model import (
     AgentSpec,
