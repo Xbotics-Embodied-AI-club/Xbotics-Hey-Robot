@@ -10,9 +10,8 @@ from typing import Any, TypedDict
 
 logger = logging.getLogger(__name__)
 
-from hey_robot.cognition.autonomous.supervisor import AutonomySupervisorService
+from hey_robot.cognition.autonomous_agent_service import AutonomousAgentService
 from hey_robot.cognition.perception.scene import build_scene_captioner
-from hey_robot.cognition.robot_agent_service import RobotAgentService
 from hey_robot.config import DeploymentConfig
 from hey_robot.config.validation import validate_deployment
 from hey_robot.gateway import GatewayService
@@ -147,15 +146,10 @@ class DeploymentRunner:
             services.append(
                 ManagedService("skill-controller", skills.start, skills.stop)
             )
-        if self.config.autonomy.enabled:
-            supervisor = AutonomySupervisorService(self.config)
-            services.append(
-                ManagedService("autonomy-supervisor", supervisor.start, supervisor.stop)
-            )
         for agent_id, spec in self.config.agents.items():
             if not spec.enabled:
                 continue
-            agent = RobotAgentService(self.config, agent_id=agent_id)
+            agent = AutonomousAgentService(self.config, agent_id=agent_id)
             services.append(
                 ManagedService(f"agent:{agent_id}", agent.start, agent.stop)
             )

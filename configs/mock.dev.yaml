@@ -1,4 +1,4 @@
-# Main mock development deployment for autonomous runtime and channel integration.
+# Main mock development deployment for task runtime and channel integration.
 deployment:
   id: mock-dev
   bus:
@@ -10,7 +10,7 @@ deployment:
       robot_publish_hz: 10.0
       robot_status_log_every_frames: 5
 
-autonomy:
+agent_runtime:
   enabled: true
   robot_id: mock0
   entity_catalog: [robot:mock0, scene]
@@ -170,3 +170,5 @@ agents:
           temperature: 0.0
           max_tokens: 1024
         media_root: runtime/mock.dev/media
+
+

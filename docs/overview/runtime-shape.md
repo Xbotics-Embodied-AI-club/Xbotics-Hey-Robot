@@ -30,7 +30,7 @@ User Channel
       -> identity resolution
       -> episode allocation / history persistence
   -> NATS topic: user.turn
-  -> RobotAgentService
+  -> AutonomousAgentService
       -> RobotAgentLoop
           -> restore -> build -> run -> save
       -> RobotAgentCore

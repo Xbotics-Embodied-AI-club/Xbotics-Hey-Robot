@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
+from hey_robot.logging import HeyRobotLogger
 from hey_robot.protocol import (
     RobotAction,
     RobotObservation,
@@ -20,6 +21,8 @@ from hey_robot.robot_runtime.observations import (
     PerceptionSnapshot,
 )
 from hey_robot.robot_runtime.safety import RobotSafetyError, RobotSafetySupervisor
+
+logger = HeyRobotLogger(name="robot_runtime")
 
 
 class SceneCaptioner(Protocol):
@@ -230,12 +233,24 @@ class RobotRuntime:
                 observation, await self.status()
             )
         except Exception:
+            logger.exception(
+                f"场景理解调用异常: robot={self.robot_id} frame={observation.frame_id}"
+            )
             return None, ()
-        if (
-            not hasattr(understanding, "metadata")
-            or understanding.metadata.get("error")
-            or not getattr(understanding, "confidence", 0.0) > 0.0
-        ):
+        metadata = getattr(understanding, "metadata", None)
+        confidence = getattr(understanding, "confidence", 0.0)
+        if not isinstance(metadata, dict):
+            logger.warning(
+                f"场景理解结果无元数据，已丢弃: robot={self.robot_id} "
+                f"frame={observation.frame_id}"
+            )
+            return None, ()
+        if metadata.get("error") or not confidence > 0.0:
+            logger.warning(
+                f"场景理解结果不可用，已丢弃: robot={self.robot_id} "
+                f"frame={observation.frame_id} confidence={confidence} "
+                f"reason={metadata.get('error') or metadata.get('raw') or 'unknown'}"
+            )
             return None, ()
         summary = understanding.summary.strip()
         entities = tuple(
@@ -320,9 +335,7 @@ class RobotRuntime:
             SkillIntent(
                 envelope=parent.envelope,
                 skill_id=parent.skill_id,
-                goal_id=parent.goal_id,
                 task_id=parent.task_id,
-                deliberation_id=parent.deliberation_id,
                 intent_kind=parent.intent_kind,
                 name=name,
                 arguments=dict(arguments),

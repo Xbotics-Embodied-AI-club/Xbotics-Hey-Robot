@@ -18,7 +18,10 @@ from hey_robot.channels import (
     VoiceChannel,
     WebChannel,
 )
-from hey_robot.cognition.autonomous.store import AutonomyStore
+from hey_robot.cognition.runtime.agent_task_store import (
+    AgentTask,
+    AgentTaskStore,
+)
 from hey_robot.config import DeploymentConfig
 from hey_robot.episode import JsonlEpisodeStore, allocate_episode
 from hey_robot.episode.scope import DEFAULT_EPISODE_DIMENSIONS
@@ -26,10 +29,7 @@ from hey_robot.events import EventKind, RuntimeEvent
 from hey_robot.events.bus import BusEventPublisher
 from hey_robot.events.store import RuntimeEventStore
 from hey_robot.gateway.identity import ClaimedBinding, IdentityResolver, PendingBinding
-from hey_robot.gateway.receipts import (
-    GoalNotificationReceiptStore,
-    InteractionReceiptStore,
-)
+from hey_robot.gateway.receipts import InteractionReceiptStore
 from hey_robot.health import HealthReportService
 from hey_robot.logging import HeyRobotLogger
 from hey_robot.protocol import (
@@ -37,17 +37,14 @@ from hey_robot.protocol import (
     ConversationResult,
     ConversationTurn,
     Envelope,
-    GoalCommand,
-    GoalEvent,
     RobotStatus,
+    SkillControl,
     SkillEvent,
     SkillResult,
     Topics,
     UserTurn,
 )
 from hey_robot.protocol.messages import (
-    GoalBudgets,
-    SuccessCriterion,
     from_payload,
     to_payload,
 )
@@ -81,21 +78,16 @@ class GatewayService:
             Path(config.resources.runtime_dir) / "skills",
             max_items=config.resources.events_max_items,
         )
-        autonomy_path = (
+        task_path = (
             Path(config.resources.runtime_dir)
             / config.deployment.id
-            / "autonomy.sqlite3"
+            / "sustained_tasks.sqlite3"
         )
-        self.autonomy_store = AutonomyStore(autonomy_path)
+        self.task_store = AgentTaskStore(task_path)
         self.interaction_receipts = InteractionReceiptStore(
             Path(config.resources.runtime_dir)
             / config.deployment.id
             / "interaction_receipts.sqlite3"
-        )
-        self.goal_notification_receipts = GoalNotificationReceiptStore(
-            Path(config.resources.runtime_dir)
-            / config.deployment.id
-            / "goal_notification_receipts.sqlite3"
         )
         self.latest_robot_status: dict[str, RobotStatus] = {}
         self.identity = IdentityResolver(
@@ -129,11 +121,10 @@ class GatewayService:
         await self.bus.subscribe([self.topics.robot_status], self._on_robot_status)
         await self.bus.subscribe([self.topics.skill_event], self._on_skill_event)
         await self.bus.subscribe([self.topics.skill_result], self._on_skill_result)
-        await self.bus.subscribe([self.topics.goal_event], self._on_goal_event)
         logger.info(
             f"gateway subscribed {self.topics.agent_reply}, {self.topics.conversation_result}, {self.topics.runtime_event}, "
             f"{self.topics.robot_status}, {self.topics.skill_event}, {self.topics.skill_result}, "
-            f"{self.topics.goal_event}"
+            f"{self.topics.skill_control_result}"
         )
         await self.channels.start_all(self._on_user_turn)
         self._log_channel_ready()
@@ -151,7 +142,6 @@ class GatewayService:
         await self.channels.stop_all()
         await self.bus.close()
         self.interaction_receipts.close()
-        self.goal_notification_receipts.close()
 
     async def _on_user_turn(self, turn: UserTurn) -> None:
         if await self._try_handle_identity_binding_turn(turn):
@@ -186,9 +176,6 @@ class GatewayService:
         if await self._handle_safety_command(turn.text, envelope, interaction_id):
             self.interaction_receipts.complete(interaction_id, "safety_command")
             return
-        if await self._handle_goal_command(turn.text, envelope, interaction_id):
-            self.interaction_receipts.complete(interaction_id, "goal_command")
-            return
         session_key = self._session_key(envelope)
         await self.bus.publish(
             self.topics.conversation_turn,
@@ -214,135 +201,6 @@ class GatewayService:
         )
         return f"{self.config.deployment.id}:{envelope.agent_id or self._agent_id(None)}:{principal}"
 
-    async def _handle_goal_command(
-        self, text: str, envelope: Envelope, interaction_id: str
-    ) -> bool:
-        """Gateway 仅接受明确且结构化的自主命令。"""
-        stripped = text.strip()
-        if not stripped.startswith("/goal "):
-            return False
-        parts = stripped.split(maxsplit=2)
-        if len(parts) < 2 or parts[1] not in {
-            "create",
-            "cancel",
-            "confirm",
-            "reconcile",
-            "emergency_stop",
-        }:
-            await self._send_reply(
-                AgentReply(envelope=envelope, text="GOAL_CONTRACT_INVALID")
-            )
-            return True
-        import json
-
-        if parts[1] == "confirm":
-            if len(parts) != 3:
-                await self._send_reply(
-                    AgentReply(envelope=envelope, text="CONFIRM_CONTRACT_INVALID")
-                )
-                return True
-            try:
-                body = json.loads(parts[2])
-                command = GoalCommand(
-                    envelope,
-                    self._command_id(envelope, interaction_id, "confirm"),
-                    "confirm",
-                    goal_id=str(body["goal_id"]),
-                    condition_id=str(body["condition_id"]),
-                )
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-                await self._send_reply(
-                    AgentReply(envelope=envelope, text="CONFIRM_CONTRACT_INVALID")
-                )
-                return True
-        elif parts[1] == "reconcile":
-            if len(parts) != 3:
-                await self._send_reply(
-                    AgentReply(envelope=envelope, text="RECONCILE_CONTRACT_INVALID")
-                )
-                return True
-            try:
-                body = json.loads(parts[2])
-                skill_id = str(body["skill_id"])
-                robot_id = str(body.get("robot_id") or envelope.robot_id or "")
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-                await self._send_reply(
-                    AgentReply(envelope=envelope, text="RECONCILE_CONTRACT_INVALID")
-                )
-                return True
-            status = self.latest_robot_status.get(robot_id)
-            if (
-                not robot_id
-                or status is None
-                or status.state != "idle"
-                or status.skill_id is not None
-            ):
-                await self._send_reply(
-                    AgentReply(envelope=envelope, text="RECONCILE_IDLE_PROOF_REQUIRED")
-                )
-                return True
-            command = GoalCommand(
-                envelope.child(robot_id=robot_id),
-                self._command_id(envelope, interaction_id, "reconcile"),
-                "reconcile",
-                skill_id=skill_id,
-            )
-            await self.bus.publish(self.topics.goal_command, to_payload(command))
-            await self._send_reply(
-                AgentReply(envelope=envelope, text="RECONCILE_REQUESTED")
-            )
-            return True
-        if parts[1] == "cancel":
-            if len(parts) != 3 or not parts[2].strip():
-                await self._send_reply(
-                    AgentReply(envelope=envelope, text="GOAL_CONTRACT_INVALID")
-                )
-                return True
-            command = GoalCommand(
-                envelope,
-                self._command_id(envelope, interaction_id, "cancel"),
-                "cancel",
-                goal_id=parts[2].strip(),
-            )
-        elif parts[1] == "emergency_stop":
-            if len(parts) != 2:
-                await self._send_reply(
-                    AgentReply(envelope=envelope, text="GOAL_CONTRACT_INVALID")
-                )
-                return True
-            command = GoalCommand(
-                envelope,
-                self._command_id(envelope, interaction_id, "emergency_stop"),
-                "emergency_stop",
-            )
-        else:
-            if len(parts) != 3:
-                await self._send_reply(
-                    AgentReply(envelope=envelope, text="GOAL_CONTRACT_REQUIRED")
-                )
-                return True
-            try:
-                body = json.loads(parts[2])
-                criteria = tuple(
-                    SuccessCriterion(**item) for item in body["success_criteria"]
-                )
-                budgets = GoalBudgets(**dict(body.get("budgets") or {}))
-                command = GoalCommand(
-                    envelope,
-                    self._command_id(envelope, interaction_id, "create"),
-                    "create",
-                    objective=str(body["objective"]),
-                    success_criteria=criteria,
-                    budgets=budgets,
-                )
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-                await self._send_reply(
-                    AgentReply(envelope=envelope, text="GOAL_CONTRACT_INVALID")
-                )
-                return True
-        await self.bus.publish(self.topics.goal_command, to_payload(command))
-        return True
-
     async def _handle_safety_command(
         self, text: str, envelope: Envelope, interaction_id: str
     ) -> bool:
@@ -358,12 +216,15 @@ class GatewayService:
             "\u7d27\u6025\u505c\u6b62",
         }
         if compact in {item.replace(" ", "") for item in emergency}:
-            command = GoalCommand(
+            command = SkillControl(
                 envelope,
                 self._command_id(envelope, interaction_id, "emergency_stop"),
                 "emergency_stop",
+                target_skill_id=None,
+                task_id=None,
+                reason="gateway emergency stop",
             )
-            await self.bus.publish(self.topics.goal_command, to_payload(command))
+            await self.bus.publish(self.topics.skill_control, to_payload(command))
             await self._send_reply(
                 AgentReply(envelope=envelope, text="EMERGENCY_STOP_REQUESTED")
             )
@@ -376,55 +237,11 @@ class GatewayService:
             "\u53d6\u6d88\u5f53\u524d\u4efb\u52a1",
         }
         if compact in {item.replace(" ", "") for item in cancel}:
-            goal = self.autonomy_store.active_goal_for_robot(envelope.robot_id or "")
-            if goal is None:
-                await self._send_reply(
-                    AgentReply(envelope=envelope, text="NO_ACTIVE_GOAL")
-                )
-                return True
-            command = GoalCommand(
-                envelope,
-                self._command_id(envelope, interaction_id, "cancel"),
-                "cancel",
-                goal_id=str(goal["goal_id"]),
-            )
-            await self.bus.publish(self.topics.goal_command, to_payload(command))
-            await self._send_reply(
-                AgentReply(envelope=envelope, text="CANCEL_REQUESTED")
-            )
-            return True
+            return False
 
         confirmations = {"confirm", "yes", "\u786e\u8ba4", "\u7ee7\u7eed"}
         if compact in confirmations:
-            goal = self.autonomy_store.active_goal_for_robot(envelope.robot_id or "")
-            condition = (
-                None
-                if goal is None
-                else self.autonomy_store.pending_wake_condition(
-                    goal_id=str(goal["goal_id"]), kind="human_confirmation"
-                )
-            )
-            if (
-                goal is None
-                or goal["status"] != "waiting_condition"
-                or condition is None
-            ):
-                await self._send_reply(
-                    AgentReply(envelope=envelope, text="NO_PENDING_CONFIRMATION")
-                )
-                return True
-            command = GoalCommand(
-                envelope,
-                self._command_id(envelope, interaction_id, "confirm"),
-                "confirm",
-                goal_id=str(goal["goal_id"]),
-                condition_id=str(condition["condition_id"]),
-            )
-            await self.bus.publish(self.topics.goal_command, to_payload(command))
-            await self._send_reply(
-                AgentReply(envelope=envelope, text="CONFIRM_REQUESTED")
-            )
-            return True
+            return False
 
         query = {
             "status",
@@ -434,20 +251,7 @@ class GatewayService:
             "\u673a\u5668\u4eba\u72b6\u6001",
         }
         if compact in {item.replace(" ", "") for item in query}:
-            goal = self.autonomy_store.active_goal_for_robot(envelope.robot_id or "")
-            if goal is None:
-                text_reply = "NO_ACTIVE_GOAL"
-            else:
-                view = self.autonomy_store.goal_view(str(goal["goal_id"])) or {}
-                text_reply = (
-                    f"GOAL_STATUS: {view.get('status', goal['status'])}; "
-                    f"objective={view.get('objective', '')}; "
-                    f"current_skill={view.get('current_skill_name') or 'none'}; "
-                    f"evidence_count={view.get('evidence_count', 0)}; "
-                    f"termination_reason={view.get('termination_reason') or 'none'}"
-                )
-            await self._send_reply(AgentReply(envelope=envelope, text=text_reply))
-            return True
+            return False
         return False
 
     @staticmethod
@@ -499,42 +303,6 @@ class GatewayService:
         if reply.envelope.episode_id:
             self.episodes.append_agent_reply(reply.envelope.episode_id, reply)
         await self.channels.send(reply)
-
-    async def _on_goal_event(self, _topic: str, payload: dict) -> None:
-        """向每个关联输出渠道投递一条持久化 Goal 通知。"""
-        event = from_payload(GoalEvent, payload)
-        view = self.autonomy_store.goal_view(event.goal_id)
-        if view is None:
-            return
-        owner = view.get("owner_principal_id")
-        targets = self.identity.linked_channel_targets(str(owner or ""))
-        if not targets and event.envelope.channel:
-            targets = [event.envelope]
-        for target in targets:
-            channel = str(target.channel or "")
-            if not channel or not self.goal_notification_receipts.claim(
-                goal_id=event.goal_id,
-                goal_version=int(view["version"]),
-                status=event.status,
-                channel=channel,
-            ):
-                continue
-            await self.channels.send(
-                AgentReply(
-                    envelope=target.child(
-                        deployment_id=self.config.deployment.id,
-                        robot_id=event.envelope.robot_id,
-                        agent_id=event.envelope.agent_id,
-                    ),
-                    text=_goal_status_text(str(event.status), str(view["objective"])),
-                    metadata={
-                        "notification": True,
-                        "goal_id": event.goal_id,
-                        "goal_status": event.status,
-                        "goal_version": view["version"],
-                    },
-                )
-            )
 
     def _materialize_reply(self, reply: AgentReply) -> AgentReply:
         envelope = reply.envelope
@@ -663,34 +431,32 @@ class GatewayService:
 
     async def _web_cockpit(self, episode_id: str) -> dict[str, Any] | None:
         del episode_id
-        goals = self.autonomy_store.goals_recent(limit=1)
-        if not goals:
+        tasks = self.task_store.recent_tasks(limit=1)
+        if not tasks:
             return None
+        task = tasks[0]
         return {
-            "goal": _goal_payload(goals[0]),
-            "goal_view": self.autonomy_store.goal_view(goals[0]["goal_id"]),
-            "health": HealthReportService(self.config).payload(
-                robot_id=goals[0]["robot_id"]
-            ),
+            "task": _task_payload(task),
+            "steps": [
+                _step_payload(step)
+                for step in self.task_store.recent_steps(task.task_id)
+            ],
+            "health": HealthReportService(self.config).payload(robot_id=task.robot_id),
         }
 
     async def _web_tasks_list(self, limit: int) -> dict[str, Any]:
         return {
-            "goals": [
-                {
-                    **_goal_payload(goal),
-                    "goal_view": self.autonomy_store.goal_view(goal["goal_id"]),
-                }
-                for goal in self.autonomy_store.goals_recent(limit=limit)
+            "tasks": [
+                _task_payload(task) for task in self.task_store.recent_tasks(limit)
             ]
         }
 
     async def _web_runtime_summary(self, limit: int) -> dict[str, Any]:
-        goals = self.autonomy_store.goals_recent(limit)
+        tasks = self.task_store.recent_tasks(limit)
         skills = self.skill_store.recent(limit=limit)
         events = self.event_store.recent(limit=limit)
         return {
-            "goals": [_goal_payload(goal) for goal in goals],
+            "tasks": [_task_payload(task) for task in tasks],
             "robots": [
                 {
                     "robot_id": status.envelope.robot_id,
@@ -723,7 +489,7 @@ class GatewayService:
                 )
             ],
             "stats": {
-                "goal_count": len(goals),
+                "task_count": len(tasks),
                 "robot_count": len(self.latest_robot_status),
                 "skill_count": len(skills),
                 "event_count": len(events or []),
@@ -732,17 +498,17 @@ class GatewayService:
 
     async def _web_episode_task(self, episode_id: str) -> dict[str, Any] | None:
         del episode_id
-        goals = self.autonomy_store.goals_recent(limit=1)
-        return (
-            None
-            if not goals
-            else {
-                "goal": _goal_payload(goals[0]),
-                "goal_view": self.autonomy_store.goal_view(goals[0]["goal_id"]),
-                "actions": self.autonomy_store.actions_for_goal(goals[0]["goal_id"]),
-                "timeline": self.autonomy_store.goal_timeline(goals[0]["goal_id"]),
-            }
-        )
+        tasks = self.task_store.recent_tasks(limit=1)
+        if not tasks:
+            return None
+        task = tasks[0]
+        return {
+            "task": _task_payload(task),
+            "steps": [
+                _step_payload(step)
+                for step in self.task_store.recent_steps(task.task_id)
+            ],
+        }
 
     async def create_identity_binding(
         self, envelope: Envelope, ttl_sec: float = 600.0
@@ -930,34 +696,37 @@ class GatewayService:
         }
 
 
-def _goal_payload(goal: dict[str, Any]) -> dict[str, Any]:
-    snapshot = dict(goal.get("snapshot") or {})
+def _task_payload(task: AgentTask) -> dict[str, Any]:
     return {
-        "goal_id": goal["goal_id"],
-        "task_id": snapshot.get("task_id"),
-        "robot_id": goal["robot_id"],
-        "objective": snapshot.get("objective"),
-        "status": goal["status"],
-        "termination_reason": goal.get("termination_reason"),
-        "created_at": goal.get("created_at"),
+        "task_id": task.task_id,
+        "session_key": task.session_key,
+        "robot_id": task.robot_id,
+        "objective": task.objective,
+        "ui_summary": task.ui_summary,
+        "status": task.status,
+        "created_at": task.created_at,
+        "updated_at": task.updated_at,
+        "step_count": task.step_count,
+        "continuation_count": task.continuation_count,
+        "last_error": task.last_error,
+        "final_recap": task.final_recap,
     }
 
 
-def _goal_status_text(status: str, objective: str) -> str:
-    templates = {
-        "pending": "已接收任务：{objective}。",
-        "active": "正在执行：{objective}。",
-        "waiting": "任务正在等待新的条件：{objective}。",
-        "waiting_condition": "任务需要你的确认或补充信息：{objective}。",
-        "completed": "任务已完成：{objective}。",
-        "failed": "任务未完成：{objective}。",
-        "cancelled": "任务已取消：{objective}。",
-        "needs_review": "任务需要人工检查：{objective}。",
-        "blocked": "任务暂时无法继续：{objective}。",
+def _step_payload(step: Any) -> dict[str, Any]:
+    return {
+        "step_id": step.step_id,
+        "task_id": step.task_id,
+        "sequence": step.sequence,
+        "skill": step.proposal.skill_name,
+        "intent_kind": step.proposal.intent_kind,
+        "objective": step.proposal.objective,
+        "status": step.outcome.status,
+        "summary": step.outcome.user_summary,
+        "evidence_ids": list(step.evidence_ids),
+        "started_at": step.started_at,
+        "completed_at": step.completed_at,
     }
-    return templates.get(status, "任务状态已更新：{objective}。").format(
-        objective=objective
-    )
 
 
 def _compact_status_metrics(metrics: dict[str, Any]) -> dict[str, Any]:

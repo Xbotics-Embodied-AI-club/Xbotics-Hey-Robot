@@ -12,8 +12,8 @@ def _read(relative: str) -> str:
 
 def test_deployment_starts_only_the_unified_robot_agent() -> None:
     source = _read("app/runner.py")
-    assert "RobotAgentService" in source
-    assert "AutonomousRobotAgentService" not in source
+    assert "AutonomousAgentService" in source
+    assert "AutonomousAutonomousAgentService" not in source
     assert "build_conversation_agent" not in source
     assert 'ManagedService(f"agent:{agent_id}"' in source
     assert 'f"conversation:{agent_id}"' not in source
@@ -28,7 +28,7 @@ def test_cli_has_one_agent_entrypoint() -> None:
 
 
 def test_robot_agent_owns_one_provider_and_one_runner() -> None:
-    source = _read("cognition/robot_agent_service.py")
+    source = _read("cognition/autonomous_agent_service.py")
     assert source.count("build_provider(") == 1
     assert source.count("AgentRunner(") == 1
     assert source.count("ToolRegistry(") == 1
@@ -53,11 +53,9 @@ def test_shared_runner_has_no_io_or_robot_dependencies() -> None:
 
 
 def test_agent_never_constructs_physical_protocol_messages() -> None:
-    source = _read("cognition/robot_agent_service.py")
+    source = _read("cognition/autonomous_agent_service.py")
     assert "SkillIntent(" not in source
     assert "RobotAction(" not in source
-    supervisor = _read("cognition/autonomous/supervisor.py")
-    assert "SkillIntent(" in supervisor
 
 
 def test_agent_prompt_has_no_removed_tool_vocabulary() -> None:
@@ -79,11 +77,10 @@ def test_agent_prompt_has_no_removed_tool_vocabulary() -> None:
 
 
 def test_robot_agent_loads_packaged_prompts() -> None:
-    source = _read("cognition/robot_agent_service.py")
+    source = _read("cognition/autonomous_agent_service.py")
     assert '"agent/SYSTEM.md"' in source
     assert 'self.templates.render("agent/SOUL.md")' in source
-    context_builder = _read("cognition/autonomous/context_builder.py")
-    assert 'template_store.render("agent/GOAL.md")' in context_builder
+    assert "task_context=" in source
 
 
 def test_template_package_exposes_only_the_used_store() -> None:

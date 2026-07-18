@@ -10,7 +10,7 @@ deployment:
       human_follow_service_enabled: true
       robot_status_log_every_frames: 30
 
-autonomy:
+agent_runtime:
   enabled: true
   robot_id: xlerobot
   entity_catalog: [robot:xlerobot, scene]
@@ -307,3 +307,5 @@ agents:
           api_key_env: DASHSCOPE_API_KEY
           temperature: 0.0
           max_tokens: 512
+
+

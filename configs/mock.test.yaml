@@ -37,7 +37,7 @@ skills:
     - human_follow
     - stop_motion
 
-autonomy:
+agent_runtime:
   enabled: true
   robot_id: mock0
   entity_catalog:
@@ -149,3 +149,5 @@ agents:
           model: mock-planner
           api_key: test-key
           api_base: http://127.0.0.1:9/v1
+
+

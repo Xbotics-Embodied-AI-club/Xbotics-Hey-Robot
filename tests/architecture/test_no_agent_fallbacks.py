@@ -44,7 +44,6 @@ def test_no_legacy_autonomy_in_cognition() -> None:
         COGNITION / "core_builder.py",
         COGNITION / "loop.py",
         COGNITION / "robot_agent.py",
-        COGNITION / "task_runtime.py",
         COGNITION / "task_supervisor.py",
         COGNITION / "task_contract.py",
         COGNITION / "task_events.py",

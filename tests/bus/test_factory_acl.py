@@ -7,21 +7,21 @@ from hey_robot.config import BusSpec
 
 
 def test_bus_factory_uses_service_role_credentials(monkeypatch) -> None:
-    monkeypatch.setenv("SUPERVISOR_PASSWORD", "secret")
+    monkeypatch.setenv("AGENT_PASSWORD", "secret")
     client = create_bus_client(
         BusSpec(
             options={
                 "credentials": {
-                    "autonomy_supervisor": {
-                        "username": "supervisor",
-                        "password_env": "SUPERVISOR_PASSWORD",
+                    "agent": {
+                        "username": "agent",
+                        "password_env": "AGENT_PASSWORD",
                     }
                 }
             }
         ),
-        role="autonomy_supervisor",
+        role="agent",
     )
-    assert client.username == "supervisor"
+    assert client.username == "agent"
     assert client.password == "secret"  # noqa: S105
 
 
@@ -35,14 +35,14 @@ def test_in_memory_bus_delivers_only_within_shared_process_hub() -> None:
         received: list[dict] = []
         spec = BusSpec(type="in_memory", url="memory://test-factory")
         publisher = create_bus_client(spec, role="gateway")
-        subscriber = create_bus_client(spec, role="autonomy_supervisor")
+        subscriber = create_bus_client(spec, role="agent")
         await publisher.connect()
         await subscriber.connect()
         await subscriber.subscribe(
-            ["goal.command"], lambda _topic, payload: _append(received, payload)
+            ["conversation.turn"], lambda _topic, payload: _append(received, payload)
         )
-        await publisher.publish("goal.command", {"action": "create"})
-        assert received == [{"action": "create"}]
+        await publisher.publish("conversation.turn", {"text": "hello"})
+        assert received == [{"text": "hello"}]
         await publisher.close()
         await subscriber.close()
 

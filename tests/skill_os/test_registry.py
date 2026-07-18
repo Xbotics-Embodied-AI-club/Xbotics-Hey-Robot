@@ -56,10 +56,9 @@ def test_runtime_runs_plugin_backed_builtin_skill() -> None:
     assert robot.calls == [("move_base", {"direction": "forward", "distance_cm": 10})]
 
 
-def test_runtime_returns_failed_result_for_invalid_arguments() -> None:
+def test_runtime_applies_declared_skill_defaults() -> None:
     robot = _RobotAPI()
-    registry = load_skill_registry(enabled=("move_base",))
-    runtime = SkillRuntime(registry)
+    runtime = SkillRuntime(load_skill_registry(enabled=("move_base",)))
 
     result = __import__("asyncio").run(
         runtime.execute(
@@ -69,10 +68,27 @@ def test_runtime_returns_failed_result_for_invalid_arguments() -> None:
         )
     )
 
+    assert result.success is True
+    assert robot.calls == [("move_base", {"direction": "forward", "distance_cm": 20.0})]
+
+
+def test_runtime_returns_failed_result_for_invalid_arguments() -> None:
+    robot = _RobotAPI()
+    registry = load_skill_registry(enabled=("move_base",))
+    runtime = SkillRuntime(registry)
+
+    result = __import__("asyncio").run(
+        runtime.execute(
+            "move_base",
+            {"distance_cm": 20},
+            context_factory=lambda invoke: SkillContext(robot=robot, invoke=invoke),
+        )
+    )
+
     assert result.success is False
     assert result.status == "failed"
     assert result.failure_mode == "invalid_arguments"
-    assert "distance_cm" in (result.summary or "")
+    assert "direction" in (result.summary or "")
     assert robot.calls == []
 
 

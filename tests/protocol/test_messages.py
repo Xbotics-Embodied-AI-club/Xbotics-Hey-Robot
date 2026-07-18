@@ -248,9 +248,7 @@ class TestSkillIntent:
         intent = SkillIntent(
             envelope=env,
             skill_id="skill1",
-            goal_id="goal1",
             task_id="task1",
-            deliberation_id="deliberation1",
             intent_kind="skill",
             name="move",
             objective="move",

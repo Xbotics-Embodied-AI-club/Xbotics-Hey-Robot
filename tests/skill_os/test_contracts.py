@@ -18,7 +18,7 @@ def test_skill_contract_runtime_blocks_missing_required_arguments() -> None:
 
     assert decision.allowed is False
     assert decision.failure_mode == "invalid_arguments"
-    assert decision.metadata["missing_arguments"] == ["direction", "distance_cm"]
+    assert decision.metadata["missing_arguments"] == ["direction"]
 
 
 def test_skill_contract_runtime_checks_readiness_by_required_resource() -> None:

@@ -10,11 +10,10 @@ deployment:
       robot_publish_hz: 2.0
       robot_status_log_every_frames: 10
 
-autonomy:
+agent_runtime:
   enabled: true
   robot_id: sim_robot
-  # Keep the goal vocabulary small and explicit.  These are the locations the
-  # simulator can currently report as verified robot locations.
+  # 持续任务只使用明确、可验证的实体词表。
   entity_catalog: [robot:sim_robot, scene, room:living_room, room:dining_room, room:kitchen]
   entity_aliases:
     客厅: room:living_room
@@ -224,4 +223,7 @@ agents:
           model_env: DASHSCOPE_MODEL
           api_key_env: DASHSCOPE_API_KEY
           temperature: 0.0
-          max_tokens: 512
+          max_tokens: 1024
+
+
+

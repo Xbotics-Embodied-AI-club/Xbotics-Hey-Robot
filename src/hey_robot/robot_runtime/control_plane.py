@@ -351,9 +351,7 @@ class RobotControlPlane:
         return RobotAction(
             envelope=intent.envelope,
             skill_id=intent.skill_id,
-            goal_id=intent.goal_id,
             task_id=intent.task_id,
-            deliberation_id=intent.deliberation_id,
             intent_kind=intent.intent_kind,
             values=numeric_values,
             metadata={
@@ -381,9 +379,7 @@ def _intent_like(action: RobotAction) -> SkillIntent:
     return SkillIntent(
         envelope=action.envelope,
         skill_id=action.skill_id,
-        goal_id=action.goal_id,
         task_id=action.task_id,
-        deliberation_id=action.deliberation_id,
         intent_kind=action.intent_kind,
         name="stop_motion",
         arguments={},

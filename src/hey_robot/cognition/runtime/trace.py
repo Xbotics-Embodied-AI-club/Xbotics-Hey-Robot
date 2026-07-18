@@ -19,13 +19,13 @@ class RunTraceWriter:
         self,
         event: str,
         *,
-        goal_id: str | None = None,
+        task_id: str | None = None,
         details: dict[str, Any] | None = None,
     ) -> bool:
         record = {
             "timestamp": time.time(),
             "event": event,
-            "goal_id": goal_id,
+            "task_id": task_id,
             "details": dict(details or {}),
         }
         try:

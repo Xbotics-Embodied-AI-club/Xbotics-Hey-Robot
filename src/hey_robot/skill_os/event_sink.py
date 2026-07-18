@@ -268,7 +268,7 @@ def _evidence_from_data(
         facts.append(
             EvidenceFact(
                 evidence_id=f"skill:{intent.skill_id}:{index}",
-                goal_id=intent.goal_id,
+                task_id=intent.task_id,
                 source_kind="skill_result",
                 source_id=intent.skill_id,
                 observed_at=time.time(),

@@ -21,15 +21,24 @@ from hey_robot.skill_os.perception.human_follow import (
 class MoveBaseSkill(BaseSkill):
     spec = spec(
         "move_base",
-        "Move the base forward, backward, left, or right by a short distance in centimeters.",
+        "Move the base forward, backward, left, or right in the robot body frame by a short distance in centimeters.",
         category="base",
         input_schema={
             "type": "object",
             "properties": {
-                "direction": {"type": "string"},
-                "distance_cm": {"type": "number"},
+                "direction": {
+                    "type": "string",
+                    "enum": ["forward", "backward", "left", "right"],
+                    "description": "机器人本体坐标方向：forward/backward 为机器人前后，left/right 为机器人左右侧移。",
+                },
+                "distance_cm": {
+                    "type": "number",
+                    "default": 20.0,
+                    "minimum": 5.0,
+                    "maximum": 50.0,
+                },
             },
-            "required": ["direction", "distance_cm"],
+            "required": ["direction"],
         },
         required_resources=("base",),
         driver_primitives=("move_base",),
@@ -49,12 +58,16 @@ class MoveBaseSkill(BaseSkill):
 class TurnBaseSkill(BaseSkill):
     spec = spec(
         "turn_base",
-        "Turn the base left or right by a bounded angle in degrees.",
+        "Turn the base left or right from the robot perspective by a bounded angle in degrees.",
         category="base",
         input_schema={
             "type": "object",
             "properties": {
-                "direction": {"type": "string"},
+                "direction": {
+                    "type": "string",
+                    "enum": ["left", "right"],
+                    "description": "机器人本体视角转向：left 为向左转，right 为向右转。",
+                },
                 "angle_deg": {"type": "number"},
             },
             "required": ["direction", "angle_deg"],

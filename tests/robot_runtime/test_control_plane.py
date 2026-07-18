@@ -27,9 +27,7 @@ def _intent() -> SkillIntent:
     return SkillIntent(
         envelope=Envelope(trace_id="tr1", robot_id="mock0"),
         skill_id="skill1",
-        goal_id="goal1",
         task_id="task1",
-        deliberation_id="deliberation1",
         intent_kind="skill",
         name="policy_action",
         arguments={},

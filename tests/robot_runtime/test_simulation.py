@@ -34,9 +34,7 @@ def _intent(name: str) -> SkillIntent:
     return SkillIntent(
         envelope=Envelope(robot_id="test_sim_robot"),
         skill_id=f"test-{name}",
-        goal_id="goal-test",
         task_id="task-test",
-        deliberation_id="deliberation-test",
         intent_kind="skill",
         name=name,
         arguments={},
@@ -82,10 +80,20 @@ class TestXLeRobotSimSkillAdapter:
         cmd = adapter.decode(
             RobotSkillAction("move_base", {"distance_cm": 10, "direction": "left"})
         )
-        assert cmd.vx < 0
+        assert cmd.vx > 0
         assert cmd.vy == 0
         assert cmd.duration_sec > 0
         assert "left" in cmd.message
+
+    def test_decode_move_base_right(self) -> None:
+        adapter = self._adapter()
+        cmd = adapter.decode(
+            RobotSkillAction("move_base", {"distance_cm": 10, "direction": "right"})
+        )
+        assert cmd.vx < 0
+        assert cmd.vy == 0
+        assert cmd.duration_sec > 0
+        assert "right" in cmd.message
 
     def test_decode_turn_base_left(self) -> None:
         adapter = self._adapter()

@@ -85,11 +85,13 @@ class _XLeRobotBackend(ClassicPrimitiveBackend[dict[str, Any]]):
         _ = skill_name
         with self._base_lock:
             self._cancel_velocity_watchdog()
-            return (
-                self.client.move_backward_cm(primitive.distance_cm)
-                if primitive.direction == "backward"
-                else self.client.move_forward_cm(primitive.distance_cm)
-            )
+            if primitive.direction == "backward":
+                return self.client.move_backward_cm(primitive.distance_cm)
+            if primitive.direction == "left":
+                return self.client.strafe_left_cm(primitive.distance_cm)
+            if primitive.direction == "right":
+                return self.client.strafe_right_cm(primitive.distance_cm)
+            return self.client.move_forward_cm(primitive.distance_cm)
 
     def on_turn_base(
         self, primitive: TurnBasePrimitive, *, skill_name: str

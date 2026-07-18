@@ -142,7 +142,7 @@ User Channel -> Gateway -> Agent/Cognition
 
 ### 4.3 Agent 运行时
 
-`RobotAgentService` 是 Agent 侧服务壳，订阅用户轮次、机器人状态、机器人观测、技能事件和技能结果。复杂职责拆分给：
+`AutonomousAgentService` 是 Agent 侧服务壳，订阅用户轮次、机器人状态、机器人观测、技能事件和技能结果。复杂职责拆分给：
 
 - `RobotAgentLoop`：轮次生命周期状态机，负责 restore → build → run → save 流程。
 - `TaskRunManager`：持久任务状态、检查点和恢复上下文。

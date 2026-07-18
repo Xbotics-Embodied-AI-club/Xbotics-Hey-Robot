@@ -191,11 +191,11 @@ class SkillSurfaceConfig:
 
 
 @dataclass(frozen=True)
-class AutonomySpec:
+class AgentRuntimeSpec:
     enabled: bool = False
     robot_id: str | None = None
     hard_max_wall_time_sec: float = 3600.0
-    hard_max_deliberations: int = 40
+    hard_max_continuations: int = 40
     hard_max_skills: int = 24
     min_battery_percentage: float = 20.0
     entity_catalog: tuple[str, ...] = ()
@@ -217,7 +217,7 @@ class DeploymentConfig:
     model_services: dict[str, ModelServiceSpec] = field(default_factory=dict)
     agents: dict[str, AgentSpec] = field(default_factory=dict)
     skills: SkillSurfaceConfig = field(default_factory=SkillSurfaceConfig)
-    autonomy: AutonomySpec = field(default_factory=AutonomySpec)
+    agent_runtime: AgentRuntimeSpec = field(default_factory=AgentRuntimeSpec)
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> DeploymentConfig:
@@ -232,17 +232,24 @@ class DeploymentConfig:
             raise ValueError(
                 "deployment config uses removed field: capability_services"
             )
-        autonomy_data = data.get("autonomy", {}) or {}
-        forbidden_autonomy = {
+        if "autonomy" in data:
+            raise ValueError("deployment config uses removed field: autonomy")
+        if "task_runtime" in data:
+            raise ValueError("deployment config uses removed field: task_runtime")
+        agent_runtime_data = data.get("agent_runtime", {}) or {}
+        forbidden_agent_runtime = {
             "goals",
             "interval_sec",
             "legacy_mode",
             "resume",
             "auto_retry",
+            "hard_max_deliberations",
         }
-        unsupported = forbidden_autonomy.intersection(autonomy_data)
+        unsupported = forbidden_agent_runtime.intersection(agent_runtime_data)
         if unsupported:
-            raise ValueError(f"autonomy uses removed fields: {sorted(unsupported)}")
+            raise ValueError(
+                f"agent_runtime uses removed fields: {sorted(unsupported)}"
+            )
         for service_id, service_data in dict(
             data.get("model_services", {}) or {}
         ).items():
@@ -477,34 +484,35 @@ class DeploymentConfig:
                 ),
                 mode=str(skills_data.get("mode", "production")),
             ),
-            autonomy=AutonomySpec(
-                enabled=bool(autonomy_data.get("enabled", False)),
-                robot_id=autonomy_data.get("robot_id"),
+            agent_runtime=AgentRuntimeSpec(
+                enabled=bool(agent_runtime_data.get("enabled", False)),
+                robot_id=agent_runtime_data.get("robot_id"),
                 hard_max_wall_time_sec=float(
-                    autonomy_data.get("hard_max_wall_time_sec", 3600.0)
+                    agent_runtime_data.get("hard_max_wall_time_sec", 3600.0)
                 ),
-                hard_max_deliberations=int(
-                    autonomy_data.get("hard_max_deliberations", 40)
+                hard_max_continuations=int(
+                    agent_runtime_data.get("hard_max_continuations", 40)
                 ),
-                hard_max_skills=int(autonomy_data.get("hard_max_skills", 24)),
+                hard_max_skills=int(agent_runtime_data.get("hard_max_skills", 24)),
                 min_battery_percentage=float(
-                    autonomy_data.get("min_battery_percentage", 20.0)
+                    agent_runtime_data.get("min_battery_percentage", 20.0)
                 ),
                 entity_catalog=tuple(
-                    str(item) for item in autonomy_data.get("entity_catalog", ()) or ()
+                    str(item)
+                    for item in agent_runtime_data.get("entity_catalog", ()) or ()
                 ),
                 entity_aliases={
                     str(alias).strip(): str(entity_id).strip()
                     for alias, entity_id in dict(
-                        autonomy_data.get("entity_aliases", {}) or {}
+                        agent_runtime_data.get("entity_aliases", {}) or {}
                     ).items()
                     if str(alias).strip() and str(entity_id).strip()
                 },
                 enable_auto_reobserve_once=bool(
-                    autonomy_data.get("enable_auto_reobserve_once", False)
+                    agent_runtime_data.get("enable_auto_reobserve_once", False)
                 ),
                 enable_no_progress_review=bool(
-                    autonomy_data.get("enable_no_progress_review", False)
+                    agent_runtime_data.get("enable_no_progress_review", False)
                 ),
             ),
         )

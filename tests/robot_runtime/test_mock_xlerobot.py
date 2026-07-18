@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from hey_robot.config import DeploymentConfig
 from hey_robot.contracts import SkillContract, SkillContractCatalog
 from hey_robot.protocol import (
@@ -71,9 +73,7 @@ def _action(
     intent = SkillIntent(
         envelope=Envelope(robot_id="mock0"),
         skill_id=skill_id,
-        goal_id="goal-test",
         task_id="task-test",
-        deliberation_id="deliberation-test",
         intent_kind="skill",
         name=name,
         arguments=dict(arguments or {}),
@@ -410,6 +410,24 @@ async def test_mock_status_exposes_base_control_diagnostics(tmp_path) -> None:
     assert (
         stopped.metrics["base_control"]["last_motion_report"]["kind"] == "stop_motion"
     )
+
+
+async def test_mock_move_base_left_uses_robot_body_frame(tmp_path) -> None:
+    runtime = _runtime(tmp_path)
+    await runtime.start()
+
+    turned = await runtime.apply_action(
+        _action("turn_base", {"direction": "left", "angle_deg": 90.0})
+    )
+    moved = await runtime.apply_action(
+        _action("move_base", {"direction": "left", "distance_cm": 20.0})
+    )
+
+    assert turned.success is True
+    assert moved.success is True
+    pose = moved.metrics["base_pose"]
+    assert pose["x_cm"] == pytest.approx(-20.0)
+    assert pose["y_cm"] == pytest.approx(0.0, abs=1e-6)
 
 
 async def test_mock_transient_readiness_fault_blocks_then_recovers(tmp_path) -> None:

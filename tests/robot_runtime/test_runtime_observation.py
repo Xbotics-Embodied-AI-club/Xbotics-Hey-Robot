@@ -23,9 +23,7 @@ def _intent(skill_id: str, name: str, objective: str) -> SkillIntent:
     return SkillIntent(
         envelope=Envelope(robot_id="mock0"),
         skill_id=skill_id,
-        goal_id="goal-test",
         task_id="task-test",
-        deliberation_id="deliberation-test",
         intent_kind="observation"
         if name in {"inspect_scene", "look_around", "detect_marker"}
         else "skill",
@@ -159,7 +157,7 @@ async def test_robot_runtime_uses_scene_captioner_for_inspect_scene(tmp_path) ->
 
     result = status.metrics["last_skill_result"]
     assert result["semantic_available"] is True
-    assert result["summary"] == "scene=桌面中央有一个杯子"
+    assert result["summary"] == "scene=mug on table"
     assert captioner.observations[0].images
 
 
@@ -395,4 +393,4 @@ class _FakeSceneCaptioner:
         from hey_robot.cognition.perception.scene import SceneUnderstanding
 
         self.observations.append(observation)
-        return SceneUnderstanding(summary="桌面中央有一个杯子", confidence=0.9)
+        return SceneUnderstanding(summary="mug on table", confidence=0.9)

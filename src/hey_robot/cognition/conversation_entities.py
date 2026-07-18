@@ -61,8 +61,8 @@ class EntityResolver:
         if not entities:
             return "当前没有可用于目标解析的受信视觉实体。"
         return (
-            "当前受信视觉实体如下。若用户指代其中实体，request_goal 的 target "
-            "必须使用精确 entity_id；代码不会解释自然语言方位或类型。\n"
+            "当前受信视觉实体如下。它们只能作为观察证据上下文使用；"
+            "持续任务创建不要求预先解析为 entity_id。\n"
             + json.dumps(
                 [
                     {

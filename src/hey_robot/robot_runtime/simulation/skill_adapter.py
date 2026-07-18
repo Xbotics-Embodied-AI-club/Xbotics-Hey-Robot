@@ -167,7 +167,7 @@ class _XLeRobotSimBackend(ClassicPrimitiveBackend[SimSkillCommand]):
         direction = primitive.direction.strip().lower()
         duration = abs(distance) / max(self.linear_speed, 0.01)
         if direction in {"left", "right"}:
-            sign = -1.0 if direction == "left" else 1.0
+            sign = 1.0 if direction == "left" else -1.0
             return SimSkillCommand(
                 skill_name=skill_name,
                 vx=sign * self.linear_speed,

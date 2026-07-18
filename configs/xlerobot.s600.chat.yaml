@@ -9,7 +9,7 @@ deployment:
       robot_publish_hz: 10.0
       robot_status_log_every_frames: 5
 
-autonomy:
+agent_runtime:
   enabled: true
   robot_id: mock0
   entity_catalog: [robot:mock0, scene]
@@ -161,8 +161,8 @@ agents:
     settings:
       mode: autonomous
       providers:
-        # v1（planner 线上版）：planner 只要求 OpenAI 兼容端点，端点/模型/key 全部由环境变量提供，
-        # 配置里不写死具体网关与模型（与云端 profile 同风格）。
+        # Planner 使用 OpenAI 兼容端点；端点、模型和 key 都由环境变量提供。
+        # 配置里不写死具体网关和模型，保持和云端 profile 一致。
         planner:
           type: openai_compat
           model_env: PLANNER_LLM_MODEL
@@ -171,3 +171,5 @@ agents:
           temperature: 0.0
           max_tokens: 1024
         media_root: runtime/mock.dev/media
+
+

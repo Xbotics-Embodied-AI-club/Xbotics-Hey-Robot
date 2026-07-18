@@ -122,13 +122,12 @@ class ToolOutcome:
     user_summary: str | None = None
     data: dict[str, Any] = field(default_factory=dict)
     operation_id: str | None = None
-    goal_id: str | None = None
     retryable: bool = False
 
 
 @dataclass(frozen=True)
 class ShortOperationCommand:
-    """一项受限操作的对话请求，由 Supervisor 准入。"""
+    """一项由 Agent 提出的受限操作请求，由 Skill OS 准入并执行。"""
 
     envelope: Envelope
     operation_id: str
@@ -195,9 +194,7 @@ class RobotStatus:
 class SkillIntent:
     envelope: Envelope
     skill_id: str
-    goal_id: str
     task_id: str
-    deliberation_id: str
     intent_kind: Literal["skill", "observation"]
     name: str
     arguments: dict[str, Any]
@@ -231,40 +228,19 @@ class RobotAction:
     values: list[float]
     action_id: str = field(default_factory=lambda: _new_id("act"))
     skill_id: str = ""
-    goal_id: str = ""
     task_id: str = ""
-    deliberation_id: str = ""
     intent_kind: Literal["skill", "observation"] = "skill"
     timestamp: float = field(default_factory=time.time)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-CriterionType = Literal["robot_state", "object_relation", "evidence_present"]
 CriterionPredicate = Literal["equals", "at", "near", "inside", "held_by", "observed"]
-
-
-@dataclass(frozen=True)
-class GoalBudgets:
-    max_wall_time_sec: float = 1800.0
-    max_deliberations: int = 20
-    max_skills: int = 12
-    min_battery_percentage: float = 20.0
-
-
-@dataclass(frozen=True)
-class SuccessCriterion:
-    criterion_id: str
-    criterion_type: CriterionType
-    subject_id: str
-    predicate: CriterionPredicate
-    object_id: str
-    max_age_sec: float
 
 
 @dataclass(frozen=True)
 class EvidenceFact:
     evidence_id: str
-    goal_id: str
+    task_id: str
     source_kind: Literal["robot_status", "skill_result"]
     source_id: str
     observed_at: float
@@ -273,73 +249,6 @@ class EvidenceFact:
     predicate: CriterionPredicate
     object_id: str
     artifacts: tuple[ArtifactRef | ImageRef, ...] = ()
-
-
-@dataclass(frozen=True)
-class GoalCommand:
-    envelope: Envelope
-    command_id: str
-    action: Literal["create", "cancel", "emergency_stop", "confirm", "reconcile"]
-    goal_id: str | None = None
-    condition_id: str | None = None
-    skill_id: str | None = None
-    objective: str = ""
-    success_criteria: tuple[SuccessCriterion, ...] = ()
-    budgets: GoalBudgets = field(default_factory=GoalBudgets)
-
-
-@dataclass(frozen=True)
-class GoalSnapshot:
-    goal_id: str
-    version: int
-    task_id: str
-    contract_id: str
-    contract_hash: str
-    objective: str
-    success_criteria: tuple[SuccessCriterion, ...]
-    status: Literal[
-        "pending",
-        "active",
-        "waiting",
-        "waiting_condition",
-        "needs_review",
-        "blocked",
-        "completed",
-        "failed",
-        "cancelled",
-    ]
-    termination_reason: Literal["cancel", "budget", "emergency"] | None = None
-
-
-@dataclass(frozen=True)
-class ActionSnapshot:
-    skill_id: str
-    deliberation_id: str
-    intent_kind: Literal["skill", "observation"]
-    name: str
-    objective: str
-    arguments: dict[str, Any]
-    status: Literal[
-        "persisted",
-        "publishing",
-        "published",
-        "accepted",
-        "running",
-        "completed",
-        "failed",
-        "interrupted",
-        "cancelled",
-        "unknown",
-        "reconciled_idle",
-    ]
-
-
-@dataclass(frozen=True)
-class BudgetState:
-    elapsed_wall_time_sec: float
-    deliberations_used: int
-    skills_used: int
-    battery_percentage: float | None
 
 
 @dataclass(frozen=True)
@@ -357,14 +266,6 @@ class FailurePayload:
     component: str
     message: str
     details: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class TaskEvaluationPayload:
-    outcome: Literal["satisfied", "inconclusive"]
-    reason: str
-    evidence_ids: tuple[str, ...] = ()
-    missing_criteria_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -386,63 +287,12 @@ class SkillResult:
 
 
 @dataclass(frozen=True)
-class DeliberationRequest:
-    envelope: Envelope
-    deliberation_id: str
-    trigger_event_id: str
-    goal: GoalSnapshot
-    robot_status: RobotStatus | None
-    robot_observation: RobotObservation | None
-    actions: tuple[ActionSnapshot, ...]
-    evidence: tuple[EvidenceFact, ...]
-    latest_skill_result: SkillResult | None
-    budget_state: BudgetState
-
-
-@dataclass(frozen=True)
-class DeliberationResult:
-    envelope: Envelope
-    deliberation_id: str
-    request_hash: str
-    goal_id: str
-    task_id: str
-    status: Literal["completed", "action_proposed", "failed"]
-    proposal: ActionProposal | None = None
-    failure: FailurePayload | None = None
-    evaluation: TaskEvaluationPayload | None = None
-
-
-@dataclass(frozen=True)
-class GoalEvent:
-    envelope: Envelope
-    event_id: str
-    goal_id: str
-    task_id: str
-    status: Literal[
-        "pending",
-        "active",
-        "waiting",
-        "waiting_condition",
-        "needs_review",
-        "blocked",
-        "completed",
-        "failed",
-        "cancelled",
-    ]
-    active_skill_id: str | None = None
-    active_control_id: str | None = None
-    termination_reason: Literal["cancel", "budget", "emergency"] | None = None
-    evaluation: TaskEvaluationPayload | None = None
-    failure: FailurePayload | None = None
-
-
-@dataclass(frozen=True)
 class SkillControl:
     envelope: Envelope
     control_id: str
     action: Literal["interrupt", "emergency_stop"]
     target_skill_id: str | None
-    goal_id: str | None
+    task_id: str | None
     reason: str
 
 
@@ -551,22 +401,8 @@ def _decode_value(value: Any, target: Any) -> Any:
 
 
 def _validate_message(message: Any) -> None:
-    if isinstance(message, SuccessCriterion):
-        allowed = {
-            "robot_state": {"equals"},
-            "object_relation": {"at", "near", "inside", "held_by"},
-            "evidence_present": {"observed"},
-        }
-        if message.predicate not in allowed[message.criterion_type]:
-            raise ValueError(
-                f"criterion predicate {message.predicate!r} is invalid for {message.criterion_type!r}"
-            )
-        if not message.criterion_id or not message.subject_id or not message.object_id:
-            raise ValueError("SuccessCriterion ids must be non-empty")
-        if message.max_age_sec <= 0:
-            raise ValueError("SuccessCriterion max_age_sec must be positive")
     if isinstance(message, EvidenceFact):
-        if not message.evidence_id or not message.goal_id or not message.source_id:
+        if not message.evidence_id or not message.task_id or not message.source_id:
             raise ValueError("EvidenceFact identity fields must be non-empty")
         if message.source_kind == "robot_status":
             if message.frame_id is None:
@@ -576,24 +412,6 @@ def _validate_message(message: Any) -> None:
                 raise ValueError(
                     "robot_status evidence source_id must match status:<robot_id>:<frame_id>"
                 )
-    if isinstance(message, GoalCommand):
-        if not message.command_id:
-            raise ValueError("GoalCommand command_id must be non-empty")
-        if message.action == "create":
-            if not message.envelope.robot_id:
-                raise ValueError("create GoalCommand requires robot_id")
-            if not message.objective or not message.success_criteria:
-                raise ValueError(
-                    "create GoalCommand requires objective and success_criteria"
-                )
-        elif message.action == "cancel" and not message.goal_id:
-            raise ValueError("cancel GoalCommand requires goal_id")
-        elif message.action == "emergency_stop" and not message.envelope.robot_id:
-            raise ValueError("emergency_stop GoalCommand requires robot_id")
-        elif message.action == "reconcile" and (
-            not message.envelope.robot_id or not message.skill_id
-        ):
-            raise ValueError("reconcile GoalCommand requires robot_id and skill_id")
     if isinstance(message, SkillResult):
         if message.status == "completed" and message.success is not True:
             raise ValueError("completed SkillResult requires success=True")
@@ -606,21 +424,6 @@ def _validate_message(message: Any) -> None:
                 raise ValueError(
                     "SkillResult evidence must be sourced by the result skill_id"
                 )
-    if isinstance(message, DeliberationResult):
-        if message.status == "action_proposed" and message.proposal is None:
-            raise ValueError("action_proposed DeliberationResult requires proposal")
-        if message.status != "action_proposed" and message.proposal is not None:
-            raise ValueError(
-                "only action_proposed DeliberationResult may contain proposal"
-            )
-        if message.status == "completed" and (
-            message.evaluation is None or message.evaluation.outcome != "satisfied"
-        ):
-            raise ValueError(
-                "completed DeliberationResult requires satisfied evaluation"
-            )
-        if message.status == "failed" and message.failure is None:
-            raise ValueError("failed DeliberationResult requires failure")
     if isinstance(message, SkillControlResult):
         if message.status == "completed" and not message.robot_idle_confirmed:
             raise ValueError("completed SkillControlResult requires idle confirmation")

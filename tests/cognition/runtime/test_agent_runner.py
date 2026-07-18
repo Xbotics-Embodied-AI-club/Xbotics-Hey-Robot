@@ -40,7 +40,6 @@ def _tools():
     return ToolRegistry(
         ToolDependencies(
             SkillCatalog((SkillSpec(name="move", description="move"),)),
-            goal_kinds=("locate",),
         )
     )
 
@@ -52,7 +51,7 @@ async def test_conversation_can_return_text_with_the_shared_runner() -> None:
     result = await runner.run(
         AgentTurnRequest(
             (ReasoningMessage("user", "你好"),),
-            frozenset({"request_skill", "request_goal"}),
+            frozenset({"request_skill", "complete_task"}),
             time.monotonic() + 1,
             "turn-1",
         )
@@ -62,14 +61,14 @@ async def test_conversation_can_return_text_with_the_shared_runner() -> None:
 
 
 @pytest.mark.asyncio
-async def test_goal_turn_cannot_call_conversation_only_tool() -> None:
+async def test_removed_start_task_tool_is_rejected() -> None:
     provider = Provider(
         ReasoningResponse(
             tool_calls=[
                 ReasoningToolCall(
                     "g1",
-                    "request_goal",
-                    {"goal_kind": "locate", "objective": "find", "target": "cup"},
+                    "start_task",
+                    {"objective": "find the cup"},
                 )
             ]
         )

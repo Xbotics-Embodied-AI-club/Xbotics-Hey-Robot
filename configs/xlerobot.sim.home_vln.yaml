@@ -10,9 +10,6 @@ deployment:
     url: nats://127.0.0.1:4222
     options:
       credentials:
-        autonomy_supervisor:
-          username: autonomy_supervisor
-          password_env: HEY_ROBOT_NATS_SUPERVISOR_PASSWORD
         agent:
           username: agent
           password_env: HEY_ROBOT_NATS_AGENT_PASSWORD
@@ -29,7 +26,7 @@ deployment:
       robot_publish_hz: 2.0
       robot_status_log_every_frames: 5
 
-autonomy:
+agent_runtime:
   enabled: true
   robot_id: sim_robot
   entity_catalog:
@@ -191,3 +188,5 @@ agents:
           api_key_env: DASHSCOPE_API_KEY
           temperature: 0.0
           max_tokens: 512
+
+

@@ -1,13 +1,9 @@
 """认知层的公开接口。"""
 
-from hey_robot.cognition.autonomous.supervisor import AutonomySupervisorService
-from hey_robot.cognition.policy.task_evaluator import TaskEvaluator
-from hey_robot.cognition.robot_agent_service import RobotAgentService
+from hey_robot.cognition.autonomous_agent_service import AutonomousAgentService
 from hey_robot.cognition.runtime.agent_runner import AgentRunner
 
 __all__ = [
     "AgentRunner",
-    "AutonomySupervisorService",
-    "RobotAgentService",
-    "TaskEvaluator",
+    "AutonomousAgentService",
 ]

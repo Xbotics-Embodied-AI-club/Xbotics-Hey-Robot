@@ -27,6 +27,9 @@ MOJIBAKE_MARKER_CODES = (
     0x9230,
     0x6500,
     0x20AC,
+    0x704F,
+    0x93C8,
+    0x6AE7,
 )
 MOJIBAKE_MARKERS = tuple(chr(code) for code in MOJIBAKE_MARKER_CODES)
 

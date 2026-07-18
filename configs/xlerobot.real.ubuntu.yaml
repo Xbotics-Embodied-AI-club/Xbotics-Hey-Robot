@@ -13,7 +13,7 @@ deployment:
       human_follow_service_enabled: true
       robot_status_log_every_frames: 30
 
-autonomy:
+agent_runtime:
   enabled: true
   robot_id: xlerobot
   entity_catalog: [robot:xlerobot, scene]
@@ -117,9 +117,9 @@ channels:
     tts_echo_guard_sec: 1.0
     reply_tts: true
     recorder:
-      input_device: "sof-hda-dsp: - (hw:1,7)"  # DMIC16kHz（原生支持 16kHz）
+      input_device: "sof-hda-dsp: - (hw:1,7)"  # DMIC 16kHz 原生输入。
       sample_rate: 16000
-      channels: 2  # DMIC 为双声道，streaming_asr 会自动下混为单声道
+      channels: 2  # DMIC 为双声道，streaming_asr 会自动下混为单声道。
       block_ms: 100
       energy_threshold: 0.012
       silence_sec: 0.9
@@ -152,7 +152,7 @@ channels:
       endpoint: wss://openspeech.bytedance.com/api/v3/tts/bidirection
       encoding: pcm
       sample_rate: 16000
-      output_device: null  # 使用系统默认输出设备（PulseAudio）
+      output_device: null  # 使用系统默认输出设备（PulseAudio）。
   feishu:
     type: feishu
     enabled: true
@@ -320,3 +320,6 @@ agents:
           api_key_env: DASHSCOPE_API_KEY
           temperature: 0.0
           max_tokens: 512
+
+
+

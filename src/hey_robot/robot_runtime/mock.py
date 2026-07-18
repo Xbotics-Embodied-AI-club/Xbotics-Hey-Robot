@@ -431,9 +431,14 @@ class MockRobotDriver:
             return self._ok(skill, "base stopped")
         if name == "move_base":
             distance = float(args["distance_cm"])
-            if str(args.get("direction", "forward")).lower() == "backward":
-                distance = -abs(distance)
-            return self._move(skill, distance, 0.0)
+            direction = str(args.get("direction", "forward")).lower()
+            if direction == "backward":
+                return self._move(skill, -abs(distance), 0.0)
+            if direction == "left":
+                return self._move(skill, 0.0, abs(distance))
+            if direction == "right":
+                return self._move(skill, 0.0, -abs(distance))
+            return self._move(skill, abs(distance), 0.0)
         if name == "turn_base":
             angle = float(args["angle_deg"])
             if str(args.get("direction", "left")).lower() == "right":

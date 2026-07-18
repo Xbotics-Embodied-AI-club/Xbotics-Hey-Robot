@@ -20,13 +20,13 @@ def test_robot_agent_has_one_canonical_tool_registry() -> None:
     assert names == {
         "request_observation",
         "request_skill",
-        "request_goal",
-        "control_goal",
+        "complete_task",
+        "control_task",
     }
 
 
-def test_autonomous_path_does_not_import_legacy_tools() -> None:
-    """No cognition/autonomous source may import any deleted legacy tool."""
+def test_cognition_path_does_not_import_legacy_tools() -> None:
+    """No cognition source may import any deleted legacy tool."""
     forbidden_tools = (
         re.compile(r"\bget_robot_status\b"),
         re.compile(r"\bget_task_context\b"),
@@ -56,17 +56,12 @@ def test_agent_runner_does_not_import_task_contract() -> None:
 
 
 def test_agent_service_does_not_publish_skill_intent() -> None:
-    """RobotAgentService must never publish skill.intent directly."""
-    agent_path = COGNITION_ROOT / "robot_agent_service.py"
+    """AutonomousAgentService must never publish skill.intent directly."""
+    agent_path = COGNITION_ROOT / "autonomous_agent_service.py"
     text = agent_path.read_text(encoding="utf-8")
     assert "skill_intent" not in text, "agent_service references skill_intent"
     assert "SkillIntent(" not in text, "agent_service constructs SkillIntent"
 
 
-def test_supervisor_does_not_import_provider() -> None:
-    """AutonomySupervisor must never call a model provider."""
-    supervisor_path = COGNITION_ROOT / "autonomous" / "supervisor.py"
-    text = supervisor_path.read_text(encoding="utf-8")
-    forbidden = ("ReasoningProvider", "build_provider", "provider.chat", "chat(")
-    offenders = [f"supervisor.py: {name}" for name in forbidden if name in text]
-    assert offenders == [], f"supervisor imports provider: {offenders}"
+def test_removed_supervisor_path_does_not_exist() -> None:
+    assert not (COGNITION_ROOT / "autonomous").exists()

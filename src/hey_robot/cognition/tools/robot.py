@@ -6,11 +6,6 @@ import json
 from dataclasses import dataclass
 from typing import Any, ClassVar, Protocol
 
-from hey_robot.cognition.conversation_goal import (
-    DEFAULT_GOAL_TEMPLATES,
-    GoalControlProposal,
-    GoalProposal,
-)
 from hey_robot.protocol import ActionProposal
 
 
@@ -23,8 +18,19 @@ class SkillCatalogView(Protocol):
 @dataclass(frozen=True)
 class ToolDependencies:
     skill_catalog: SkillCatalogView
-    goal_kinds: tuple[str, ...] = tuple(item.name for item in DEFAULT_GOAL_TEMPLATES)
     extra_tools: tuple[Any, ...] = ()
+
+
+@dataclass(frozen=True)
+class CompleteTaskProposal:
+    recap: str
+    evidence_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ControlTaskProposal:
+    action: str
+    reason: str
 
 
 class RequestObservationTool:
@@ -62,8 +68,8 @@ class RequestSkillTool:
         "function": {
             "name": name,
             "description": (
-                "只提出一个明确、有界的机器人技能。不得用它拼接多个动作来实现"
-                "长程世界目标；此类请求必须使用 request_goal。"
+                "为当前用户目标提出一个明确、有界的机器人技能。运行时会把第一次"
+                "机器人操作自动纳入任务，并在每个结果返回后继续审议。"
             ),
             "parameters": {
                 "type": "object",
@@ -96,7 +102,9 @@ class RequestSkillTool:
         category = str(getattr(spec, "category", ""))
         if skill.strip() == "inspect_scene" or category in {"observe", "perception"}:
             raise ValueError("observation skills must use request_observation")
-        _validate_slots(dict(getattr(spec, "input_schema", {}) or {}), slots)
+        schema = dict(getattr(spec, "input_schema", {}) or {})
+        slots = _apply_schema_defaults(schema, slots)
+        _validate_slots(schema, slots)
         normalized_objective = (
             objective.strip()
             if isinstance(objective, str) and objective.strip()
@@ -105,74 +113,62 @@ class RequestSkillTool:
         return ActionProposal("skill", skill.strip(), normalized_objective, dict(slots))
 
 
-class RequestGoalTool:
-    name: ClassVar[str] = "request_goal"
-
-    def __init__(self, goal_kinds: tuple[str, ...]) -> None:
-        self._goal_kinds = frozenset(goal_kinds)
-        self.schema: dict[str, Any] = {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": (
-                    "创建持续执行、由证据验证的世界目标。target 应使用当前上下文"
-                    "中的精确实体 ID。"
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "goal_kind": {
-                            "type": "string",
-                            "enum": sorted(self._goal_kinds),
-                        },
-                        "objective": {"type": "string"},
-                        "target": {"type": "string"},
-                        "destination": {"type": "string"},
-                    },
-                    "required": ["goal_kind", "objective", "target"],
-                    "additionalProperties": False,
-                },
-            },
-        }
-
-    def proposal(self, arguments: dict[str, Any]) -> GoalProposal:
-        kind = arguments.get("goal_kind")
-        objective = arguments.get("objective")
-        target = arguments.get("target")
-        destination = arguments.get("destination")
-        if not isinstance(kind, str) or kind not in self._goal_kinds:
-            raise ValueError("goal_kind is invalid")
-        if not isinstance(objective, str) or not objective.strip():
-            raise ValueError("objective must be a non-empty string")
-        if not isinstance(target, str) or not target.strip():
-            raise ValueError("target must be a non-empty string")
-        if destination is not None and not isinstance(destination, str):
-            raise ValueError("destination must be a string")
-        return GoalProposal(
-            kind,
-            objective.strip(),
-            target.strip(),
-            destination.strip() if destination else None,
-        )
-
-
-class ControlGoalTool:
-    name: ClassVar[str] = "control_goal"
+class CompleteTaskTool:
+    name: ClassVar[str] = "complete_task"
     schema: ClassVar[dict[str, Any]] = {
         "type": "function",
         "function": {
             "name": name,
-            "description": "取消、紧急停止或确认当前持续 Goal。",
+            "description": "引用当前任务证据并提议结束 active task。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "recap": {"type": "string"},
+                    "evidence_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+                "required": ["recap", "evidence_ids"],
+                "additionalProperties": False,
+            },
+        },
+    }
+
+    def proposal(self, arguments: dict[str, Any]) -> CompleteTaskProposal:
+        recap = arguments.get("recap")
+        evidence_ids = arguments.get("evidence_ids")
+        if not isinstance(recap, str) or not recap.strip():
+            raise ValueError("recap must be a non-empty string")
+        if not isinstance(evidence_ids, list) or not evidence_ids:
+            raise ValueError("evidence_ids must be a non-empty array")
+        normalized = tuple(
+            item.strip()
+            for item in evidence_ids
+            if isinstance(item, str) and item.strip()
+        )
+        if len(normalized) != len(evidence_ids):
+            raise ValueError("evidence_ids must contain only non-empty strings")
+        return CompleteTaskProposal(recap.strip(), normalized)
+
+
+class ControlTaskTool:
+    name: ClassVar[str] = "control_task"
+    schema: ClassVar[dict[str, Any]] = {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": "取消、阻塞确认或紧急停止当前持续任务。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["cancel", "emergency_stop", "confirm"],
+                        "enum": ["cancel", "block", "emergency_stop"],
                     },
-                    "condition_id": {
+                    "reason": {
                         "type": "string",
-                        "description": "确认 waiting_condition 时必须提供。",
+                        "description": "面向用户的简短原因。",
                     },
                 },
                 "required": ["action"],
@@ -181,14 +177,16 @@ class ControlGoalTool:
         },
     }
 
-    def proposal(self, arguments: dict[str, Any]) -> GoalControlProposal:
+    def proposal(self, arguments: dict[str, Any]) -> ControlTaskProposal:
         action = arguments.get("action")
-        if action not in {"cancel", "emergency_stop", "confirm"}:
+        if action not in {"cancel", "block", "emergency_stop"}:
             raise ValueError("action is invalid")
-        condition_id = str(arguments.get("condition_id", "")).strip() or None
-        if action == "confirm" and condition_id is None:
-            raise ValueError("condition_id is required when action is confirm")
-        return GoalControlProposal(action, condition_id)
+        reason = arguments.get("reason", "")
+        if reason is not None and not isinstance(reason, str):
+            raise ValueError("reason must be a string")
+        return ControlTaskProposal(
+            action, reason.strip() if isinstance(reason, str) else ""
+        )
 
 
 class ToolRegistry:
@@ -198,8 +196,8 @@ class ToolRegistry:
         core_tools: dict[str, Any] = {
             RequestObservationTool.name: RequestObservationTool(),
             RequestSkillTool.name: RequestSkillTool(deps.skill_catalog),
-            RequestGoalTool.name: RequestGoalTool(deps.goal_kinds),
-            ControlGoalTool.name: ControlGoalTool(),
+            CompleteTaskTool.name: CompleteTaskTool(),
+            ControlTaskTool.name: ControlTaskTool(),
         }
         for tool in deps.extra_tools:
             name = getattr(tool, "name", "")
@@ -233,13 +231,14 @@ class ToolRegistry:
 
     def proposal(
         self, name: str, arguments: dict[str, Any]
-    ) -> ActionProposal | GoalProposal | GoalControlProposal:
+    ) -> ActionProposal | CompleteTaskProposal | ControlTaskProposal:
         tool = self._tools.get(name)
         if tool is None:
             raise KeyError(name)
         proposal = tool.proposal(arguments)
         if not isinstance(
-            proposal, ActionProposal | GoalProposal | GoalControlProposal
+            proposal,
+            ActionProposal | CompleteTaskProposal | ControlTaskProposal,
         ):
             raise TypeError(f"unsupported Robot Agent proposal: {type(proposal)!r}")
         return proposal
@@ -264,6 +263,17 @@ def _validate_slots(schema: dict[str, Any], slots: dict[str, Any]) -> None:
             not isinstance(value, int | float) or isinstance(value, bool)
         ):
             raise ValueError(f"slot {name} must be a number")
+        if (
+            expected == "number"
+            and isinstance(value, int | float)
+            and not isinstance(value, bool)
+        ):
+            minimum = field.get("minimum")
+            maximum = field.get("maximum")
+            if isinstance(minimum, int | float) and value < minimum:
+                raise ValueError(f"slot {name} must be >= {minimum}")
+            if isinstance(maximum, int | float) and value > maximum:
+                raise ValueError(f"slot {name} must be <= {maximum}")
         if expected == "integer" and (
             not isinstance(value, int) or isinstance(value, bool)
         ):
@@ -272,3 +282,17 @@ def _validate_slots(schema: dict[str, Any], slots: dict[str, Any]) -> None:
             raise ValueError(f"slot {name} must be a boolean")
         if expected == "object" and not isinstance(value, dict):
             raise ValueError(f"slot {name} must be an object")
+
+
+def _apply_schema_defaults(
+    schema: dict[str, Any], slots: dict[str, Any]
+) -> dict[str, Any]:
+    """Fill declared skill defaults before validating a bounded operation."""
+    properties = schema.get("properties", {})
+    if not isinstance(properties, dict):
+        return dict(slots)
+    resolved = dict(slots)
+    for name, field in properties.items():
+        if name not in resolved and isinstance(field, dict) and "default" in field:
+            resolved[name] = field["default"]
+    return resolved

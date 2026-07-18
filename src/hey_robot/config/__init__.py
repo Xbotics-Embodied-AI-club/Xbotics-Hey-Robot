@@ -1,6 +1,7 @@
 """新可部署运行时的配置模型。"""
 
 from hey_robot.config.model import (
+    AgentRuntimeSpec,
     AgentSpec,
     BusSpec,
     ChannelSpec,
@@ -16,6 +17,7 @@ from hey_robot.config.model import (
 )
 
 __all__ = [
+    "AgentRuntimeSpec",
     "AgentSpec",
     "BusSpec",
     "ChannelSpec",

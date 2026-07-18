@@ -54,7 +54,7 @@ GatewayService
           | NATS: user.turn
           v
 1. Agent / Cognition
-  RobotAgentService
+  AutonomousAgentService
   RobotAgentLoop: restore -> build -> run -> save
   RobotAgentCore / AgentRuntime
   task state / memory / perception / feedback / recovery
@@ -95,7 +95,7 @@ Gateway、消息总线、持久化和通知是贯穿四层的系统基础设施�
 - 可选 `HumanFollowService`
 - `SkillControllerService`
 - `TaskSupervisorService`
-- 一个或多个 `RobotAgentService`
+- 一个或多个 `AutonomousAgentService`
 - `GatewayService`
 
 这些服务各自创建 NATS client，并通过协议消息协作。ModelService 和 NATS broker 是独立
@@ -127,7 +127,7 @@ channel 和用户身份。
 
 ### 4.2 Agent turn
 
-`RobotAgentService` 为 episode 和 robot 加锁，避免同一机器人同时处理冲突 turn。
+`AutonomousAgentService` 为 episode 和 robot 加锁，避免同一机器人同时处理冲突 turn。
 `RobotAgentLoop` 依次执行：
 
 - `restore`：恢复 checkpoint 和 task state；

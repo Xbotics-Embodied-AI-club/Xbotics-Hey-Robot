@@ -6,9 +6,7 @@ def _intent() -> SkillIntent:
     return SkillIntent(
         envelope=Envelope(robot_id="sim_robot"),
         skill_id="skill1",
-        goal_id="goal1",
         task_id="task1",
-        deliberation_id="deliberation1",
         intent_kind="observation",
         name="inspect_scene",
         arguments={"question": "is the wand at the dock?"},
@@ -36,7 +34,7 @@ def test_skill_result_evidence_requires_explicit_typed_fact() -> None:
     )
 
     assert len(facts) == 1
-    assert facts[0].goal_id == "goal1"
+    assert facts[0].task_id == "task1"
     assert facts[0].source_id == "skill1"
     assert facts[0].frame_id == 7
     assert facts[0].subject_id == "object:wand"

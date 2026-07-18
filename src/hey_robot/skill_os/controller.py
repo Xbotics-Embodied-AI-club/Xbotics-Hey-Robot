@@ -26,6 +26,7 @@ from hey_robot.logging import HeyRobotLogger
 from hey_robot.protocol import (
     RobotObservation,
     RobotStatus,
+    ShortOperationCommand,
     SkillControl,
     SkillControlResult,
     SkillIntent,
@@ -61,6 +62,20 @@ class _SkillControllerState:
     @property
     def active_runs(self) -> dict[str, SkillRun]:
         return self.scheduler.runs
+
+
+def _short_operation_intent(command: ShortOperationCommand) -> SkillIntent:
+    proposal = command.proposal
+    return SkillIntent(
+        envelope=command.envelope,
+        skill_id=command.operation_id,
+        task_id=command.operation_id,
+        intent_kind=proposal.intent_kind,
+        name=proposal.skill_name,
+        arguments=dict(proposal.arguments),
+        objective=proposal.objective,
+        timeout_sec=command.timeout_sec,
+    )
 
 
 class SkillControllerService:
@@ -111,6 +126,9 @@ class SkillControllerService:
         if self.human_follow is not None:
             await self.human_follow.start()
         await self.bus.subscribe([self.topics.robot_observation], self._on_observation)
+        await self.bus.subscribe(
+            [self.topics.short_operation_command], self._on_short_operation
+        )
         await self.bus.subscribe([self.topics.skill_intent], self._on_skill_intent)
         await self.bus.subscribe([self.topics.skill_control], self._on_skill_control)
         await self.bus.subscribe([self.topics.robot_status], self._on_status)
@@ -153,6 +171,11 @@ class SkillControllerService:
         for state in self.states.values():
             if state.spec.robot_id == robot_id:
                 state.latest_camera_frame = (metadata, image)
+
+    async def _on_short_operation(self, _topic: str, payload: dict[str, Any]) -> None:
+        command = from_payload(ShortOperationCommand, payload)
+        intent = _short_operation_intent(command)
+        await self._on_skill_intent(self.topics.skill_intent, to_payload(intent))
 
     async def _on_skill_intent(self, _topic: str, payload: dict[str, Any]) -> None:
         intent = from_payload(SkillIntent, payload)
@@ -285,9 +308,7 @@ class SkillControllerService:
                     envelope=control.envelope,
                     values=[],
                     skill_id=control.target_skill_id or control.control_id,
-                    goal_id=control.goal_id or "",
-                    task_id="",
-                    deliberation_id="",
+                    task_id=control.task_id or "",
                     intent_kind="skill",
                     metadata={
                         "action_type": "skill",
@@ -1033,9 +1054,7 @@ class SkillControllerService:
         return SkillIntent(
             envelope=intent.envelope,
             skill_id=intent.skill_id,
-            goal_id=intent.goal_id,
             task_id=intent.task_id,
-            deliberation_id=intent.deliberation_id,
             intent_kind=intent.intent_kind,
             name=action.name,
             arguments=dict(action.arguments),

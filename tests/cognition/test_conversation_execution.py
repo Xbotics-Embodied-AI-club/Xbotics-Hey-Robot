@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import asyncio
 
-from hey_robot.cognition.conversation_execution import (
-    RobotExecutionAdapter,
+from hey_robot.cognition.robot_execution_gateway import (
+    RobotExecutionGateway,
     _trusted_observation_summary,
 )
-from hey_robot.cognition.conversation_goal import GoalProposal
 from hey_robot.cognition.runtime.conversation_store import ConversationStore
-from hey_robot.protocol import ActionProposal, Envelope, GoalCommand, Topics
-from hey_robot.protocol.messages import from_payload
+from hey_robot.protocol import ActionProposal, Envelope, Topics
 from hey_robot.skill_os.base import SkillCatalog, SkillSpec
 
 
@@ -21,41 +19,10 @@ class _Bus:
         self.published.append((topic, payload))
 
 
-def test_goal_proposal_creates_linked_long_horizon_goal(tmp_path) -> None:
+def test_short_operation_timeout_is_terminal_failure(tmp_path) -> None:
     bus = _Bus()
     store = ConversationStore(tmp_path / "conversation.sqlite3")
-    adapter = RobotExecutionAdapter(
-        bus,
-        Topics(),
-        SkillCatalog((SkillSpec(name="navigate_to", description="navigate"),)),
-        store,
-        known_entities=("room:kitchen",),
-    )
-    envelope = Envelope(robot_id="mock0", channel="web", chat_id="chat")
-
-    outcome = asyncio.run(
-        adapter.execute(
-            GoalProposal("enter", "go to the kitchen", "room:kitchen"),
-            envelope,
-            "d1:main:web:chat",
-        )
-    )
-
-    assert outcome.status == "accepted"
-    assert outcome.goal_id is not None
-    command = from_payload(GoalCommand, bus.published[0][1])
-    assert bus.published[0][0] == Topics().goal_command
-    assert command.goal_id == outcome.goal_id
-    assert command.success_criteria[0].object_id == "room:kitchen"
-    link = store.goal_link(outcome.goal_id)
-    assert link is not None
-    assert link[0] == "d1:main:web:chat"
-
-
-def test_short_operation_is_submitted_to_supervisor_for_preflight(tmp_path) -> None:
-    bus = _Bus()
-    store = ConversationStore(tmp_path / "conversation.sqlite3")
-    adapter = RobotExecutionAdapter(
+    adapter = RobotExecutionGateway(
         bus,
         Topics(),
         SkillCatalog(
@@ -73,7 +40,9 @@ def test_short_operation_is_submitted_to_supervisor_for_preflight(tmp_path) -> N
         )
     )
 
-    assert outcome.status == "waiting"
+    assert outcome.status == "failed"
+    assert outcome.retryable is False
+    assert "限定时间内返回最终结果" in (outcome.user_summary or "")
     assert bus.published[0][0] == Topics().short_operation_command
 
 
