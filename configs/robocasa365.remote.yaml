@@ -1,0 +1,19 @@
+# Main-runtime configuration for the optional frame-level RoboCasa driver.
+# The simulator stays in the robocasa365 container; no RoboCasa dependency is
+# installed into the Hey Robot process.
+deployment:
+  id: robocasa365.remote
+
+robots:
+  robocasa365:
+    type: robocasa
+    family: robocasa
+    environment: remote
+    driver: grpc
+    embodiment_profile: robocasa_remote
+    settings:
+      target: grpc://127.0.0.1:9092
+      timeout_sec: 60
+      task: CloseFridge
+      seed: 1000
+      control_hz: 20

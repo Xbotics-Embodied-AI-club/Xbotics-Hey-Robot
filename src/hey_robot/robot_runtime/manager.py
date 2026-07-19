@@ -5,6 +5,10 @@ from hey_robot.contracts import SkillContractCatalog
 from hey_robot.robot_runtime.base import RobotDriver, RobotDriverContext
 from hey_robot.robot_runtime.embodiments import get_embodiment_profile
 from hey_robot.robot_runtime.mock import MockRobotDriver
+from hey_robot.robot_runtime.robocasa_remote import (
+    GrpcRoboCasaRuntimeClient,
+    RoboCasaRemoteDriver,
+)
 from hey_robot.robot_runtime.simulation.xlerobot_sim_driver import XLeRobotSimDriver
 from hey_robot.robot_runtime.xlerobot import XLeRobotDriver
 
@@ -52,6 +56,20 @@ class RobotManager:
                 continue
             if spec.robot_family == "xlerobot" and spec.driver_kind == "native":
                 self._drivers[robot_id] = XLeRobotDriver(context)
+                continue
+            if (
+                spec.robot_family == "robocasa"
+                and spec.robot_environment == "remote"
+                and spec.driver_kind == "grpc"
+            ):
+                target = str(spec.settings.get("target", "grpc://127.0.0.1:9092"))
+                self._drivers[robot_id] = RoboCasaRemoteDriver(
+                    context,
+                    GrpcRoboCasaRuntimeClient(
+                        target,
+                        timeout_sec=float(spec.settings.get("timeout_sec", 10.0)),
+                    ),
+                )
                 continue
             raise ValueError(
                 "unsupported robot driver combination: "

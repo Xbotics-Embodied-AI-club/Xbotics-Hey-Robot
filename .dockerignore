@@ -33,6 +33,9 @@ ENV/
 .coverage
 htmlcov/
 .tox/
+artifacts/
+runtime/
+logs/
 
 # Documentation
 docs/

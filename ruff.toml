@@ -126,6 +126,10 @@ ignore = [
 # gRPC servicer 方法名必须与 proto contract 一致，不能改成 Python 风格小写。
 "src/hey_robot/foundation/transport/grpc/server.py" = ["N802"]
 
+# Generated from proto/; source is reviewed at the .proto boundary.
+"src/hey_robot/robocasa_runtime/v1/*_pb2.py" = ["ALL"]
+"src/hey_robot/robocasa_runtime/v1/*_pb2_grpc.py" = ["ALL"]
+
 # 这是第三方协议/硬件语义映射层，字段命名需要贴近设备协议。
 "src/hey_robot/robot_runtime/components/servo_bus.py" = ["N815"]
 

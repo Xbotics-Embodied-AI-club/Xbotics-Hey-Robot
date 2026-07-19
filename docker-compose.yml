@@ -44,7 +44,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ${HEY_ROBOT_VLA_GPU:-0}
+              device_ids: ["${HEY_ROBOT_VLA_GPU:-0}"]
               capabilities: [gpu]
     restart: unless-stopped
     profiles:
@@ -79,11 +79,50 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ${HEY_ROBOT_VLN_GPU:-1}
+              device_ids: ["${HEY_ROBOT_VLN_GPU:-1}"]
               capabilities: [gpu]
     restart: unless-stopped
     profiles:
       - gpu
+
+  robocasa365:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.robocasa365
+      args:
+        # Resolve this to an immutable digest before a reproducible benchmark.
+        LEROBOT_BASE_IMAGE: ${HEY_ROBOT_ROBOCASA_BASE_IMAGE:-python:3.12-bookworm}
+        LEROBOT_REF: ${HEY_ROBOT_ROBOCASA_LEROBOT_REF:-v0.6.0}
+        IMAGE_REVISION: ${HEY_ROBOT_ROBOCASA_IMAGE_REVISION:-unknown}
+    image: ${HEY_ROBOT_ROBOCASA_IMAGE:-hey-robot-robocasa365:latest}
+    environment:
+      MUJOCO_GL: egl
+      HF_HOME: /cache/huggingface
+      HF_TOKEN: ${HF_TOKEN:-}
+      ROBOCASA_POLICY: ${ROBOCASA_POLICY:-lerobot/smolvla_robocasa}
+      ROBOCASA_DEFAULT_TASK: ${ROBOCASA_DEFAULT_TASK:-CloseFridge}
+      ROBOCASA_OUTPUT_ROOT: /outputs
+      ROBOCASA_ASSET_ROOT: /root/.robocasa
+      ROBOCASA_MODEL_ASSET_ROOT: /opt/robocasa/robocasa/models/assets
+      ROBOCASA_ASSET_READY_FILE: /opt/robocasa/robocasa/models/assets/.robocasa-assets-ready
+    volumes:
+      - ${HF_CACHE_DIR:-/home/liber/.cache/huggingface}:/cache/huggingface
+      # RoboCasa creates derived MJCF XML next to object assets during environment reset.
+      - ./artifacts/robocasa365/merged-assets:/opt/robocasa/robocasa/models/assets
+      - ./runtime/robocasa365:/outputs
+    ports:
+      - "${HEY_ROBOT_ROBOCASA_PORT:-9092}:9092"
+    shm_size: "8gb"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${HEY_ROBOT_ROBOCASA_GPU:-0}"]
+              capabilities: [gpu]
+    restart: unless-stopped
+    profiles:
+      - robocasa
 
   runtime:
     build:

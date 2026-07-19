@@ -4,6 +4,23 @@ from hey_robot.config import RobotSpec
 from hey_robot.robot_runtime.embodiments.base import EmbodimentProfile
 
 DEFAULT_EMBODIMENT_PROFILES: dict[str, EmbodimentProfile] = {
+    "robocasa_remote": EmbodimentProfile(
+        name="robocasa_remote",
+        robot_family="robocasa",
+        environment="remote",
+        camera_layout={
+            "default_camera": "camera1",
+            "owner": "remote_simulator",
+            "cameras": ("camera1", "camera2", "camera3"),
+        },
+        readiness_resources=("remote_runtime", "camera"),
+        metadata={
+            "driver_kind": "grpc",
+            "action_dimensions": 12,
+            "state_dimensions": 16,
+            "simulator_only": True,
+        },
+    ),
     "xlerobot_real": EmbodimentProfile(
         name="xlerobot_real",
         robot_family="xlerobot",

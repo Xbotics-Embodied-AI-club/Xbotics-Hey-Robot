@@ -18,6 +18,7 @@ from hey_robot.robot_runtime.embodiments import (
 from hey_robot.robot_runtime.lekiwi import LeKiwiDriver
 from hey_robot.robot_runtime.manager import RobotManager
 from hey_robot.robot_runtime.mock import MockRobotDriver
+from hey_robot.robot_runtime.robocasa_remote import RoboCasaRemoteDriver
 from hey_robot.robot_runtime.runtime import RobotRuntime, RobotRuntimeSnapshot
 from hey_robot.robot_runtime.safety import (
     RobotSafetyError,
@@ -35,6 +36,7 @@ __all__ = [
     "EmbodimentProfile",
     "LeKiwiDriver",
     "MockRobotDriver",
+    "RoboCasaRemoteDriver",
     "RobotCapabilities",
     "RobotControlPlane",
     "RobotDriver",

@@ -1,0 +1,5 @@
+# This environment is intentionally independent from Hey Robot's Python 3.12
+# runtime and its optional VLA dependency group.
+grpcio==1.73.1
+grpcio-tools==1.73.1
+protobuf>=4.25.0,<7

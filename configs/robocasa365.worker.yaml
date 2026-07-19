@@ -1,0 +1,25 @@
+# Host-side configuration for the external RoboCasa365 benchmark worker.
+# The worker itself is built from docker/Dockerfile.robocasa365 and does not
+# load this YAML; Hey Robot uses it to route robocasa_rollout over gRPC.
+deployment:
+  id: robocasa365.worker
+
+skills:
+  modules:
+    - hey_robot.skill_os.builtins
+  enabled:
+    - robocasa_rollout
+
+model_services:
+  robocasa365:
+    type: vla_policy
+    robot_id: ""
+    enabled: true
+    target: grpc://127.0.0.1:9092
+    provides:
+      - robocasa_rollout
+    timeout_sec: 1800
+    settings:
+      health_timeout_sec: 10
+      policy_path: lerobot/smolvla_robocasa
+      default_task: CloseFridge
