@@ -92,14 +92,16 @@ services:
       args:
         # Resolve this to an immutable digest before a reproducible benchmark.
         LEROBOT_BASE_IMAGE: ${HEY_ROBOT_ROBOCASA_BASE_IMAGE:-python:3.12-bookworm}
-        LEROBOT_REF: ${HEY_ROBOT_ROBOCASA_LEROBOT_REF:-v0.6.0}
+        LEROBOT_REF: ${HEY_ROBOT_ROBOCASA_LEROBOT_REF:-cb73cf3ffa1cec60640a06b924c2174548ae2b1b}
         IMAGE_REVISION: ${HEY_ROBOT_ROBOCASA_IMAGE_REVISION:-unknown}
     image: ${HEY_ROBOT_ROBOCASA_IMAGE:-hey-robot-robocasa365:latest}
     environment:
       MUJOCO_GL: egl
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,graphics
       HF_HOME: /cache/huggingface
       HF_TOKEN: ${HF_TOKEN:-}
       ROBOCASA_POLICY: ${ROBOCASA_POLICY:-lerobot/smolvla_robocasa}
+      ROBOCASA_EVAL_BINARY: ${ROBOCASA_EVAL_BINARY:-/opt/bridge/lerobot_eval_wrapper.py}
       ROBOCASA_DEFAULT_TASK: ${ROBOCASA_DEFAULT_TASK:-CloseFridge}
       ROBOCASA_OUTPUT_ROOT: /outputs
       ROBOCASA_ASSET_ROOT: /root/.robocasa

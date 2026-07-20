@@ -1,0 +1,41 @@
+# Host-side configuration for RoboCasa365 embodied-agent evaluation.
+# The worker on :9092 exposes both ModelService v1 and RoboCasaRuntime gRPC.
+deployment:
+  id: robocasa365.agent
+
+skills:
+  modules:
+    - hey_robot.skill_os.builtins
+  enabled:
+    - robocasa_option
+    - robocasa_rollout
+
+robots:
+  robocasa365:
+    type: robocasa
+    family: robocasa
+    environment: remote
+    driver: grpc
+    embodiment_profile: robocasa_remote
+    settings:
+      target: grpc://127.0.0.1:9092
+      timeout_sec: 60
+      task: CloseFridge
+      seed: 1000
+      control_hz: 20
+
+model_services:
+  robocasa365:
+    type: vla_policy
+    robot_id: robocasa365
+    enabled: true
+    target: grpc://127.0.0.1:9092
+    provides:
+      - robocasa_option
+      - robocasa_rollout
+    timeout_sec: 1800
+    settings:
+      health_timeout_sec: 10
+      policy_path: lerobot/smolvla_robocasa
+      default_task: CloseFridge
+      policy_device: cuda

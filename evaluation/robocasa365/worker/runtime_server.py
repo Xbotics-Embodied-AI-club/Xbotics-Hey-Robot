@@ -5,6 +5,7 @@ import io
 import math
 import os
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,7 @@ from PIL import Image
 try:
     from rollout import ALLOWED_TASKS, CAMERA_RENAME_MAP, DEFAULT_REGISTRIES
 except ModuleNotFoundError:
-    from deploy.robocasa365.rollout import (
+    from evaluation.robocasa365.worker.rollout import (
         ALLOWED_TASKS,
         CAMERA_RENAME_MAP,
         DEFAULT_REGISTRIES,
@@ -258,27 +259,35 @@ def _validate_observation(observation: dict[str, Any]) -> None:
 
 
 def _assets_available() -> bool:
-    marker = Path(
-        os.environ.get(
-            "ROBOCASA_ASSET_READY_FILE",
-            "/opt/robocasa/robocasa/models/assets/.robocasa-assets-ready",
-        )
-    )
-    asset_root = Path(
+    explicit_root = Path(
         os.environ.get(
             "ROBOCASA_MODEL_ASSET_ROOT",
             "/opt/robocasa/robocasa/models/assets",
         )
     )
-    return marker.is_file() and all(
-        path.is_dir()
-        for path in (
-            asset_root / "textures",
-            asset_root / "generative_textures",
-            asset_root / "fixtures",
-            asset_root / "objects" / "lightwheel",
+    roots = [explicit_root]
+    with suppress(Exception):
+        import robocasa
+
+        roots.append(Path(robocasa.__file__).resolve().parent / "models" / "assets")
+    marker_override = os.environ.get("ROBOCASA_ASSET_READY_FILE")
+    for root in dict.fromkeys(roots):
+        required = (
+            root / "textures",
+            root / "generative_textures",
+            root / "fixtures",
+            root / "objects" / "lightwheel",
         )
-    )
+        if not all(path.is_dir() for path in required):
+            continue
+        marker = (
+            Path(marker_override)
+            if marker_override
+            else root / ".robocasa-assets-ready"
+        )
+        if marker.is_file() or root != explicit_root:
+            return True
+    return False
 
 
 def _struct(value: dict[str, Any]) -> Struct:

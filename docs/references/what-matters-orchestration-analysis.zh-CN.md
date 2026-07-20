@@ -2,7 +2,6 @@
 
 > 文档状态：基于 2026-07-19 仓库实现的代码审计与设计评述  
 > 论文：`What Matters in Orchestrating Robot Policies.md`，arXiv:2606.10267v1  
-> 相关接入文档：[RoboCasa365 独立容器接入 Hey Robot](../operations/robocasa365-integration.md)
 
 ## 1. 结论
 
@@ -364,7 +363,7 @@ checkpoint 已在目标 observation/action schema 上稳定跑通。更缺少以
 
 ### 7.1 容器内完整 rollout 只能验证基础设施
 
-当前 RoboCasa365 接入文档建议首版采用容器内闭环 rollout：
+RoboCasa365 canonical 文档将容器内完整 rollout 标记为 B0 flat VLA baseline：
 
 ```text
 Hey Robot 下发完整任务

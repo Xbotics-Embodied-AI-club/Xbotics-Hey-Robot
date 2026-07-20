@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -17,18 +18,18 @@ from typing import Any
 try:
     from rollout import (
         ALLOWED_TASKS,
-        CAMERA_RENAME_MAP,
         DEFAULT_POLICY,
         DEFAULT_SPLIT,
         _versions,
+        evaluation_rename_map,
     )
 except ModuleNotFoundError:
-    from deploy.robocasa365.rollout import (
+    from evaluation.robocasa365.worker.rollout import (
         ALLOWED_TASKS,
-        CAMERA_RENAME_MAP,
         DEFAULT_POLICY,
         DEFAULT_SPLIT,
         _versions,
+        evaluation_rename_map,
     )
 
 
@@ -39,14 +40,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--task", default="CloseFridge", choices=sorted(ALLOWED_TASKS))
     parser.add_argument("--episodes", type=int, default=20)
     parser.add_argument("--seed", type=int, default=1000)
-    parser.add_argument("--policy-path", default=DEFAULT_POLICY)
+    parser.add_argument(
+        "--policy-path", default=os.environ.get("ROBOCASA_POLICY", DEFAULT_POLICY)
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     return parser
 
 
 def _command(args: argparse.Namespace) -> list[str]:
-    return [
-        "lerobot-eval",
+    command = [
+        os.environ.get("ROBOCASA_EVAL_BINARY", "lerobot-eval"),
         f"--policy.path={args.policy_path}",
         "--env.type=robocasa",
         f"--env.task={args.task}",
@@ -58,8 +61,11 @@ def _command(args: argparse.Namespace) -> list[str]:
         f"--seed={args.seed}",
         "--policy.device=cuda",
         f"--output_dir={args.output_dir}",
-        f"--rename_map={json.dumps(CAMERA_RENAME_MAP, separators=(',', ':'))}",
     ]
+    rename_map = evaluation_rename_map()
+    if rename_map:
+        command.append(f"--rename_map={json.dumps(rename_map, separators=(',', ':'))}")
+    return command
 
 
 def _gpu_info() -> dict[str, Any]:

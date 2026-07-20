@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import asdict, dataclass
 from importlib import metadata
 from pathlib import Path
@@ -32,6 +33,28 @@ CAMERA_RENAME_MAP = {
     "observation.images.robot0_agentview_right": "observation.images.camera2",
     "observation.images.robot0_eye_in_hand": "observation.images.camera3",
 }
+
+
+def evaluation_rename_map(environ: dict[str, str] | None = None) -> dict[str, str]:
+    """Return an optional environment-to-policy feature rename map.
+
+    The eval wrapper automatically restores a checkpoint's saved processor
+    mapping. This environment value is only an explicit override for custom
+    checkpoints or diagnostics.
+    """
+    raw = (environ or os.environ).get("ROBOCASA_RENAME_MAP", "").strip()
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"ROBOCASA_RENAME_MAP is not valid JSON: {exc}") from exc
+    if not isinstance(value, dict) or not all(
+        isinstance(key, str) and isinstance(target, str)
+        for key, target in value.items()
+    ):
+        raise ValueError("ROBOCASA_RENAME_MAP must be a JSON object of string pairs")
+    return value
 
 
 class RolloutError(RuntimeError):
@@ -74,15 +97,19 @@ class RoboCasaRolloutRunner:
         self,
         *,
         output_root: Path | str | None = None,
-        eval_binary: str = "lerobot-eval",
+        eval_binary: str | None = None,
         environ: dict[str, str] | None = None,
         popen_factory: Callable[..., subprocess.Popen[str]] = subprocess.Popen,
     ) -> None:
         self.output_root = Path(
             output_root or os.environ.get("ROBOCASA_OUTPUT_ROOT", "/outputs")
         ).resolve()
-        self.eval_binary = eval_binary
         self.environ = dict(environ or os.environ)
+        self.eval_binary = eval_binary or self.environ.get(
+            "ROBOCASA_EVAL_BINARY", "lerobot-eval"
+        )
+        self.default_policy = self.environ.get("ROBOCASA_POLICY", DEFAULT_POLICY)
+        self.rename_map = evaluation_rename_map(self.environ)
         self._popen_factory = popen_factory
         self._lock = Lock()
         self._process: subprocess.Popen[str] | None = None
@@ -102,7 +129,7 @@ class RoboCasaRolloutRunner:
     def health(self) -> dict[str, Any]:
         imports_ok, import_error = self._imports_available()
         assets_ok = self._assets_available()
-        policy_cached = self._policy_cached(DEFAULT_POLICY)
+        policy_cached = self._policy_cached(self.default_policy)
         loaded = imports_ok and assets_ok and policy_cached
         return {
             "online": True,
@@ -118,8 +145,8 @@ class RoboCasaRolloutRunner:
             "metrics": {
                 "benchmark": "robocasa365",
                 "asset_profile": "lightwheel",
-                "policy_path": DEFAULT_POLICY,
-                "policy_revision": self._policy_revision(DEFAULT_POLICY),
+                "policy_path": self.default_policy,
+                "policy_revision": self._policy_revision(self.default_policy),
                 "policy_cached": policy_cached,
                 "imports_available": imports_ok,
                 "assets_available": assets_ok,
@@ -299,8 +326,11 @@ class RoboCasaRolloutRunner:
             f"--seed={request.seed}",
             "--policy.device=cuda",
             f"--output_dir={output_dir}",
-            f"--rename_map={json.dumps(CAMERA_RENAME_MAP, separators=(',', ':'))}",
         ]
+        if self.rename_map:
+            command.append(
+                f"--rename_map={json.dumps(self.rename_map, separators=(',', ':'))}"
+            )
         # The pinned RoboCasa evaluation command records its video artifacts in
         # the output directory. Do not add an unverified "disable video" flag:
         # unknown LeRobot CLI options abort an otherwise valid rollout.
@@ -349,27 +379,18 @@ class RoboCasaRolloutRunner:
         return True, None
 
     def _assets_available(self) -> bool:
-        marker = Path(
-            self.environ.get("ROBOCASA_ASSET_READY_FILE", "/opt/robocasa-assets-ready")
-        )
-        asset_root = Path(
-            self.environ.get(
-                "ROBOCASA_MODEL_ASSET_ROOT",
-                "/opt/robocasa/robocasa/models/assets",
-            )
-        )
-        required = (
-            asset_root / "textures",
-            asset_root / "generative_textures",
-            asset_root / "fixtures",
-            asset_root / "objects" / "lightwheel",
-        )
-        return marker.is_file() and all(path.is_dir() for path in required)
+        return _assets_available(self.environ)
 
     def _policy_cached(self, policy_path: str) -> bool:
         cache_root = Path(self.environ.get("HF_HOME", "/cache/huggingface")) / "hub"
         repo_name = policy_path.replace("/", "--")
-        return any(cache_root.glob(f"models--{repo_name}/snapshots/*"))
+        snapshots = cache_root.glob(f"models--{repo_name}/snapshots/*")
+        return any(
+            (snapshot / "model.safetensors").is_file()
+            or (snapshot / "model.safetensors.index.json").is_file()
+            or any(snapshot.glob("model-*.safetensors"))
+            for snapshot in snapshots
+        )
 
     def _policy_revision(self, policy_path: str) -> str | None:
         cache_root = Path(self.environ.get("HF_HOME", "/cache/huggingface")) / "hub"
@@ -436,11 +457,12 @@ def parse_eval_info(path: Path, n_episodes: int) -> dict[str, Any]:
 
 def _find_successes(value: Any) -> list[int]:
     if isinstance(value, dict):
-        direct = value.get("success")
-        if isinstance(direct, list) and all(
-            isinstance(item, bool | int | float) for item in direct
-        ):
-            return [int(bool(item)) for item in direct]
+        for key in ("success", "successes"):
+            direct = value.get(key)
+            if isinstance(direct, list) and all(
+                isinstance(item, bool | int | float) for item in direct
+            ):
+                return [int(bool(item)) for item in direct]
         for key in ("per_episode", "episodes", "episode_results"):
             items = value.get(key)
             if isinstance(items, list):
@@ -575,3 +597,34 @@ def _failure_mode_from_logs(stderr_path: Path) -> str:
     if "policy" in text and ("load" in text or "deserialize" in text):
         return "policy_load_failed"
     return "environment_reset_failed"
+
+
+def _assets_available(environ: dict[str, str] | None = None) -> bool:
+    environ = environ or os.environ
+    explicit_root = Path(
+        environ.get("ROBOCASA_MODEL_ASSET_ROOT", "/opt/robocasa/robocasa/models/assets")
+    )
+    roots = [explicit_root]
+    with suppress(Exception):
+        import robocasa
+
+        roots.append(Path(robocasa.__file__).resolve().parent / "models" / "assets")
+
+    marker_override = environ.get("ROBOCASA_ASSET_READY_FILE")
+    for root in dict.fromkeys(roots):
+        required = (
+            root / "textures",
+            root / "generative_textures",
+            root / "fixtures",
+            root / "objects" / "lightwheel",
+        )
+        if not all(path.is_dir() for path in required):
+            continue
+        marker = (
+            Path(marker_override)
+            if marker_override
+            else root / ".robocasa-assets-ready"
+        )
+        if marker.is_file() or root != explicit_root:
+            return True
+    return False

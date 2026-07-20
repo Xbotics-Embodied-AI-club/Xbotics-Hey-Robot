@@ -70,6 +70,9 @@ _ARM_JOINT_NAMES = (
 _EGL_CONTEXT: Any = None
 """Singleton EGL GL context for headless rendering."""
 
+_EGL_AVAILABLE: bool | None = None
+"""Cached EGL platform-device availability — evaluated once per process."""
+
 
 class _DockSessionAdapter:
     """通过已验证的 dock-kernel session API 暴露 XLeRobotSimDriver。"""
@@ -141,6 +144,32 @@ class _DockSessionAdapter:
             self.data.qvel[dof_addr] = 0.0
 
 
+def _test_egl_device_display() -> bool:
+    """Probe whether the EGL driver supports PLATFORM_DEVICE headless rendering.
+
+    A failed ``GLContext`` construction leaves ``mujoco.egl.EGL_DISPLAY`` pointing
+    at ``EGL_NO_DISPLAY``, which poisons any later EGL path.  We reset it so that
+    the OSMesa fallback operates from a clean slate.
+    """
+    import mujoco.egl
+
+    try:
+        ctx = mujoco.egl.GLContext(64, 64)
+    except Exception:
+        mujoco.egl.EGL_DISPLAY = None
+        return False
+    else:
+        ctx.free()
+        return True
+
+
+def _is_egl_available() -> bool:
+    global _EGL_AVAILABLE
+    if _EGL_AVAILABLE is None:
+        _EGL_AVAILABLE = _test_egl_device_display()
+    return _EGL_AVAILABLE
+
+
 def _configure_mujoco_gl_backend() -> str | None:
     configured = os.environ.get("MUJOCO_GL")
     if configured:
@@ -150,8 +179,12 @@ def _configure_mujoco_gl_backend() -> str | None:
         os.environ["MUJOCO_GL"] = "wgl"
         return "wgl"
     if system == "Linux" and not os.environ.get("DISPLAY"):
-        os.environ["MUJOCO_GL"] = "egl"
-        return "egl"
+        if _is_egl_available():
+            os.environ["MUJOCO_GL"] = "egl"
+            return "egl"
+        logger.info("EGL platform-device headless unavailable; falling back to osmesa")
+        os.environ["MUJOCO_GL"] = "osmesa"
+        return "osmesa"
     return None
 
 

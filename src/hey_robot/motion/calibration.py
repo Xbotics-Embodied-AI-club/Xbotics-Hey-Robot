@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import yaml
@@ -30,4 +31,4 @@ def camera_to_base(position: np.ndarray, transform: np.ndarray) -> np.ndarray:
     if point.shape != (3,) or matrix.shape != (4, 4):
         raise ValueError("camera_to_base expects a 3-vector and a 4x4 transform")
     homogeneous = np.concatenate((point, np.ones(1, dtype=np.float64)))
-    return (matrix @ homogeneous)[:3]
+    return cast(np.ndarray, (matrix @ homogeneous)[:3])

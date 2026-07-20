@@ -63,6 +63,7 @@ venv/*
 .venv/
 .vln-venv/
 .vla-venv/
+.robocasa365-venv/
 
 # Disable upload .env
 .env

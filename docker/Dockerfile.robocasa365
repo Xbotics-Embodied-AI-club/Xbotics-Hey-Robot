@@ -3,7 +3,9 @@
 ARG LEROBOT_BASE_IMAGE=python:3.12-bookworm
 FROM ${LEROBOT_BASE_IMAGE}
 
-ARG LEROBOT_REF=v0.6.0
+# PI052 is currently available on this upstream post-v0.6.0 commit. Keep the
+# build arg overridable so a tagged release can replace it once available.
+ARG LEROBOT_REF=cb73cf3ffa1cec60640a06b924c2174548ae2b1b
 ARG ROBOCASA_SHA=56e355ccc64389dfc1b8a61a33b9127b975ba681
 ARG ROBOSUITE_SHA=aaa8b9b214ce8e77e82926d677b4d61d55e577ab
 ARG IMAGE_REVISION=unknown
@@ -35,7 +37,7 @@ import tempfile
 import urllib.request
 
 ref = os.environ.get("LEROBOT_REF", "v0.6.0")
-url = f"https://github.com/huggingface/lerobot/archive/refs/tags/{ref}.tar.gz"
+url = f"https://github.com/huggingface/lerobot/archive/{ref}.tar.gz"
 dst = Path("/opt/lerobot")
 tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".tar.gz")
 urllib.request.urlretrieve(url, tmp.name)
@@ -54,7 +56,7 @@ with tarfile.open(tmp.name, "r:gz") as tf:
 Path(tmp.name).unlink()
 PY
 RUN uv pip install --system --no-cache -c /tmp/torch-constraints.txt \
-    -e "/opt/lerobot[dataset,smolvla]"
+    -e "/opt/lerobot[dataset,evaluation,pi,smolvla]"
 
 RUN python - <<'PY'
 from pathlib import Path
@@ -88,14 +90,14 @@ PY
 RUN uv pip install --system --no-cache --no-deps -e /opt/robocasa \
     && uv pip install --system --no-cache -e /opt/robosuite
 
-COPY deploy/robocasa365/requirements.txt /tmp/requirements.txt
-RUN uv pip install --system --no-cache \
+COPY evaluation/robocasa365/worker/requirements.txt /tmp/requirements.txt
+RUN uv pip uninstall --system -y opencv-python \
+    && uv pip install --system --no-cache \
         "numpy==2.2.5" "numba==0.61.2" "scipy==1.15.3" "mujoco==3.3.1" \
         "pygame==2.6.1" "Pillow==12.2.0" "opencv-python-headless==4.13.0.92" \
         "pyyaml==6.0.3" "pynput==1.8.1" "tqdm==4.67.3" "termcolor==3.3.0" \
         "imageio==2.37.3" "h5py==3.16.0" "lxml==6.0.4" \
         "hidapi==0.14.0.post4" "tianshou==0.4.10" "gymnasium==1.2.3" \
-    && uv pip uninstall --system -y opencv-python \
     && uv pip install --system --no-cache -r /tmp/requirements.txt
 
 RUN apt-get update \
@@ -130,8 +132,9 @@ RUN mkdir -p /opt/bridge/hey_robot/model_service/v1 /opt/bridge/hey_robot/roboca
         /opt/bridge/proto/hey_robot/model_service/v1/model_service.proto \
         /opt/bridge/proto/hey_robot/robocasa_runtime/v1/robocasa_runtime.proto
 
-COPY deploy/robocasa365 /opt/bridge/
-RUN mkdir -p /outputs /cache/huggingface
+COPY evaluation/robocasa365/worker /opt/bridge/
+RUN chmod +x /opt/bridge/lerobot_eval_wrapper.py \
+    && mkdir -p /outputs /cache/huggingface
 
 EXPOSE 9092
 CMD ["python", "server.py", "--host", "0.0.0.0", "--port", "9092"]
