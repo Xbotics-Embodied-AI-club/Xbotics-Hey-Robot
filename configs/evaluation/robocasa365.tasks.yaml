@@ -1,0 +1,25 @@
+version: robocasa-1.0.0-target-v1
+split: target
+registries: [lightwheel]
+
+suites:
+  atomic_gate:
+    - CloseFridge
+    - OpenDrawer
+    - PickPlaceCounterToCabinet
+    - TurnOnMicrowave
+    - TurnOnSinkFaucet
+  composite_seen:
+    - KettleBoiling
+    - PrepareCoffee
+    - LoadDishwasher
+    - SetUpCuttingStation
+    - StackBowlsCabinet
+    - SteamInMicrowave
+  composite_unseen:
+    - ArrangeTea
+    - CategorizeCondiments
+    - MakeIceLemonade
+    - RecycleBottlesByType
+    - WashFruitColander
+    - WeighIngredients

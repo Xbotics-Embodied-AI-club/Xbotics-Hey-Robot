@@ -326,7 +326,7 @@ def test_manipulate_routes_to_required_vla_model_service() -> None:
     )
 
 
-def test_vla_max_steps_exhausted_fails() -> None:
+def test_vla_max_steps_returns_control_to_agent() -> None:
     class ModelServiceAPI:
         async def call(self, _name: str, _arguments: dict):
             return SimpleNamespace(
@@ -357,8 +357,59 @@ def test_vla_max_steps_exhausted_fails() -> None:
         )
     )
 
+    assert result.success is True
+    assert result.failure_mode is None
+    assert result.data["option_state"] == "boundary_reached"
+    assert result.data["termination_reason"] == "max_steps"
+    assert result.data["root_task_success"] is None
+
+
+def test_vla_action_fails_when_post_action_observation_stays_stale() -> None:
+    class ModelServiceAPI:
+        async def call(self, _name: str, _arguments: dict):
+            return SimpleNamespace(
+                success=True,
+                summary="action produced",
+                status="completed",
+                failure_mode=None,
+                error=None,
+                metrics={
+                    "vla": {
+                        "joint_angles": {"shoulder_pan": 0.1},
+                        "task_done": False,
+                    }
+                },
+            )
+
+    class FakeRobot:
+        async def move_arm_joints(self, **_arguments):
+            return {"success": True}
+
+    observation = RobotObservation(envelope=Envelope(robot_id="xlerobot"), frame_id=7)
+    runtime = SkillRuntime(load_skill_registry(enabled=("manipulate",)))
+
+    result = __import__("asyncio").run(
+        runtime.execute(
+            "manipulate",
+            {
+                "task_prompt": "Pick up the red cup.",
+                "max_steps": 1,
+                "fresh_observation_timeout_sec": 0.001,
+            },
+            context_factory=lambda invoke: SkillContext(
+                model_services=ModelServiceAPI(),
+                invoke=invoke,
+                robot=FakeRobot(),
+                current_observation=lambda: observation,
+            ),
+        )
+    )
+
     assert result.success is False
-    assert result.failure_mode == "vla_max_steps_exhausted"
+    assert result.failure_mode == "observation_stale"
+    assert result.data["termination_reason"] == "observation_stale"
+    assert result.data["before_frame_id"] == 7
+    assert result.data["after_frame_id"] is None
 
 
 def test_vla_adapter_consumes_typed_action_chunk_policy_result() -> None:
@@ -539,11 +590,15 @@ def test_vla_skill_injects_observation_and_consumes_typed_policy_result() -> Non
             )
 
     class FakeRobot:
-        def __init__(self) -> None:
+        def __init__(self, observations: list[RobotObservation]) -> None:
             self.calls: list[tuple[str, dict]] = []
+            self.observations = observations
 
         async def move_arm_joints(self, **arguments):
             self.calls.append(("move_arm_joints", dict(arguments)))
+            self.observations[0] = RobotObservation(
+                envelope=Envelope(robot_id="xlerobot"), frame_id=8
+            )
             return {"success": True}
 
         async def set_gripper(self, **arguments):
@@ -561,8 +616,9 @@ def test_vla_skill_injects_observation_and_consumes_typed_policy_result() -> Non
         ],
         proprioception=[0.1, 0.2],
     )
+    observations = [observation]
     model_services = ModelServiceAPI()
-    robot = FakeRobot()
+    robot = FakeRobot(observations)
     registry = load_skill_registry(enabled=("manipulate",))
     runtime = SkillRuntime(registry)
 
@@ -576,7 +632,7 @@ def test_vla_skill_injects_observation_and_consumes_typed_policy_result() -> Non
                 robot=robot,
                 skill_id="pick-typed",
                 observation=observation,
-                current_observation=lambda: observation,
+                current_observation=lambda: observations[0],
             ),
         )
     )

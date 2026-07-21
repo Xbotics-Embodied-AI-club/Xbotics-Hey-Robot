@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import grpc
@@ -23,12 +24,23 @@ robocasa_runtime_pb2: Any = _robocasa_runtime_pb2
 class GrpcRoboCasaRuntimeClient:
     """Async client for the isolated RoboCasa runtime container."""
 
-    def __init__(self, target: str, *, timeout_sec: float = 10.0) -> None:
+    def __init__(
+        self,
+        target: str,
+        *,
+        timeout_sec: float = 10.0,
+        role: str = "data",
+        token: str | None = None,
+    ) -> None:
         normalized = target.removeprefix("grpc://")
         if not normalized:
             raise ValueError("RoboCasa runtime target must not be empty")
         self.target = normalized
         self.timeout_sec = float(timeout_sec)
+        self.role = role
+        self.token = token or os.environ.get(
+            "ROBOCASA_EVALUATOR_TOKEN" if role == "evaluator" else "ROBOCASA_DATA_TOKEN"
+        )
         self._channel: grpc.aio.Channel | None = None
         # gRPC's generated stub does not publish a useful static interface.
         # Keep that untyped boundary local to the generated protocol adapter.
@@ -44,7 +56,9 @@ class GrpcRoboCasaRuntimeClient:
 
     async def health(self) -> dict[str, Any]:
         response = await self._runtime_stub().GetHealth(
-            robocasa_runtime_pb2.HealthRequest(), timeout=self.timeout_sec
+            robocasa_runtime_pb2.HealthRequest(),
+            timeout=self.timeout_sec,
+            metadata=self._metadata(),
         )
         return {
             "online": response.online,
@@ -54,30 +68,34 @@ class GrpcRoboCasaRuntimeClient:
             "metrics": _struct_to_dict(response.metrics),
         }
 
-    async def create_episode(self, *, task: str, seed: int) -> RemoteObservation:
-        response = await self._runtime_stub().CreateEpisode(
-            robocasa_runtime_pb2.CreateEpisodeRequest(task=task, seed=seed),
+    async def begin_trial(
+        self, *, trial_id: str, task: str, seed: int
+    ) -> RemoteObservation:
+        response = await self._runtime_stub().BeginTrial(
+            robocasa_runtime_pb2.BeginTrialRequest(
+                trial_id=trial_id, task=task, seed=seed
+            ),
             timeout=self.timeout_sec,
-        )
-        return _observation(response.observation)
-
-    async def observe(self, *, episode_id: str) -> RemoteObservation:
-        response = await self._runtime_stub().Observe(
-            robocasa_runtime_pb2.EpisodeRequest(episode_id=episode_id),
-            timeout=self.timeout_sec,
+            metadata=self._metadata(),
         )
         return _observation(response)
 
-    async def step(
-        self, *, episode_id: str, action: list[float], expected_frame_id: int
-    ) -> RemoteStep:
+    async def observe(self) -> RemoteObservation:
+        response = await self._runtime_stub().Observe(
+            robocasa_runtime_pb2.EmptyRequest(),
+            timeout=self.timeout_sec,
+            metadata=self._metadata(),
+        )
+        return _observation(response)
+
+    async def step(self, *, action: list[float], expected_frame_id: int) -> RemoteStep:
         response = await self._runtime_stub().Step(
             robocasa_runtime_pb2.StepRequest(
-                episode_id=episode_id,
                 action=action,
                 expected_frame_id=expected_frame_id,
             ),
             timeout=self.timeout_sec,
+            metadata=self._metadata(),
         )
         return RemoteStep(
             observation=_observation(response.observation),
@@ -87,28 +105,38 @@ class GrpcRoboCasaRuntimeClient:
             metrics=_struct_to_dict(response.metrics),
         )
 
-    async def reset(self, *, episode_id: str) -> RemoteObservation:
-        response = await self._runtime_stub().Reset(
-            robocasa_runtime_pb2.EpisodeRequest(episode_id=episode_id),
+    async def read_truth(self) -> dict[str, Any]:
+        response = await self._runtime_stub().ReadTruth(
+            robocasa_runtime_pb2.EmptyRequest(),
             timeout=self.timeout_sec,
+            metadata=self._metadata(),
         )
-        return _observation(response)
+        return {
+            "done": bool(response.done),
+            "official_success": bool(response.official_success),
+            "frame_id": int(response.frame_id),
+            "metrics": _struct_to_dict(response.metrics),
+        }
 
-    async def close_episode(self, *, episode_id: str) -> bool:
-        response = await self._runtime_stub().CloseEpisode(
-            robocasa_runtime_pb2.EpisodeRequest(episode_id=episode_id),
+    async def end_trial(self, *, reason: str = "completed") -> bool:
+        response = await self._runtime_stub().EndTrial(
+            robocasa_runtime_pb2.EndTrialRequest(reason=reason),
             timeout=self.timeout_sec,
+            metadata=self._metadata(),
         )
-        return bool(response.closed)
+        return bool(response.ended)
 
     async def close(self) -> None:
         if self._channel is not None:
             await self._channel.close()
 
+    def _metadata(self) -> tuple[tuple[str, str], ...]:
+        return (("authorization", f"Bearer {self.token}"),) if self.token else ()
+
 
 def _observation(value) -> RemoteObservation:
     return RemoteObservation(
-        episode_id=value.episode_id,
+        episode_id=value.trial_id,
         frame_id=int(value.frame_id),
         state=[float(item) for item in value.state],
         images=[

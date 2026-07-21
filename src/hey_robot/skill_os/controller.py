@@ -48,6 +48,33 @@ from hey_robot.skill_os.scheduler import SkillRun, SkillScheduler
 
 logger = HeyRobotLogger(name="skill")
 
+_ORCHESTRATION_RESULT_KEYS = (
+    "option_state",
+    "termination_reason",
+    "root_task_success",
+    "episode_done",
+    "requires_reobservation",
+    "before_frame_id",
+    "after_frame_id",
+)
+
+
+def _orchestration_result_metadata(data: object) -> dict[str, Any]:
+    """Select small control-plane fields from a plugin result.
+
+    Model outputs and RoboCasa traces can be large.  Only the fields needed by
+    the slow Agent loop are allowed onto the protocol result metadata.
+    """
+    if not isinstance(data, dict):
+        return {}
+    metrics = data.get("metrics")
+    nested = metrics if isinstance(metrics, dict) else {}
+    return {
+        key: data[key] if key in data else nested[key]
+        for key in _ORCHESTRATION_RESULT_KEYS
+        if key in data or key in nested
+    }
+
 
 @dataclass
 class _SkillControllerState:
@@ -608,7 +635,9 @@ class SkillControllerService:
         )
         if state.active_runs.get(intent.skill_id) is not run or run.terminal:
             return
-        evidence_data = getattr(result, "data", {}).get("evidence")
+        result_data = dict(getattr(result, "data", {}) or {})
+        evidence_data = result_data.get("evidence")
+        result_metadata = _orchestration_result_metadata(result_data)
         if result.success and intent.name == "inspect_scene":
             facts = list(evidence_data) if isinstance(evidence_data, list) else []
             facts.append(
@@ -632,6 +661,7 @@ class SkillControllerService:
             failure_mode=getattr(result, "failure_mode", None),
             error=getattr(result, "error", None),
             evidence_data=evidence_data,
+            result_metadata=result_metadata,
         )
 
     async def _finish_run(
@@ -646,6 +676,7 @@ class SkillControllerService:
         failure_mode: str | None = None,
         error: str | None = None,
         evidence_data: object = None,
+        result_metadata: dict[str, Any] | None = None,
     ) -> None:
         intent = run.intent
         final_summary = self._completion_summary(run, summary) if success else summary
@@ -677,6 +708,7 @@ class SkillControllerService:
             contract=run.contract,
             run=run,
             evidence_data=evidence_data,
+            metadata=result_metadata,
         )
         await self._publish_scheduler_state(
             policy_id,
@@ -1008,6 +1040,7 @@ class SkillControllerService:
         contract: SkillContract | None = None,
         run: SkillRun | None = None,
         evidence_data: object = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         self._sync_event_sink()
         await self.event_sink.publish_result(
@@ -1022,6 +1055,7 @@ class SkillControllerService:
             steps_executed=steps_executed,
             contract=contract,
             evidence_data=evidence_data,
+            metadata=metadata,
         )
 
     def _state_for_robot(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from hey_robot.cognition.autonomous_agent_service import _tool_outcome_context
 from hey_robot.cognition.runtime.agent_task_store import AgentTaskStore
 from hey_robot.cognition.tools.robot import (
     CompleteTaskProposal,
@@ -43,6 +44,20 @@ def test_complete_task_requires_evidence_ids() -> None:
 
     assert isinstance(proposal, CompleteTaskProposal)
     assert proposal.evidence_ids == ("observation:op1",)
+
+
+def test_bounded_option_result_requires_reobservation_in_next_turn() -> None:
+    proposal = ActionProposal("skill", "manipulate", "pick up cup", {})
+    outcome = ToolOutcome(
+        "completed",
+        "bounded option ended",
+        data={"requires_reobservation": True},
+    )
+
+    context = _tool_outcome_context(proposal, outcome)
+
+    assert "先调用 request_observation" in context
+    assert "不能仅凭动作调用成功" in context
 
 
 def test_sustained_task_completion_requires_post_motion_observation(

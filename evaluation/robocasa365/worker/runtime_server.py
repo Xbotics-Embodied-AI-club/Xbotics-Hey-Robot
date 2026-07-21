@@ -4,30 +4,39 @@ import asyncio
 import io
 import math
 import os
-import uuid
+from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import grpc
 import numpy as np
 from google.protobuf.json_format import ParseDict
 from google.protobuf.struct_pb2 import Struct
 from PIL import Image
 
 try:
-    from rollout import ALLOWED_TASKS, CAMERA_RENAME_MAP, DEFAULT_REGISTRIES
+    from episode_manager import ActiveTrial, EpisodeManager
 except ModuleNotFoundError:
-    from evaluation.robocasa365.worker.rollout import (
+    from evaluation.robocasa365.worker.episode_manager import (
+        ActiveTrial,
+        EpisodeManager,
+    )
+
+try:
+    from contract import ALLOWED_TASKS, CAMERA_RENAME_MAP
+except ModuleNotFoundError:
+    from evaluation.robocasa365.worker.contract import (
         ALLOWED_TASKS,
         CAMERA_RENAME_MAP,
-        DEFAULT_REGISTRIES,
     )
 
 from hey_robot.robocasa_runtime.v1 import (
-    robocasa_runtime_pb2,
+    robocasa_runtime_pb2 as _robocasa_runtime_pb2,
     robocasa_runtime_pb2_grpc,
 )
+
+robocasa_runtime_pb2: Any = _robocasa_runtime_pb2
 
 _CAMERA_NAMES = tuple(
     source.removeprefix("observation.images.") for source in CAMERA_RENAME_MAP
@@ -40,30 +49,30 @@ _CAMERA_ALIASES = {
 }
 
 
-@dataclass
-class _Episode:
-    task: str
-    seed: int
-    env: Any
-    frame_id: int
-    observation: dict[str, Any]
-    done: bool = False
-    success: bool = False
-
-
 class RoboCasaRuntimeService(robocasa_runtime_pb2_grpc.RoboCasaRuntimeServicer):
     """One causal RoboCasa episode at a time, isolated inside the worker image."""
 
-    def __init__(self, *, resource_lock: asyncio.Lock | None = None) -> None:
-        self._episodes: dict[str, _Episode] = {}
+    def __init__(
+        self,
+        *,
+        manager: EpisodeManager | None = None,
+        resource_lock: asyncio.Lock | None = None,
+        evaluator_token: str | None = None,
+        data_token: str | None = None,
+        prepare_trial: Callable[[], None] | None = None,
+    ) -> None:
+        self.manager = manager or EpisodeManager(allowed_tasks=ALLOWED_TASKS)
         self._lock = asyncio.Lock()
         self._resource_lock = resource_lock or asyncio.Lock()
         self._owns_resource = False
         self._last_error: str | None = None
+        self._evaluator_token = evaluator_token
+        self._data_token = data_token
+        self._prepare_trial = prepare_trial
 
     @property
     def busy(self) -> bool:
-        return bool(self._episodes) or self._resource_lock.locked()
+        return self.manager.active or self._resource_lock.locked()
 
     async def GetHealth(self, request, context):  # noqa: N802
         del request, context
@@ -84,138 +93,118 @@ class RoboCasaRuntimeService(robocasa_runtime_pb2_grpc.RoboCasaRuntimeServicer):
             loaded=loaded,
             busy=self.busy,
             error_message=self._last_error or "",
-            metrics=_struct({"active_episodes": len(self._episodes), **dimensions}),
+            metrics=_struct({"active_trials": int(self.manager.active), **dimensions}),
         )
 
-    async def CreateEpisode(self, request, context):  # noqa: N802
-        del context
+    async def BeginTrial(self, request, context):  # noqa: N802
+        await self._authorize(context, role="evaluator")
         if request.task not in ALLOWED_TASKS:
             raise ValueError(f"task {request.task!r} is not allowlisted")
         async with self._lock:
-            if self._episodes:
+            if self.manager.active:
                 raise RuntimeError("RoboCasa runtime already has an active episode")
             if self._resource_lock.locked():
                 raise RuntimeError("RoboCasa worker is busy with a task-level rollout")
             await self._resource_lock.acquire()
             self._owns_resource = True
-            episode_id = f"rc-{uuid.uuid4().hex}"
             try:
-                episode = await asyncio.to_thread(
-                    self._create_episode, request.task, int(request.seed)
+                spec = self.manager.new_spec(
+                    task=request.task,
+                    seed=int(request.seed),
+                    trial_id=request.trial_id or None,
                 )
+                trial = await asyncio.to_thread(
+                    self.manager.begin_trial,
+                    spec,
+                )
+                if self._prepare_trial is not None:
+                    await asyncio.to_thread(self._prepare_trial)
             except Exception:
+                if self.manager.active:
+                    await asyncio.to_thread(self.manager.end_trial)
                 self._release_resource()
                 raise
-            self._episodes[episode_id] = episode
-            return robocasa_runtime_pb2.EpisodeResponse(
-                observation=self._response_observation(episode_id, episode)
-            )
+            return self._response_observation(trial)
 
     async def Observe(self, request, context):  # noqa: N802
-        del context
+        await self._authorize(context, role="data")
         async with self._lock:
-            return self._response_observation(
-                request.episode_id, self._episode(request.episode_id)
-            )
+            del request
+            try:
+                return self._response_observation(self.manager.observe())
+            except Exception as exc:
+                message = str(exc)
+                if not self.manager.active:
+                    message = f"trial_unavailable: {message}"
+                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, message)
+                raise AssertionError("context.abort must not return") from exc
 
     async def Step(self, request, context):  # noqa: N802
-        del context
+        await self._authorize(context, role="data")
         action = [float(value) for value in request.action]
         if len(action) != 12 or not all(math.isfinite(value) for value in action):
             raise ValueError("action must contain exactly 12 finite values")
         async with self._lock:
-            episode = self._episode(request.episode_id)
-            if episode.done:
-                raise ValueError("episode is done; call Reset before Step")
-            if int(request.expected_frame_id) != episode.frame_id:
-                raise ValueError(
-                    f"stale action frame {request.expected_frame_id}; current frame is {episode.frame_id}"
-                )
-            action_array = np.asarray(action, dtype=np.float32)
-            if not episode.env.action_space.contains(action_array):
-                raise ValueError(
-                    "action is outside the RoboCasa environment action_space"
-                )
-            observation, reward, terminated, truncated, info = await asyncio.to_thread(
-                episode.env.step, action_array
+            outcome = await asyncio.to_thread(
+                self.manager.step,
+                action,
+                expected_frame_id=int(request.expected_frame_id),
             )
-            episode.observation = observation
-            episode.frame_id += 1
-            episode.done = bool(terminated or truncated)
-            episode.success = bool(info.get("is_success", False))
+            trial = self.manager.current_trial()
             return robocasa_runtime_pb2.StepResponse(
-                observation=self._response_observation(request.episode_id, episode),
-                reward=float(reward),
-                done=episode.done,
-                success=episode.success,
+                observation=self._response_observation(trial),
+                reward=outcome.reward,
+                done=outcome.done,
+                success=outcome.official_success,
                 metrics=_struct(
-                    {"truncated": bool(truncated), "info": _json_safe(info)}
+                    {"truncated": outcome.truncated, "info": _json_safe(outcome.info)}
                 ),
             )
 
-    async def Reset(self, request, context):  # noqa: N802
-        del context
+    async def ReadTruth(self, request, context):  # noqa: N802
+        await self._authorize(context, role="evaluator")
         async with self._lock:
-            episode = self._episode(request.episode_id)
-            observation, _ = await asyncio.to_thread(
-                episode.env.reset, seed=episode.seed
+            del request
+            truth = self.manager.read_truth()
+            truth["events"] = self.manager.evaluator_events()
+            return robocasa_runtime_pb2.TruthResponse(
+                done=bool(truth["episode_done"]),
+                official_success=bool(truth["official_success"]),
+                frame_id=int(truth["frame_id"]),
+                metrics=_struct(_json_safe(truth)),
             )
-            _validate_observation(observation)
-            episode.observation = observation
-            episode.frame_id += 1
-            episode.done = False
-            episode.success = False
-            return self._response_observation(request.episode_id, episode)
 
-    async def CloseEpisode(self, request, context):  # noqa: N802
-        del context
+    async def EndTrial(self, request, context):  # noqa: N802
+        await self._authorize(context, role="evaluator")
         async with self._lock:
-            episode = self._episodes.pop(request.episode_id, None)
-            if episode is None:
-                return robocasa_runtime_pb2.CloseEpisodeResponse(closed=False)
-            try:
-                await asyncio.to_thread(episode.env.close)
-            finally:
-                self._release_resource()
-            return robocasa_runtime_pb2.CloseEpisodeResponse(closed=True)
+            del request
+            if not self.manager.active:
+                return robocasa_runtime_pb2.EndTrialResponse(ended=False)
+            await asyncio.to_thread(self.manager.end_trial)
+            self._release_resource()
+            return robocasa_runtime_pb2.EndTrialResponse(ended=True)
 
     def _release_resource(self) -> None:
         if self._owns_resource:
             self._owns_resource = False
             self._resource_lock.release()
 
-    def _create_episode(self, task: str, seed: int) -> _Episode:
-        from lerobot.envs.robocasa import DEFAULT_CAMERAS, RoboCasaEnv
-
-        env = RoboCasaEnv(
-            task=task,
-            camera_name=DEFAULT_CAMERAS,
-            obs_type="pixels_agent_pos",
-            obj_registries=DEFAULT_REGISTRIES,
-            split="target",
-        )
-        try:
-            observation, _ = env.reset(seed=seed)
-            _validate_observation(observation)
-        except Exception:
-            env.close()
-            raise
-        return _Episode(
-            task=task,
-            seed=seed,
-            env=env,
-            frame_id=0,
-            observation=observation,
+    async def _authorize(self, context: Any, *, role: str) -> None:
+        """Require a role-specific bearer token when worker auth is configured."""
+        expected = self._evaluator_token if role == "evaluator" else self._data_token
+        if not expected:
+            return
+        metadata = dict(context.invocation_metadata())
+        token = metadata.get("authorization", "").removeprefix("Bearer ")
+        if token == expected:
+            return
+        await context.abort(
+            grpc.StatusCode.PERMISSION_DENIED,
+            f"RoboCasa {role}-plane credential is required",
         )
 
-    def _episode(self, episode_id: str) -> _Episode:
-        episode = self._episodes.get(episode_id)
-        if episode is None:
-            raise ValueError(f"unknown RoboCasa episode: {episode_id}")
-        return episode
-
-    def _response_observation(self, episode_id: str, episode: _Episode):
-        pixels = dict(episode.observation.get("pixels", {}) or {})
+    def _response_observation(self, trial: ActiveTrial):
+        pixels = dict(trial.observation.get("pixels", {}) or {})
         images = [
             robocasa_runtime_pb2.ImageFrame(
                 camera=_CAMERA_ALIASES[camera],
@@ -228,13 +217,13 @@ class RoboCasaRuntimeService(robocasa_runtime_pb2_grpc.RoboCasaRuntimeServicer):
             if camera in pixels
         ]
         return robocasa_runtime_pb2.ObservationResponse(
-            episode_id=episode_id,
-            frame_id=episode.frame_id,
-            state=[float(value) for value in episode.observation.get("agent_pos", [])],
+            trial_id=trial.spec.trial_id,
+            frame_id=trial.frame_id,
+            state=[float(value) for value in trial.observation.get("agent_pos", [])],
             images=images,
-            task=episode.task,
-            done=episode.done,
-            success=episode.success,
+            task=trial.spec.task,
+            done=trial.done,
+            success=False,
             metadata=_struct({"native_cameras": list(_CAMERA_NAMES)}),
         )
 

@@ -2,13 +2,57 @@
 # The worker on :9092 exposes both ModelService v1 and RoboCasaRuntime gRPC.
 deployment:
   id: robocasa365.agent
+  bus:
+    type: in_memory
+    url: memory://robocasa365.agent
+
+resources:
+  runtime_dir: runtime/robocasa365.agent
+  media:
+    root: runtime/robocasa365.agent/media
+    max_items: 10000
+    image_save_every_n: 1
+  episodes:
+    root: runtime/robocasa365.agent/episodes
+  events:
+    retain: 10000
+
+identity:
+  enabled: true
+  # Every benchmark trial carries a unique chat_id/trial_id and must not resume
+  # an active task left by an earlier seed or failed process.
+  unified_user_episodes: false
+  bindings:
+    "web:sender:robocasa365-benchmark": owner
+
+# A RoboCasa episode permits 1000 environment steps. One PI052 option consumes
+# 50 steps and the re-observation gate adds an inspect_scene call between
+# options, so the generic 24-skill default can stop a valid rollout halfway.
+agent_runtime:
+  enabled: true
+  robot_id: robocasa365
+  hard_max_wall_time_sec: 1800
+  hard_max_continuations: 40
+  hard_max_skills: 64
+
+channels:
+  web:
+    type: web
+    enabled: true
+    account_id: robocasa365-web
+    host: 127.0.0.1
+    port: 18080
+    sender_id: robocasa365-benchmark
+    chat_id: robocasa365-benchmark
+    access_log: false
+    uvicorn_log_level: warning
 
 skills:
   modules:
     - hey_robot.skill_os.builtins
   enabled:
+    - inspect_scene
     - robocasa_option
-    - robocasa_rollout
 
 robots:
   robocasa365:
@@ -20,9 +64,8 @@ robots:
     settings:
       target: grpc://127.0.0.1:9092
       timeout_sec: 60
-      task: CloseFridge
-      seed: 1000
       control_hz: 20
+      supported_driver_primitives: [inspect_scene]
 
 model_services:
   robocasa365:
@@ -32,10 +75,38 @@ model_services:
     target: grpc://127.0.0.1:9092
     provides:
       - robocasa_option
-      - robocasa_rollout
     timeout_sec: 1800
     settings:
       health_timeout_sec: 10
-      policy_path: lerobot/smolvla_robocasa
+      policy_path: lerobot/pi052_robocasa
       default_task: CloseFridge
       policy_device: cuda
+
+policies:
+  embodied_skills:
+    enabled: true
+    robot_id: robocasa365
+    freq_hz: 1.0
+
+agents:
+  main:
+    enabled: true
+    robot_id: robocasa365
+    policy_id: embodied_skills
+    settings:
+      mode: autonomous
+      providers:
+        planner:
+          type: deepseek
+          model_env: DEEPSEEK_MODEL
+          api_key_env: DEEPSEEK_API_KEY
+          base_url_env: DEEPSEEK_BASE_URL
+          temperature: 0.0
+          max_tokens: 2048
+        scene_captioner:
+          type: dashscope
+          model_env: DASHSCOPE_MODEL
+          api_key_env: DASHSCOPE_API_KEY
+          base_url_env: DASHSCOPE_BASE_URL
+          temperature: 0.0
+          max_tokens: 1024

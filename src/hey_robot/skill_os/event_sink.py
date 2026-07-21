@@ -105,7 +105,10 @@ class SkillEventSink:
         steps_executed: int = 0,
         contract: SkillContract | None = None,
         evidence_data: object = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
+        result_metadata = self._metadata(intent, contract=contract, run=run)
+        result_metadata.update(metadata or {})
         result = SkillResult(
             envelope=intent.envelope,
             skill_id=intent.skill_id,
@@ -119,7 +122,7 @@ class SkillEventSink:
             frame_id=frame_id,
             error=error,
             evidence=_evidence_from_data(intent, evidence_data, frame_id),
-            metadata=self._metadata(intent, contract=contract, run=run),
+            metadata=result_metadata,
         )
         encoded = to_payload(result)
         self.command_store.terminal(intent.skill_id, encoded)

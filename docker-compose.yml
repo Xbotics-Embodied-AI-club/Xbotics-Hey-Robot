@@ -98,6 +98,8 @@ services:
     environment:
       MUJOCO_GL: egl
       NVIDIA_DRIVER_CAPABILITIES: compute,utility,graphics
+      ROBOCASA_EVALUATOR_TOKEN: ${ROBOCASA_EVALUATOR_TOKEN:?set an evaluator control-plane token}
+      ROBOCASA_DATA_TOKEN: ${ROBOCASA_DATA_TOKEN:?set a Robot Runtime data-plane token}
       HF_HOME: /cache/huggingface
       HF_TOKEN: ${HF_TOKEN:-}
       ROBOCASA_POLICY: ${ROBOCASA_POLICY:-lerobot/smolvla_robocasa}

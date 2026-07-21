@@ -1,333 +1,225 @@
-# RoboCasa365 VLA 评估运行手册
+# RoboCasa365 完整系统评测
 
-本文只说明如何启动和运行 RoboCasa365 embodied-agent option 评估。架构设计见
-`docs/evaluation/robasaca365/robocasa365-embodied-agent-evaluation.zh-CN.md`。
+本文是 Hey Robot 集成 RoboCasa365 的唯一说明文档，只介绍当前有效架构和评测启动方式。
 
-当前已验证成功的命令是：
+## 1. 集成目标
 
-- policy：`lerobot/pi052_robocasa`
-- task：`CloseFridge`
-- seed：`1000`
-- max steps：`300`
-- 结果：官方 success predicate 成功，232 steps 完成
-
-## 1. 进入仓库
-
-```bash
-cd /workspace/caofuping/Xbotics-Hey-Robot
-```
-
-## 2. 检查 GPU
-
-```bash
-nvidia-smi
-```
-
-当前机器已验证环境是两张 RTX 3090。默认命令使用 `cuda`，会优先占用 GPU 0。
-
-## 3. 激活 RoboCasa365 venv
-
-```bash
-cd /workspace/caofuping/Xbotics-Hey-Robot
-source .robocasa365-venv/bin/activate
-```
-
-检查关键依赖：
-
-```bash
-python - <<'PY'
-import sys
-print(sys.version)
-for name in ["torch", "lerobot", "robocasa", "robosuite", "mujoco"]:
-    mod = __import__(name)
-    print(name, getattr(mod, "__version__", "import-ok"))
-PY
-```
-
-预期版本大致如下：
+RoboCasa365 用于在仿真厨房中评估 Hey Robot 完整 embodied-agent 系统，而不是只测试一个
+独立 VLA。一次 B1 评测会实际经过：
 
 ```text
-Python 3.12.x
-torch 2.7.1+cu126
-lerobot 0.6.1
-robocasa 1.0.0
-robosuite 1.5.2
-mujoco 3.3.1
+用户根任务
+  -> DeepSeek Agent / 快系统规划
+  -> DashScope 场景理解
+  -> Skill OS: inspect_scene / robocasa_option
+  -> ModelService RPC
+  -> lerobot/pi052_robocasa
+  -> EpisodeManager
+  -> RoboCasa365 environment
+  -> RoboCasa 官方成功谓词
 ```
 
-## 4. 检查 pi0.5 checkpoint 缓存
+worker 内只有一个 `EpisodeManager`，它是 simulator、observation、frame ID 和 action step
+的唯一状态源。Agent 看不到 RoboCasa 官方成功标签；成功与失败由 benchmark 独立读取并写入
+评测结果。
 
-当前成功运行依赖本地 Hugging Face cache，不要在网络不可达时强制改 `HF_HOME`。
+当前只保留一条执行路线：
 
-```bash
-test -d /root/.cache/huggingface/hub/models--lerobot--pi052_robocasa
-du -sh /root/.cache/huggingface/hub/models--lerobot--pi052_robocasa
+- 单任务入口：`evaluation/robocasa365/full_system_benchmark.py`；
+- 批量入口：`evaluation/robocasa365/batch_full_system_benchmark.py`；
+- 唯一任务清单：`configs/evaluation/robocasa365.tasks.yaml`；
+- 唯一 Agent 配置：`configs/evaluation/robocasa365.agent.yaml`；
+- 唯一推荐启动器：`scripts/evaluation/run_robocasa365_full_system.sh`。
+
+## 2. 已验证状态
+
+真实 checkpoint `lerobot/pi052_robocasa` 已通过完整 B1 链路验证：
+
+- task：`CloseFridge`；
+- split：`target`；
+- environment 与 PI052 RNG seed：`1000`；
+- 结果：`official_success=true`；
+- 完成位置：第 227 个 environment step；
+- PI052 option 数：5；
+- Agent step 数：10。
+
+验证产物位于：
+
+```text
+runtime/robocasa365/long-horizon-close-fridge-b1-r14/
 ```
 
-预期大小约为 11G。
+其中 `result.json` 是汇总结果，`video.mp4` 是成功视频。
 
-## 5. 设置运行环境变量
+## 3. 关键运行约束
 
-```bash
-cd /workspace/caofuping/Xbotics-Hey-Robot
-source .robocasa365-venv/bin/activate
+PI052 必须遵守其独立 LeRobot evaluator 的推理契约：
 
-export HF_HUB_OFFLINE=1
-export TRANSFORMERS_OFFLINE=1
-export ROBOCASA_POLICY="lerobot/pi052_robocasa"
-export ROBOCASA_POLICY_DEVICE="cuda"
+1. 模型的 `task` 使用 RoboCasa 环境自然语言 `task_description`，不能替换成 Agent 生成的
+   option 标签；
+2. option horizon 与 checkpoint 的 `n_action_steps=50` 对齐；
+3. `policy.reset()` 每个 trial 只调用一次，不能在 option 边界清空层级 subtask 状态；
+4. trial seed 同时设置 environment 以及隔离 PI052 进程的 Python、NumPy、Torch/CUDA RNG；
+5. Agent 配置使用 `hard_max_skills=64`，以覆盖最多 1000 个环境步和中间重新观察。
 
-export MUJOCO_GL="egl"
-export PYOPENGL_PLATFORM="egl"
-export LD_LIBRARY_PATH="/workspace/caofuping/.cache/Xbotics-Hey-Robot/robocasa365/driver/535.309.01:${LD_LIBRARY_PATH:-}"
-export __EGL_VENDOR_LIBRARY_FILENAMES="/workspace/caofuping/.cache/Xbotics-Hey-Robot/robocasa365/driver/535.309.01/egl_vendor.json"
+PI052 在独立 spawn 子进程中使用 CUDA，MuJoCo/EGL 留在 worker 主进程。这个隔离用于避免
+Torch/CUDA inference 与 EGL 共进程时出现渲染缓冲异常，不能合并回同一进程。
+
+当前宿主 kernel driver 为 NVIDIA 535.309.01。启动器会自动优先加载已经解压的匹配版本
+用户态 EGL 库；双 GPU 主机默认让 PI052 使用 GPU 0、MuJoCo EGL 使用 GPU 1。
+
+## 4. 运行前准备
+
+项目根目录的 `.env` 需要配置以下变量：
+
+```dotenv
+DASHSCOPE_MODEL=...
+DASHSCOPE_API_KEY=...
+DASHSCOPE_BASE_URL=...
+
+DEEPSEEK_MODEL=...
+DEEPSEEK_API_KEY=...
+DEEPSEEK_BASE_URL=...
 ```
 
-不要在这组命令里设置 `HF_HOME=/workspace/caofuping/.cache/huggingface`。本机已验证的
-pi0.5 cache 位于 `/root/.cache/huggingface`。
+不要把真实 API key 写入本文、命令行参数或评测 artifact。唯一启动器会自动读取 `.env`。
 
-## 6. 运行 pi0.5 CloseFridge 成功用例
+本地 PI052 checkpoint 默认使用：
+
+```text
+/root/.cache/huggingface/hub/models--lerobot--pi052_robocasa/snapshots/693102ebcd9b28aeec3728638dd433a04ffbdee6
+```
+
+若模型位于其他位置，可设置：
 
 ```bash
-cd /workspace/caofuping/Xbotics-Hey-Robot
-source .robocasa365-venv/bin/activate
+export ROBOCASA_POLICY=/absolute/path/to/pi052_robocasa
+```
 
-export HF_HUB_OFFLINE=1
-export TRANSFORMERS_OFFLINE=1
-export ROBOCASA_POLICY="lerobot/pi052_robocasa"
-export ROBOCASA_POLICY_DEVICE="cuda"
-export MUJOCO_GL="egl"
-export PYOPENGL_PLATFORM="egl"
-export LD_LIBRARY_PATH="/workspace/caofuping/.cache/Xbotics-Hey-Robot/robocasa365/driver/535.309.01:${LD_LIBRARY_PATH:-}"
-export __EGL_VENDOR_LIBRARY_FILENAMES="/workspace/caofuping/.cache/Xbotics-Hey-Robot/robocasa365/driver/535.309.01/egl_vendor.json"
+## 5. 启动一个完整评测
 
-mkdir -p runtime/robocasa365
-RUN_DIR="runtime/robocasa365/agent-pi052-closefridge-seed1000-ms300-$(date -u +%Y%m%dT%H%M%SZ)"
+在仓库根目录执行：
 
-python evaluation/robocasa365/agent_benchmark.py \
+```bash
+bash scripts/evaluation/run_robocasa365_full_system.sh \
   --task CloseFridge \
-  --episodes 1 \
   --seed 1000 \
-  --policy-path lerobot/pi052_robocasa \
-  --max-steps 300 \
-  --device cuda \
-  --output-dir "$RUN_DIR" \
-  2>&1 | tee "$RUN_DIR.log"
+  --objective "Close the fridge." \
+  --producer b1 \
+  --output-dir runtime/robocasa365/close-fridge-b1-seed1000 \
+  --timeout-sec 1200
 ```
 
-退出码含义：
+启动器会自动完成：
 
-- `0`：所有 trial 成功；
-- `2`：流程跑完但至少一个 trial 未成功；
-- 其他非 0：运行时错误。
+1. 读取 `.env`；
+2. 生成本轮短生命周期 Runtime credentials；
+3. 配置 NVIDIA/EGL；
+4. 启动 RoboCasa worker；
+5. 启动 Hey Robot、DeepSeek planner 和 DashScope scene captioner；
+6. 创建 trial 并预热真实 PI052；
+7. 运行完整 Agent 闭环；
+8. 保存结果并关闭本轮服务。
 
-## 7. 查看结果
+PI052 checkpoint 约 10.9 GB，当前宿主首次冷加载通常需要 4～5 分钟。frame 在加载期间保持
+为 0，属于正常现象。
+
+每次运行必须使用新的 `--output-dir`。入口拒绝覆盖已有目录，从而避免历史实验被静默覆盖。
+
+## 6. B0、B1、B2
+
+`--producer` 可选：
+
+- `b0`：直接使用根任务文本；
+- `b1`：真实 Hey Robot AutonomousAgentService，正式系统评测默认使用该项；
+- `b2`：冻结的上限规划提示，用于区分规划问题和 VLA 执行问题。
+
+三者共用相同的 Gateway、Skill OS、RPC、VLA 和 EpisodeManager，不存在绕过完整系统的
+direct runner。
+
+## 7. 批量评测
+
+当 worker 与 Hey Robot 服务已经启动时，可以运行：
 
 ```bash
-cd /workspace/caofuping/Xbotics-Hey-Robot
-
-python - <<'PY'
-import json
-from pathlib import Path
-
-runs = sorted(Path("runtime/robocasa365").glob("agent-pi052-closefridge-seed1000-ms300-*"))
-if not runs:
-    raise SystemExit("No pi052 CloseFridge run found")
-run = runs[-1]
-manifest = json.loads((run / "agent_benchmark_manifest.json").read_text())
-print("run_dir:", run)
-print("success_count:", manifest.get("success_count"))
-print("success_rate:", manifest.get("success_rate"))
-print("trials:", manifest.get("trials"))
-print("policy_path:", manifest.get("policy_path"))
-print("max_steps:", manifest.get("max_steps"))
-
-for result_path in sorted(run.glob("trial_*/result.json")):
-    result = json.loads(result_path.read_text())
-    print("result:", result_path)
-    print("  task:", result.get("task"))
-    print("  seed:", result.get("seed"))
-    print("  success:", result.get("success"))
-    print("  status:", result.get("status"))
-    print("  failure_mode:", result.get("failure_mode"))
-    option = result["option_results"][-1]
-    metrics = option.get("metrics", {})
-    print("  option_summary:", option.get("summary"))
-    print("  steps:", metrics.get("steps"))
-    print("  episode_success:", metrics.get("episode_success"))
-    print("  last_reward:", metrics.get("last_reward"))
-    print("  last_info:", metrics.get("last_info"))
-PY
+.venv/bin/python evaluation/robocasa365/batch_full_system_benchmark.py \
+  --output-root runtime/robocasa365/atomic-b1-seeds \
+  --suite atomic_gate \
+  --producer b1 \
+  --seeds 1000,1001 \
+  --agent-url http://127.0.0.1:18080/turn \
+  --runtime-target grpc://127.0.0.1:9092 \
+  --timeout-sec 1800
 ```
 
-成功时应看到类似：
+任务分组来自 `configs/evaluation/robocasa365.tasks.yaml`：
+
+- `atomic_gate`：基础原子能力门禁；
+- `composite_seen`：组合已见任务；
+- `composite_unseen`：组合未见任务。
+
+建议先运行 `atomic_gate`，确认基础 VLA 能力和系统链路，再投入 composite 长程批量实验。
+
+## 8. 评测产物
+
+每个 trial 的输出目录包含：
 
 ```text
-success_count: 1
-success_rate: 1.0
-trials: 1
-success: True
-status: completed
-failure_mode: None
-option_summary: RoboCasa option CloseFridge: success after 232 steps
-episode_success: True
-last_reward: 1.0
+manifest.json
+trial_spec.json
+root_task.json
+agent_trace.jsonl
+observations.jsonl
+agent_events.jsonl
+skill_events.jsonl
+model_service_events.jsonl
+actions.jsonl
+options.jsonl
+evaluator_truth.json
+result.json
+summary.json
+video.mp4
 ```
 
-## 8. 跑 smolvla 对照
+最重要的字段位于 `result.json`：
 
-`smolvla` 更小，适合检查流程是否能快速启动，但它在此前 smoke 中没有完成
-`CloseFridge`。
+- `official_success`：RoboCasa 官方成功谓词；
+- `episode_done`：environment 是否终止；
+- `frame_id` / `action_count`：执行的环境步数；
+- `option_count`：PI052 option 数量；
+- `planner_steps`：Agent 步骤数；
+- `false_completion`：Agent 宣称完成但官方谓词未成功；
+- `failure_stage` 与 `termination_reason`：失败阶段和终止原因。
+
+不要只根据 Agent 文本判断成功，正式统计必须使用 `official_success`。
+
+## 9. 运行前检查与常见问题
+
+运行相关测试：
 
 ```bash
-cd /workspace/caofuping/Xbotics-Hey-Robot
-source .robocasa365-venv/bin/activate
+.venv/bin/pytest -q --no-cov \
+  tests/integration/test_robocasa365_contract.py \
+  tests/robot_runtime/test_robocasa_remote_driver.py
 
-export HF_HUB_OFFLINE=1
-export TRANSFORMERS_OFFLINE=1
-export ROBOCASA_POLICY="lerobot/smolvla_robocasa"
-export ROBOCASA_POLICY_DEVICE="cuda"
-export MUJOCO_GL="egl"
-export PYOPENGL_PLATFORM="egl"
-export LD_LIBRARY_PATH="/workspace/caofuping/.cache/Xbotics-Hey-Robot/robocasa365/driver/535.309.01:${LD_LIBRARY_PATH:-}"
-export __EGL_VENDOR_LIBRARY_FILENAMES="/workspace/caofuping/.cache/Xbotics-Hey-Robot/robocasa365/driver/535.309.01/egl_vendor.json"
-
-mkdir -p runtime/robocasa365
-RUN_DIR="runtime/robocasa365/agent-smolvla-closefridge-seed1000-ms50-$(date -u +%Y%m%dT%H%M%SZ)"
-
-python evaluation/robocasa365/agent_benchmark.py \
-  --task CloseFridge \
-  --episodes 1 \
-  --seed 1000 \
-  --policy-path lerobot/smolvla_robocasa \
-  --max-steps 50 \
-  --device cuda \
-  --output-dir "$RUN_DIR" \
-  2>&1 | tee "$RUN_DIR.log"
+.venv/bin/ruff check \
+  evaluation/robocasa365 \
+  src/hey_robot/robot_runtime/robocasa_remote \
+  src/hey_robot/skill_os/builtins/robocasa.py
 ```
 
-## 9. 跑多个任务
+常见现象：
 
-当前入口允许这些任务：
+- frame 长时间为 0：通常是 PI052 冷加载；先检查 worker 日志和 GPU 显存；
+- 出现彩色噪声帧：检查是否误把 PI052 CUDA 与 MuJoCo EGL 放回同一进程，以及是否加载了
+  与 535.309.01 匹配的用户态 EGL；
+- 固定 seed 结果不一致：确认 trial seed 同时传入 environment 和 PI052 子进程；
+- 运行在约 500 步被阻断：检查是否退回通用 `hard_max_skills=24`；
+- option 每 30 步结束：配置过时，PI052 必须使用 50 步 chunk；
+- Agent option 名改变模型行为：配置过时，PI052 根任务必须来自 environment
+  `task_description`；
+- `official_success=false`：保留完整 artifact，先区分 planner、observation、RPC、VLA、
+  environment 或 completion verifier，再决定是否重跑。
 
-```text
-CloseFridge
-OpenDrawer
-OpenCabinet
-TurnOnMicrowave
-TurnOffStove
-```
-
-示例：
-
-```bash
-cd /workspace/caofuping/Xbotics-Hey-Robot
-source .robocasa365-venv/bin/activate
-
-export HF_HUB_OFFLINE=1
-export TRANSFORMERS_OFFLINE=1
-export ROBOCASA_POLICY="lerobot/pi052_robocasa"
-export ROBOCASA_POLICY_DEVICE="cuda"
-export MUJOCO_GL="egl"
-export PYOPENGL_PLATFORM="egl"
-export LD_LIBRARY_PATH="/workspace/caofuping/.cache/Xbotics-Hey-Robot/robocasa365/driver/535.309.01:${LD_LIBRARY_PATH:-}"
-export __EGL_VENDOR_LIBRARY_FILENAMES="/workspace/caofuping/.cache/Xbotics-Hey-Robot/robocasa365/driver/535.309.01/egl_vendor.json"
-
-mkdir -p runtime/robocasa365
-RUN_DIR="runtime/robocasa365/agent-pi052-tasks3-seed1000-ms300-$(date -u +%Y%m%dT%H%M%SZ)"
-
-python evaluation/robocasa365/agent_benchmark.py \
-  --tasks CloseFridge,OpenDrawer,OpenCabinet \
-  --episodes 1 \
-  --seed 1000 \
-  --policy-path lerobot/pi052_robocasa \
-  --max-steps 300 \
-  --device cuda \
-  --output-dir "$RUN_DIR" \
-  2>&1 | tee "$RUN_DIR.log"
-```
-
-注意：目前只确认 `CloseFridge` 成功。其他任务可以用同一流程评测，但不要预设成功。
-
-## 10. 跑多个 seed
-
-```bash
-cd /workspace/caofuping/Xbotics-Hey-Robot
-source .robocasa365-venv/bin/activate
-
-export HF_HUB_OFFLINE=1
-export TRANSFORMERS_OFFLINE=1
-export ROBOCASA_POLICY="lerobot/pi052_robocasa"
-export ROBOCASA_POLICY_DEVICE="cuda"
-export MUJOCO_GL="egl"
-export PYOPENGL_PLATFORM="egl"
-export LD_LIBRARY_PATH="/workspace/caofuping/.cache/Xbotics-Hey-Robot/robocasa365/driver/535.309.01:${LD_LIBRARY_PATH:-}"
-export __EGL_VENDOR_LIBRARY_FILENAMES="/workspace/caofuping/.cache/Xbotics-Hey-Robot/robocasa365/driver/535.309.01/egl_vendor.json"
-
-mkdir -p runtime/robocasa365
-RUN_DIR="runtime/robocasa365/agent-pi052-closefridge-seeds1000-1002-ms300-$(date -u +%Y%m%dT%H%M%SZ)"
-
-python evaluation/robocasa365/agent_benchmark.py \
-  --task CloseFridge \
-  --seeds 1000,1001,1002 \
-  --policy-path lerobot/pi052_robocasa \
-  --max-steps 300 \
-  --device cuda \
-  --output-dir "$RUN_DIR" \
-  2>&1 | tee "$RUN_DIR.log"
-```
-
-## 11. 常见问题
-
-### Hugging Face 网络错误
-
-如果看到：
-
-```text
-Network is unreachable
-... requesting HEAD https://huggingface.co/lerobot/pi052_robocasa/resolve/main/config.json
-```
-
-说明当前没有使用已有本地 cache。先确认：
-
-```bash
-test -d /root/.cache/huggingface/hub/models--lerobot--pi052_robocasa
-```
-
-然后不要覆盖 `HF_HOME`，并设置：
-
-```bash
-export HF_HUB_OFFLINE=1
-export TRANSFORMERS_OFFLINE=1
-```
-
-### 输出目录已存在
-
-`--output-dir` 必须是不存在的新目录。推荐始终使用：
-
-```bash
-RUN_DIR="runtime/robocasa365/name-$(date -u +%Y%m%dT%H%M%SZ)"
-```
-
-### 只跑通流程但没成功
-
-如果 `failure_mode` 是 `option_timeout`，说明：
-
-- 模型已加载；
-- 环境已 reset；
-- VLA 已输出动作；
-- RoboCasa 已执行 step；
-- 但官方 success predicate 没有触发。
-
-这属于任务未成功，不是集成链路失败。
-
-### pi0.5 加载慢
-
-`lerobot/pi052_robocasa` 是 4B 级模型。首次加载可能需要数分钟，期间可能只看到：
-
-```text
-PI052: liger-kernel is not installed; skipping fused Triton kernels
-```
-
-这是性能 warning，不是错误。
-
+失败结果不能被覆盖，也不要在 Agent 不知情的情况下手动追加 action 或 option。重新实验应
+使用新输出目录和新 trial ID。

@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import io
 import math
 import time
 from typing import Literal
+
+import grpc
+import numpy as np
+from PIL import Image
 
 from hey_robot.protocol import Envelope, RobotAction, RobotStatus
 from hey_robot.robot_runtime.base import (
@@ -34,9 +39,7 @@ class RoboCasaRemoteDriver:
         self.context = context
         self.client = client
         self.robot_id = context.robot_id
-        settings = context.spec.settings
-        self.task = str(settings.get("task", "CloseFridge"))
-        self.seed = int(settings.get("seed", 1000))
+        self.task: str | None = None
         self.state: Literal[
             "created", "idle", "executing", "completed", "error", "closed"
         ] = "created"
@@ -61,9 +64,7 @@ class RoboCasaRemoteDriver:
                 or "RoboCasa runtime dependencies or assets unavailable"
             )
             return
-        observation = await self.client.create_episode(task=self.task, seed=self.seed)
-        self._accept_observation(observation)
-        self.state = "completed" if observation.done else "idle"
+        self.state = "idle"
 
     async def capabilities(self) -> RobotCapabilities:
         return RobotCapabilities(
@@ -99,18 +100,32 @@ class RoboCasaRemoteDriver:
             frame_id=self.frame_id,
             error=self.last_error,
             metrics={
-                "episode_id": self.episode_id,
-                "task": self.task,
-                "seed": self.seed,
                 "done": self.done,
-                "success": self.success,
                 "last_reward": self.last_reward,
                 "simulator_only": True,
             },
         )
 
     async def observe(self) -> DriverObservation:
-        observation = await self._require_observation(refresh=True)
+        try:
+            observation = await self._require_observation(refresh=True)
+        except grpc.aio.AioRpcError as exc:
+            waiting_for_trial = "trial_unavailable" in exc.details()
+            waiting_for_prepare = exc.code() is grpc.StatusCode.DEADLINE_EXCEEDED
+            if not (waiting_for_trial or waiting_for_prepare):
+                raise
+            self.last_error = (
+                "waiting for evaluator to begin or prepare a RoboCasa trial"
+            )
+            return DriverObservation(
+                envelope=self._envelope(),
+                frame_id=self.frame_id,
+                assets=[],
+                proprioception=[],
+                task=None,
+                metadata={"driver": "robocasa_remote", "trial_unavailable": True},
+                timestamp=time.time(),
+            )
         return self._driver_observation(observation)
 
     async def status(self) -> RobotStatus:
@@ -125,12 +140,11 @@ class RoboCasaRemoteDriver:
             envelope=self._envelope(),
             frame_id=self.frame_id,
             state=status_state,
-            task=self.task,
-            success=self.success,
+            task=None,
+            success=None,
             error=self.last_error,
             metrics={
                 "driver": "robocasa_remote",
-                "episode_id": self.episode_id,
                 "done": self.done,
                 "last_reward": self.last_reward,
                 "simulator_only": True,
@@ -148,7 +162,6 @@ class RoboCasaRemoteDriver:
                 raise ValueError("RoboCasa episode has not been created")
             self.state = "executing"
             step = await self.client.step(
-                episode_id=self.episode_id,
                 action=[float(value) for value in action.values],
                 expected_frame_id=self.frame_id,
             )
@@ -184,31 +197,14 @@ class RoboCasaRemoteDriver:
             )
 
     async def reset(self) -> RobotStatus:
-        if self.episode_id is None:
-            self.last_error = "RoboCasa episode has not been created"
-            self.state = "error"
-            return await self.status()
-        try:
-            observation = await self.client.reset(episode_id=self.episode_id)
-            self._accept_observation(observation)
-            self.done = False
-            self.success = None
-            self.last_reward = None
-            self.last_error = None
-            self.state = "idle"
-        except Exception as exc:
-            self.state = "error"
-            self.last_error = f"{type(exc).__name__}: {exc}"
+        self.last_error = "reset is evaluator-owned; begin a new trial"
+        self.state = "error"
         return await self.status()
 
     async def close(self) -> None:
-        try:
-            if self.episode_id is not None:
-                await self.client.close_episode(episode_id=self.episode_id)
-                self.episode_id = None
-        finally:
-            await self.client.close()
-            self.state = "closed"
+        await self.client.close()
+        self.episode_id = None
+        self.state = "closed"
 
     def _validate_action(self, action: RobotAction) -> None:
         if len(action.values) != self.ACTION_DIMENSIONS:
@@ -224,13 +220,7 @@ class RoboCasaRemoteDriver:
             )
 
     async def _require_observation(self, *, refresh: bool) -> RemoteObservation:
-        if self.episode_id is None:
-            raise RuntimeError("RoboCasa episode has not been created")
-        observation = (
-            await self.client.observe(episode_id=self.episode_id)
-            if refresh
-            else self._last_observation
-        )
+        observation = await self.client.observe() if refresh else self._last_observation
         if observation is None:
             raise RuntimeError("RoboCasa runtime returned no observation")
         self._accept_observation(observation)
@@ -255,6 +245,7 @@ class RoboCasaRemoteDriver:
                 f"RoboCasa runtime camera mismatch: expected {self.CAMERA_NAMES}, got {sorted(cameras)}"
             )
         self.episode_id = observation.episode_id
+        self.task = observation.task
         self.frame_id = int(observation.frame_id)
         self.done = bool(observation.done)
         if self.done:
@@ -270,19 +261,17 @@ class RoboCasaRemoteDriver:
                     kind="image",
                     role="camera",
                     name=image.camera,
-                    data=image.data,
+                    data=_decode_rgb_image(image.data),
                     content_type=image.content_type,
                     metadata={"width": image.width, "height": image.height},
                 )
                 for image in observation.images
             ],
             proprioception=[float(value) for value in observation.state],
-            task=observation.task or self.task,
+            task=None,
             metadata={
                 "driver": "robocasa_remote",
-                "episode_id": observation.episode_id,
                 "done": observation.done,
-                "success": observation.success,
                 **dict(observation.metadata),
             },
             timestamp=time.time(),
@@ -290,3 +279,12 @@ class RoboCasaRemoteDriver:
 
     def _envelope(self) -> Envelope:
         return Envelope(robot_id=self.robot_id)
+
+
+def _decode_rgb_image(payload: bytes) -> np.ndarray:
+    """Convert worker JPEG/PNG transport bytes to the media-store image contract."""
+    try:
+        with Image.open(io.BytesIO(payload)) as image:
+            return np.asarray(image.convert("RGB"), dtype=np.uint8)
+    except Exception as exc:
+        raise ValueError("RoboCasa runtime returned an invalid encoded image") from exc

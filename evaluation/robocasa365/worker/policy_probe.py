@@ -15,7 +15,7 @@ EXPECTED_INPUTS = {
     "observation.images.robot0_agentview_right": (3, 256, 256),
     "observation.images.robot0_eye_in_hand": (3, 256, 256),
 }
-EXPECTED_OUTPUTS = {"action": (12,)}
+EXPECTED_OUTPUTS: dict[str, tuple[int, ...]] = {"action": (12,)}
 CAMERA_ALIASES = (
     (
         "observation.images.robot0_agentview_left",

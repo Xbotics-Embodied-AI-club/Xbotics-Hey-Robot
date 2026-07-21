@@ -14,7 +14,7 @@ class InspectSceneSkill(BaseSkill):
             "properties": {"question": {"type": "string"}},
         },
         required_resources=("camera",),
-        supported_robots=("xlerobot", "so101", "so101_mobile"),
+        supported_robots=("xlerobot", "so101", "so101_mobile", "robocasa"),
         driver_primitives=("inspect_scene",),
         safety_level="observe",
         timeout_sec=20.0,

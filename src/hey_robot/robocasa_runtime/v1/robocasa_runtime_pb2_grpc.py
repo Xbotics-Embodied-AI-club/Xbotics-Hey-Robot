@@ -32,10 +32,7 @@ if _version_not_supported:
 
 
 class RoboCasaRuntimeStub(object):
-    """The high-frequency simulator boundary. This is deliberately separate from
-    ModelService: a policy rollout owns an episode, while RobotDriver performs
-    causal Observe/Step calls against one episode at a time.
-    """
+    """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
         """Constructor.
@@ -49,15 +46,15 @@ class RoboCasaRuntimeStub(object):
             response_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.HealthResponse.FromString,
             _registered_method=True,
         )
-        self.CreateEpisode = channel.unary_unary(
-            "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/CreateEpisode",
-            request_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.CreateEpisodeRequest.SerializeToString,
-            response_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EpisodeResponse.FromString,
+        self.BeginTrial = channel.unary_unary(
+            "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/BeginTrial",
+            request_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.BeginTrialRequest.SerializeToString,
+            response_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.ObservationResponse.FromString,
             _registered_method=True,
         )
         self.Observe = channel.unary_unary(
             "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/Observe",
-            request_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EpisodeRequest.SerializeToString,
+            request_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EmptyRequest.SerializeToString,
             response_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.ObservationResponse.FromString,
             _registered_method=True,
         )
@@ -67,25 +64,22 @@ class RoboCasaRuntimeStub(object):
             response_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.StepResponse.FromString,
             _registered_method=True,
         )
-        self.Reset = channel.unary_unary(
-            "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/Reset",
-            request_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EpisodeRequest.SerializeToString,
-            response_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.ObservationResponse.FromString,
+        self.ReadTruth = channel.unary_unary(
+            "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/ReadTruth",
+            request_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EmptyRequest.SerializeToString,
+            response_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.TruthResponse.FromString,
             _registered_method=True,
         )
-        self.CloseEpisode = channel.unary_unary(
-            "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/CloseEpisode",
-            request_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EpisodeRequest.SerializeToString,
-            response_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.CloseEpisodeResponse.FromString,
+        self.EndTrial = channel.unary_unary(
+            "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/EndTrial",
+            request_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EndTrialRequest.SerializeToString,
+            response_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EndTrialResponse.FromString,
             _registered_method=True,
         )
 
 
 class RoboCasaRuntimeServicer(object):
-    """The high-frequency simulator boundary. This is deliberately separate from
-    ModelService: a policy rollout owns an episode, while RobotDriver performs
-    causal Observe/Step calls against one episode at a time.
-    """
+    """Missing associated documentation comment in .proto file."""
 
     def GetHealth(self, request, context):
         """Missing associated documentation comment in .proto file."""
@@ -93,7 +87,7 @@ class RoboCasaRuntimeServicer(object):
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
-    def CreateEpisode(self, request, context):
+    def BeginTrial(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details("Method not implemented!")
@@ -111,13 +105,13 @@ class RoboCasaRuntimeServicer(object):
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
-    def Reset(self, request, context):
+    def ReadTruth(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
-    def CloseEpisode(self, request, context):
+    def EndTrial(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details("Method not implemented!")
@@ -131,14 +125,14 @@ def add_RoboCasaRuntimeServicer_to_server(servicer, server):
             request_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.HealthRequest.FromString,
             response_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.HealthResponse.SerializeToString,
         ),
-        "CreateEpisode": grpc.unary_unary_rpc_method_handler(
-            servicer.CreateEpisode,
-            request_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.CreateEpisodeRequest.FromString,
-            response_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EpisodeResponse.SerializeToString,
+        "BeginTrial": grpc.unary_unary_rpc_method_handler(
+            servicer.BeginTrial,
+            request_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.BeginTrialRequest.FromString,
+            response_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.ObservationResponse.SerializeToString,
         ),
         "Observe": grpc.unary_unary_rpc_method_handler(
             servicer.Observe,
-            request_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EpisodeRequest.FromString,
+            request_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EmptyRequest.FromString,
             response_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.ObservationResponse.SerializeToString,
         ),
         "Step": grpc.unary_unary_rpc_method_handler(
@@ -146,15 +140,15 @@ def add_RoboCasaRuntimeServicer_to_server(servicer, server):
             request_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.StepRequest.FromString,
             response_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.StepResponse.SerializeToString,
         ),
-        "Reset": grpc.unary_unary_rpc_method_handler(
-            servicer.Reset,
-            request_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EpisodeRequest.FromString,
-            response_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.ObservationResponse.SerializeToString,
+        "ReadTruth": grpc.unary_unary_rpc_method_handler(
+            servicer.ReadTruth,
+            request_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EmptyRequest.FromString,
+            response_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.TruthResponse.SerializeToString,
         ),
-        "CloseEpisode": grpc.unary_unary_rpc_method_handler(
-            servicer.CloseEpisode,
-            request_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EpisodeRequest.FromString,
-            response_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.CloseEpisodeResponse.SerializeToString,
+        "EndTrial": grpc.unary_unary_rpc_method_handler(
+            servicer.EndTrial,
+            request_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EndTrialRequest.FromString,
+            response_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EndTrialResponse.SerializeToString,
         ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -168,10 +162,7 @@ def add_RoboCasaRuntimeServicer_to_server(servicer, server):
 
 # This class is part of an EXPERIMENTAL API.
 class RoboCasaRuntime(object):
-    """The high-frequency simulator boundary. This is deliberately separate from
-    ModelService: a policy rollout owns an episode, while RobotDriver performs
-    causal Observe/Step calls against one episode at a time.
-    """
+    """Missing associated documentation comment in .proto file."""
 
     @staticmethod
     def GetHealth(
@@ -204,7 +195,7 @@ class RoboCasaRuntime(object):
         )
 
     @staticmethod
-    def CreateEpisode(
+    def BeginTrial(
         request,
         target,
         options=(),
@@ -219,9 +210,9 @@ class RoboCasaRuntime(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/CreateEpisode",
-            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.CreateEpisodeRequest.SerializeToString,
-            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EpisodeResponse.FromString,
+            "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/BeginTrial",
+            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.BeginTrialRequest.SerializeToString,
+            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.ObservationResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -250,7 +241,7 @@ class RoboCasaRuntime(object):
             request,
             target,
             "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/Observe",
-            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EpisodeRequest.SerializeToString,
+            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EmptyRequest.SerializeToString,
             hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.ObservationResponse.FromString,
             options,
             channel_credentials,
@@ -294,7 +285,7 @@ class RoboCasaRuntime(object):
         )
 
     @staticmethod
-    def Reset(
+    def ReadTruth(
         request,
         target,
         options=(),
@@ -309,9 +300,9 @@ class RoboCasaRuntime(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/Reset",
-            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EpisodeRequest.SerializeToString,
-            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.ObservationResponse.FromString,
+            "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/ReadTruth",
+            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EmptyRequest.SerializeToString,
+            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.TruthResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -324,7 +315,7 @@ class RoboCasaRuntime(object):
         )
 
     @staticmethod
-    def CloseEpisode(
+    def EndTrial(
         request,
         target,
         options=(),
@@ -339,9 +330,9 @@ class RoboCasaRuntime(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/CloseEpisode",
-            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EpisodeRequest.SerializeToString,
-            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.CloseEpisodeResponse.FromString,
+            "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/EndTrial",
+            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EndTrialRequest.SerializeToString,
+            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EndTrialResponse.FromString,
             options,
             channel_credentials,
             insecure,

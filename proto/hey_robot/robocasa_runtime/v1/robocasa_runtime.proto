@@ -4,19 +4,17 @@ package hey_robot.robocasa_runtime.v1;
 
 import "google/protobuf/struct.proto";
 
-// The high-frequency simulator boundary. This is deliberately separate from
-// ModelService: a policy rollout owns an episode, while RobotDriver performs
-// causal Observe/Step calls against one episode at a time.
 service RoboCasaRuntime {
   rpc GetHealth(HealthRequest) returns (HealthResponse);
-  rpc CreateEpisode(CreateEpisodeRequest) returns (EpisodeResponse);
-  rpc Observe(EpisodeRequest) returns (ObservationResponse);
+  rpc BeginTrial(BeginTrialRequest) returns (ObservationResponse);
+  rpc Observe(EmptyRequest) returns (ObservationResponse);
   rpc Step(StepRequest) returns (StepResponse);
-  rpc Reset(EpisodeRequest) returns (ObservationResponse);
-  rpc CloseEpisode(EpisodeRequest) returns (CloseEpisodeResponse);
+  rpc ReadTruth(EmptyRequest) returns (TruthResponse);
+  rpc EndTrial(EndTrialRequest) returns (EndTrialResponse);
 }
 
 message HealthRequest {}
+message EmptyRequest {}
 
 message HealthResponse {
   bool online = 1;
@@ -26,12 +24,11 @@ message HealthResponse {
   google.protobuf.Struct metrics = 5;
 }
 
-message CreateEpisodeRequest {
-  string task = 1;
-  int64 seed = 2;
+message BeginTrialRequest {
+  string trial_id = 1;
+  string task = 2;
+  int64 seed = 3;
 }
-
-message EpisodeRequest { string episode_id = 1; }
 
 message ImageFrame {
   string camera = 1;
@@ -42,7 +39,7 @@ message ImageFrame {
 }
 
 message ObservationResponse {
-  string episode_id = 1;
+  string trial_id = 1;
   int64 frame_id = 2;
   repeated float state = 3;
   repeated ImageFrame images = 4;
@@ -52,12 +49,9 @@ message ObservationResponse {
   google.protobuf.Struct metadata = 8;
 }
 
-message EpisodeResponse { ObservationResponse observation = 1; }
-
 message StepRequest {
-  string episode_id = 1;
-  repeated float action = 2;
-  int64 expected_frame_id = 3;
+  repeated float action = 1;
+  int64 expected_frame_id = 2;
 }
 
 message StepResponse {
@@ -68,4 +62,12 @@ message StepResponse {
   google.protobuf.Struct metrics = 5;
 }
 
-message CloseEpisodeResponse { bool closed = 1; }
+message TruthResponse {
+  bool done = 1;
+  bool official_success = 2;
+  int64 frame_id = 3;
+  google.protobuf.Struct metrics = 4;
+}
+
+message EndTrialRequest { string reason = 1; }
+message EndTrialResponse { bool ended = 1; }

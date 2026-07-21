@@ -57,7 +57,7 @@ class FakeChannels:
         self.stopped = True
 
 
-def _gateway(tmp_path) -> GatewayService:
+def _gateway(tmp_path, *, unified_user_episodes: bool = True) -> GatewayService:
     config = DeploymentConfig.from_dict(
         {
             "deployment": {"id": "d1"},
@@ -67,7 +67,7 @@ def _gateway(tmp_path) -> GatewayService:
             },
             "identity": {
                 "enabled": True,
-                "unified_user_episodes": True,
+                "unified_user_episodes": unified_user_episodes,
                 "bindings": {
                     "web:sender:web-user": "owner",
                     "voice:sender:voice-user": "owner",
@@ -138,6 +138,19 @@ def test_gateway_never_routes_natural_language_directly_to_skill_intent(
         topic == gateway.topics.conversation_turn for topic, _ in fake_bus.published
     )
     assert all(topic != gateway.topics.skill_intent for topic, _ in fake_bus.published)
+
+
+def test_non_unified_identity_uses_chat_scoped_session_key(tmp_path) -> None:
+    gateway = _gateway(tmp_path, unified_user_episodes=False)
+    envelope = Envelope(
+        channel="web",
+        chat_id="trial-2",
+        sender_id="web-user",
+        user_id="owner",
+        agent_id="main",
+    )
+
+    assert gateway._session_key(envelope) == "d1:main:web:trial-2"
 
 
 def test_gateway_routes_turns_even_when_task_store_has_active_task(tmp_path) -> None:

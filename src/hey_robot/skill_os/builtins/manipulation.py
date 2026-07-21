@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from hey_robot.protocol import RobotObservation
 from hey_robot.skill_os.base import BaseSkill, SkillResult
@@ -132,9 +134,18 @@ class _ManipulateSkillBase(BaseSkill):
         )
         steps: list[dict[str, Any]] = []
         service_name = self.spec.required_model_service
+        last_vla: dict[str, Any] = {}
+        before_frame_id: int | None = None
+        after_frame_id: int | None = None
+        executed_action = False
+        fresh_observation_timeout_sec = max(
+            0.0, float(arguments.get("fresh_observation_timeout_sec") or 2.0)
+        )
 
         for step_index in range(max_steps):
-            payload = _vla_payload(ctx, arguments)
+            observation = _current_observation(ctx)
+            before_frame_id = _frame_id(observation)
+            payload = _vla_payload(ctx, arguments, observation=observation)
             payload.update(
                 {
                     "skill_name": self.spec.name,
@@ -162,6 +173,7 @@ class _ManipulateSkillBase(BaseSkill):
                 )
 
             vla_data = _extract_vla_policy_data(result)
+            last_vla = vla_data
 
             primitives = vla_output_to_primitives(vla_data)
 
@@ -184,22 +196,90 @@ class _ManipulateSkillBase(BaseSkill):
                         status="failed",
                         failure_mode="primitive_execution_failed",
                         error=step.get("error"),
-                        data={"vla": vla_data, "steps": steps},
+                        data={
+                            "vla": vla_data,
+                            "steps": steps,
+                            "option_state": "failed",
+                            "termination_reason": "primitive_execution_failed",
+                            "root_task_success": None,
+                            "episode_done": None,
+                            "requires_reobservation": True,
+                            "before_frame_id": before_frame_id,
+                            "after_frame_id": after_frame_id,
+                        },
                     )
+                executed_action = True
+
+            if primitives:
+                fresh_observation = await _wait_for_fresh_observation(
+                    ctx,
+                    after_frame_id=before_frame_id,
+                    timeout_sec=fresh_observation_timeout_sec,
+                )
+                if ctx.current_observation is not None and before_frame_id is not None:
+                    if fresh_observation is None:
+                        return SkillResult(
+                            success=False,
+                            summary=(
+                                f"{self.spec.name} executed an action but no fresh "
+                                "observation arrived"
+                            ),
+                            status="failed",
+                            failure_mode="observation_stale",
+                            error=(
+                                "current observation did not advance beyond frame "
+                                f"{before_frame_id} within "
+                                f"{fresh_observation_timeout_sec:.2f}s"
+                            ),
+                            data={
+                                "vla": vla_data,
+                                "steps": steps,
+                                "option_state": "failed",
+                                "termination_reason": "observation_stale",
+                                "root_task_success": None,
+                                "episode_done": None,
+                                "requires_reobservation": True,
+                                "before_frame_id": before_frame_id,
+                                "after_frame_id": None,
+                            },
+                        )
+                    after_frame_id = _frame_id(fresh_observation)
 
             if _vla_task_done(vla_data):
                 return SkillResult(
                     success=True,
                     summary=f"{self.spec.name} completed in {step_index + 1} steps",
-                    data={"vla": vla_data, "steps": steps},
+                    data={
+                        "vla": vla_data,
+                        "steps": steps,
+                        "option_state": "succeeded",
+                        "termination_reason": "vla_done",
+                        "root_task_success": None,
+                        "episode_done": None,
+                        "requires_reobservation": executed_action,
+                        "before_frame_id": before_frame_id,
+                        "after_frame_id": after_frame_id,
+                    },
                 )
 
         return SkillResult(
-            success=False,
-            status="failed",
-            failure_mode="vla_max_steps_exhausted",
-            summary=f"{self.spec.name} reached max steps without task_done",
-            data={"steps": steps},
+            success=True,
+            status="completed",
+            summary=(
+                f"{self.spec.name} reached its bounded execution limit; "
+                "root task completion is not established"
+            ),
+            data={
+                "vla": last_vla,
+                "steps": steps,
+                "option_state": "boundary_reached",
+                "termination_reason": "max_steps",
+                "root_task_success": None,
+                "episode_done": None,
+                "requires_reobservation": executed_action,
+                "before_frame_id": before_frame_id,
+                "after_frame_id": after_frame_id,
+            },
         )
 
     async def _execute_primitive(self, ctx, prim) -> dict[str, Any]:
@@ -248,14 +328,23 @@ class _ManipulateSkillBase(BaseSkill):
         )
 
 
-def _vla_payload(ctx: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+def _vla_payload(
+    ctx: Any,
+    arguments: dict[str, Any],
+    *,
+    observation: RobotObservation | None,
+) -> dict[str, Any]:
     payload = {
         key: value
         for key, value in dict(arguments).items()
-        if key not in {"max_steps", "execute_primitives"}
+        if key
+        not in {
+            "max_steps",
+            "execute_primitives",
+            "fresh_observation_timeout_sec",
+        }
     }
     if "observation" not in payload and "image_path" not in payload:
-        observation = ctx.current_observation() if ctx.current_observation else None
         resolve_images = getattr(ctx, "resolve_images", None)
         observation_payload = _observation_payload(
             observation,
@@ -265,6 +354,42 @@ def _vla_payload(ctx: Any, arguments: dict[str, Any]) -> dict[str, Any]:
         if observation_payload is not None:
             payload["observation"] = observation_payload
     return payload
+
+
+def _current_observation(ctx: Any) -> RobotObservation | None:
+    if ctx.current_observation is not None:
+        return cast(RobotObservation | None, ctx.current_observation())
+    return cast(RobotObservation | None, getattr(ctx, "observation", None))
+
+
+def _frame_id(observation: RobotObservation | None) -> int | None:
+    if observation is None:
+        return None
+    return int(observation.frame_id)
+
+
+async def _wait_for_fresh_observation(
+    ctx: Any,
+    *,
+    after_frame_id: int | None,
+    timeout_sec: float,
+) -> RobotObservation | None:
+    """Wait until feedback is causally newer than the action input frame.
+
+    Runtimes without an observation callback are kept compatible: they cannot
+    provide a live freshness guarantee, so the caller skips the barrier.
+    """
+    if ctx.current_observation is None or after_frame_id is None:
+        return None
+    deadline = time.monotonic() + timeout_sec
+    while True:
+        observation = cast(RobotObservation | None, ctx.current_observation())
+        frame_id = _frame_id(observation)
+        if frame_id is not None and frame_id > after_frame_id:
+            return observation
+        if time.monotonic() >= deadline:
+            return None
+        await asyncio.sleep(min(0.02, max(0.001, deadline - time.monotonic())))
 
 
 def _observation_payload(
@@ -396,6 +521,10 @@ class ManipulateSkill(_ManipulateSkillBase):
                 "camera": {"type": "string"},
                 "execution_time": {"type": "number"},
                 "max_steps": {"type": "integer"},
+                "fresh_observation_timeout_sec": {
+                    "type": "number",
+                    "default": 2.0,
+                },
             },
             "required": [],
         },
@@ -410,4 +539,11 @@ class ManipulateSkill(_ManipulateSkillBase):
         goal_effects=("manipulates_object",),
         evidence_outputs=("vla_policy_result", "arm_action_result"),
         cannot_satisfy=("weak_scene_observation",),
+        failure_modes=(
+            "model_service_unavailable",
+            "robot_runtime_unavailable",
+            "vla_inference_failed",
+            "primitive_execution_failed",
+            "observation_stale",
+        ),
     )

@@ -11,6 +11,8 @@ omit =
     src/hey_robot/channels/feishu/transport.py
     src/hey_robot/foundation/contract/v1/model_service_pb2.py
     src/hey_robot/foundation/contract/v1/model_service_pb2_grpc.py
+    src/hey_robot/robocasa_runtime/v1/robocasa_runtime_pb2.py
+    src/hey_robot/robocasa_runtime/v1/robocasa_runtime_pb2_grpc.py
     src/hey_robot/robot_runtime/components/*
     src/hey_robot/robot_runtime/lekiwi/*
     src/hey_robot/robot_runtime/so101/*

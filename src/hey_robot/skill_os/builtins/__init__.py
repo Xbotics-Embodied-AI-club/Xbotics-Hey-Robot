@@ -25,7 +25,6 @@ from hey_robot.skill_os.builtins.perception import (
 )
 from hey_robot.skill_os.builtins.robocasa import (
     RoboCasaOptionSkill,
-    RoboCasaRolloutSkill,
 )
 from hey_robot.skill_os.builtins.safety import ResetPostureSkill, StopMotionSkill
 from hey_robot.skill_os.builtins.tabletop_manipulation import (
@@ -54,7 +53,6 @@ def register_skills(registry: SkillRegistry) -> None:
         SetGripperSkill(),
         ManipulateSkill(),
         RoboCasaOptionSkill(),
-        RoboCasaRolloutSkill(),
         PickSkill(),
         PlaceSkill(),
         PickWandSkill(),

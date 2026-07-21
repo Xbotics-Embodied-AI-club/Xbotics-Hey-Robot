@@ -28,7 +28,7 @@ from google.protobuf import struct_pb2 as google_dot_protobuf_dot_struct__pb2
 
 
 DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
-    b'\n4hey_robot/robocasa_runtime/v1/robocasa_runtime.proto\x12\x1dhey_robot.robocasa_runtime.v1\x1a\x1cgoogle/protobuf/struct.proto"\x0f\n\rHealthRequest"\x7f\n\x0eHealthResponse\x12\x0e\n\x06online\x18\x01 \x01(\x08\x12\x0e\n\x06loaded\x18\x02 \x01(\x08\x12\x0c\n\x04\x62usy\x18\x03 \x01(\x08\x12\x15\n\rerror_message\x18\x04 \x01(\t\x12(\n\x07metrics\x18\x05 \x01(\x0b\x32\x17.google.protobuf.Struct"2\n\x14\x43reateEpisodeRequest\x12\x0c\n\x04task\x18\x01 \x01(\t\x12\x0c\n\x04seed\x18\x02 \x01(\x03"$\n\x0e\x45pisodeRequest\x12\x12\n\nepisode_id\x18\x01 \x01(\t"_\n\nImageFrame\x12\x0e\n\x06\x63\x61mera\x18\x01 \x01(\t\x12\x0c\n\x04\x64\x61ta\x18\x02 \x01(\x0c\x12\x14\n\x0c\x63ontent_type\x18\x03 \x01(\t\x12\r\n\x05width\x18\x04 \x01(\r\x12\x0e\n\x06height\x18\x05 \x01(\r"\xdd\x01\n\x13ObservationResponse\x12\x12\n\nepisode_id\x18\x01 \x01(\t\x12\x10\n\x08\x66rame_id\x18\x02 \x01(\x03\x12\r\n\x05state\x18\x03 \x03(\x02\x12\x39\n\x06images\x18\x04 \x03(\x0b\x32).hey_robot.robocasa_runtime.v1.ImageFrame\x12\x0c\n\x04task\x18\x05 \x01(\t\x12\x0c\n\x04\x64one\x18\x06 \x01(\x08\x12\x0f\n\x07success\x18\x07 \x01(\x08\x12)\n\x08metadata\x18\x08 \x01(\x0b\x32\x17.google.protobuf.Struct"Z\n\x0f\x45pisodeResponse\x12G\n\x0bobservation\x18\x01 \x01(\x0b\x32\x32.hey_robot.robocasa_runtime.v1.ObservationResponse"L\n\x0bStepRequest\x12\x12\n\nepisode_id\x18\x01 \x01(\t\x12\x0e\n\x06\x61\x63tion\x18\x02 \x03(\x02\x12\x19\n\x11\x65xpected_frame_id\x18\x03 \x01(\x03"\xb0\x01\n\x0cStepResponse\x12G\n\x0bobservation\x18\x01 \x01(\x0b\x32\x32.hey_robot.robocasa_runtime.v1.ObservationResponse\x12\x0e\n\x06reward\x18\x02 \x01(\x01\x12\x0c\n\x04\x64one\x18\x03 \x01(\x08\x12\x0f\n\x07success\x18\x04 \x01(\x08\x12(\n\x07metrics\x18\x05 \x01(\x0b\x32\x17.google.protobuf.Struct"&\n\x14\x43loseEpisodeResponse\x12\x0e\n\x06\x63losed\x18\x01 \x01(\x08\x32\xa0\x05\n\x0fRoboCasaRuntime\x12h\n\tGetHealth\x12,.hey_robot.robocasa_runtime.v1.HealthRequest\x1a-.hey_robot.robocasa_runtime.v1.HealthResponse\x12t\n\rCreateEpisode\x12\x33.hey_robot.robocasa_runtime.v1.CreateEpisodeRequest\x1a..hey_robot.robocasa_runtime.v1.EpisodeResponse\x12l\n\x07Observe\x12-.hey_robot.robocasa_runtime.v1.EpisodeRequest\x1a\x32.hey_robot.robocasa_runtime.v1.ObservationResponse\x12_\n\x04Step\x12*.hey_robot.robocasa_runtime.v1.StepRequest\x1a+.hey_robot.robocasa_runtime.v1.StepResponse\x12j\n\x05Reset\x12-.hey_robot.robocasa_runtime.v1.EpisodeRequest\x1a\x32.hey_robot.robocasa_runtime.v1.ObservationResponse\x12r\n\x0c\x43loseEpisode\x12-.hey_robot.robocasa_runtime.v1.EpisodeRequest\x1a\x33.hey_robot.robocasa_runtime.v1.CloseEpisodeResponseb\x06proto3'
+    b'\n4hey_robot/robocasa_runtime/v1/robocasa_runtime.proto\x12\x1dhey_robot.robocasa_runtime.v1\x1a\x1cgoogle/protobuf/struct.proto"\x0f\n\rHealthRequest"\x0e\n\x0c\x45mptyRequest"\x7f\n\x0eHealthResponse\x12\x0e\n\x06online\x18\x01 \x01(\x08\x12\x0e\n\x06loaded\x18\x02 \x01(\x08\x12\x0c\n\x04\x62usy\x18\x03 \x01(\x08\x12\x15\n\rerror_message\x18\x04 \x01(\t\x12(\n\x07metrics\x18\x05 \x01(\x0b\x32\x17.google.protobuf.Struct"A\n\x11\x42\x65ginTrialRequest\x12\x10\n\x08trial_id\x18\x01 \x01(\t\x12\x0c\n\x04task\x18\x02 \x01(\t\x12\x0c\n\x04seed\x18\x03 \x01(\x03"_\n\nImageFrame\x12\x0e\n\x06\x63\x61mera\x18\x01 \x01(\t\x12\x0c\n\x04\x64\x61ta\x18\x02 \x01(\x0c\x12\x14\n\x0c\x63ontent_type\x18\x03 \x01(\t\x12\r\n\x05width\x18\x04 \x01(\r\x12\x0e\n\x06height\x18\x05 \x01(\r"\xdb\x01\n\x13ObservationResponse\x12\x10\n\x08trial_id\x18\x01 \x01(\t\x12\x10\n\x08\x66rame_id\x18\x02 \x01(\x03\x12\r\n\x05state\x18\x03 \x03(\x02\x12\x39\n\x06images\x18\x04 \x03(\x0b\x32).hey_robot.robocasa_runtime.v1.ImageFrame\x12\x0c\n\x04task\x18\x05 \x01(\t\x12\x0c\n\x04\x64one\x18\x06 \x01(\x08\x12\x0f\n\x07success\x18\x07 \x01(\x08\x12)\n\x08metadata\x18\x08 \x01(\x0b\x32\x17.google.protobuf.Struct"8\n\x0bStepRequest\x12\x0e\n\x06\x61\x63tion\x18\x01 \x03(\x02\x12\x19\n\x11\x65xpected_frame_id\x18\x02 \x01(\x03"\xb0\x01\n\x0cStepResponse\x12G\n\x0bobservation\x18\x01 \x01(\x0b\x32\x32.hey_robot.robocasa_runtime.v1.ObservationResponse\x12\x0e\n\x06reward\x18\x02 \x01(\x01\x12\x0c\n\x04\x64one\x18\x03 \x01(\x08\x12\x0f\n\x07success\x18\x04 \x01(\x08\x12(\n\x07metrics\x18\x05 \x01(\x0b\x32\x17.google.protobuf.Struct"s\n\rTruthResponse\x12\x0c\n\x04\x64one\x18\x01 \x01(\x08\x12\x18\n\x10official_success\x18\x02 \x01(\x08\x12\x10\n\x08\x66rame_id\x18\x03 \x01(\x03\x12(\n\x07metrics\x18\x04 \x01(\x0b\x32\x17.google.protobuf.Struct"!\n\x0f\x45ndTrialRequest\x12\x0e\n\x06reason\x18\x01 \x01(\t"!\n\x10\x45ndTrialResponse\x12\r\n\x05\x65nded\x18\x01 \x01(\x08\x32\x91\x05\n\x0fRoboCasaRuntime\x12h\n\tGetHealth\x12,.hey_robot.robocasa_runtime.v1.HealthRequest\x1a-.hey_robot.robocasa_runtime.v1.HealthResponse\x12r\n\nBeginTrial\x12\x30.hey_robot.robocasa_runtime.v1.BeginTrialRequest\x1a\x32.hey_robot.robocasa_runtime.v1.ObservationResponse\x12j\n\x07Observe\x12+.hey_robot.robocasa_runtime.v1.EmptyRequest\x1a\x32.hey_robot.robocasa_runtime.v1.ObservationResponse\x12_\n\x04Step\x12*.hey_robot.robocasa_runtime.v1.StepRequest\x1a+.hey_robot.robocasa_runtime.v1.StepResponse\x12\x66\n\tReadTruth\x12+.hey_robot.robocasa_runtime.v1.EmptyRequest\x1a,.hey_robot.robocasa_runtime.v1.TruthResponse\x12k\n\x08\x45ndTrial\x12..hey_robot.robocasa_runtime.v1.EndTrialRequest\x1a/.hey_robot.robocasa_runtime.v1.EndTrialResponseb\x06proto3'
 )
 
 _globals = globals()
@@ -40,24 +40,26 @@ if not _descriptor._USE_C_DESCRIPTORS:
     DESCRIPTOR._loaded_options = None
     _globals["_HEALTHREQUEST"]._serialized_start = 117
     _globals["_HEALTHREQUEST"]._serialized_end = 132
-    _globals["_HEALTHRESPONSE"]._serialized_start = 134
-    _globals["_HEALTHRESPONSE"]._serialized_end = 261
-    _globals["_CREATEEPISODEREQUEST"]._serialized_start = 263
-    _globals["_CREATEEPISODEREQUEST"]._serialized_end = 313
-    _globals["_EPISODEREQUEST"]._serialized_start = 315
-    _globals["_EPISODEREQUEST"]._serialized_end = 351
-    _globals["_IMAGEFRAME"]._serialized_start = 353
-    _globals["_IMAGEFRAME"]._serialized_end = 448
-    _globals["_OBSERVATIONRESPONSE"]._serialized_start = 451
-    _globals["_OBSERVATIONRESPONSE"]._serialized_end = 672
-    _globals["_EPISODERESPONSE"]._serialized_start = 674
-    _globals["_EPISODERESPONSE"]._serialized_end = 764
-    _globals["_STEPREQUEST"]._serialized_start = 766
-    _globals["_STEPREQUEST"]._serialized_end = 842
-    _globals["_STEPRESPONSE"]._serialized_start = 845
-    _globals["_STEPRESPONSE"]._serialized_end = 1021
-    _globals["_CLOSEEPISODERESPONSE"]._serialized_start = 1023
-    _globals["_CLOSEEPISODERESPONSE"]._serialized_end = 1061
-    _globals["_ROBOCASARUNTIME"]._serialized_start = 1064
-    _globals["_ROBOCASARUNTIME"]._serialized_end = 1736
+    _globals["_EMPTYREQUEST"]._serialized_start = 134
+    _globals["_EMPTYREQUEST"]._serialized_end = 148
+    _globals["_HEALTHRESPONSE"]._serialized_start = 150
+    _globals["_HEALTHRESPONSE"]._serialized_end = 277
+    _globals["_BEGINTRIALREQUEST"]._serialized_start = 279
+    _globals["_BEGINTRIALREQUEST"]._serialized_end = 344
+    _globals["_IMAGEFRAME"]._serialized_start = 346
+    _globals["_IMAGEFRAME"]._serialized_end = 441
+    _globals["_OBSERVATIONRESPONSE"]._serialized_start = 444
+    _globals["_OBSERVATIONRESPONSE"]._serialized_end = 663
+    _globals["_STEPREQUEST"]._serialized_start = 665
+    _globals["_STEPREQUEST"]._serialized_end = 721
+    _globals["_STEPRESPONSE"]._serialized_start = 724
+    _globals["_STEPRESPONSE"]._serialized_end = 900
+    _globals["_TRUTHRESPONSE"]._serialized_start = 902
+    _globals["_TRUTHRESPONSE"]._serialized_end = 1017
+    _globals["_ENDTRIALREQUEST"]._serialized_start = 1019
+    _globals["_ENDTRIALREQUEST"]._serialized_end = 1052
+    _globals["_ENDTRIALRESPONSE"]._serialized_start = 1054
+    _globals["_ENDTRIALRESPONSE"]._serialized_end = 1087
+    _globals["_ROBOCASARUNTIME"]._serialized_start = 1090
+    _globals["_ROBOCASARUNTIME"]._serialized_end = 1747
 # @@protoc_insertion_point(module_scope)

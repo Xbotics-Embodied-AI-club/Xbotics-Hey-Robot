@@ -68,6 +68,7 @@ class RobotManager:
                     GrpcRoboCasaRuntimeClient(
                         target,
                         timeout_sec=float(spec.settings.get("timeout_sec", 10.0)),
+                        role="data",
                     ),
                 )
                 continue

@@ -195,10 +195,13 @@ class GatewayService:
         await self._send_reply(AgentReply(envelope=result.envelope, text=result.text))
 
     def _session_key(self, envelope: Envelope) -> str:
-        principal = (
-            envelope.user_id
-            or f"{envelope.channel or 'unknown'}:{envelope.chat_id or envelope.sender_id or 'anonymous'}"
-        )
+        if self.config.identity.unified_user_episodes and envelope.user_id:
+            principal = envelope.user_id
+        else:
+            principal = (
+                f"{envelope.channel or 'unknown'}:"
+                f"{envelope.chat_id or envelope.sender_id or 'anonymous'}"
+            )
         return f"{self.config.deployment.id}:{envelope.agent_id or self._agent_id(None)}:{principal}"
 
     async def _handle_safety_command(
