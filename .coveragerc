@@ -1,4 +1,5 @@
 [run]
+data_file = artifacts/test/.coverage
 source = hey_robot
 
 [report]
