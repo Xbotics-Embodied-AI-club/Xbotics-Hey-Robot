@@ -152,6 +152,7 @@ class RoboCasaLeRobotPolicyExecutor:
         self._lock = Lock()
         self._cancel_event = Event()
         self._session_id: str | None = None
+        self._policy_task: str | None = None
         self._last_error: str | None = None
 
     @property
@@ -242,9 +243,10 @@ class RoboCasaLeRobotPolicyExecutor:
             )
             seed = int(arguments.get("seed") or 0)
             bundle = self._policy_bundle(self.default_policy, self.default_device)
-            if session_id != self._session_id:
+            if session_id != self._session_id or policy_task != self._policy_task:
                 bundle.reset_action_queue(seed=seed)
                 self._session_id = session_id
+                self._policy_task = policy_task
             if self._cancel_event.is_set():
                 self._cancel_event.clear()
                 return {

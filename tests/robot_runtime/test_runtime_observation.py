@@ -161,9 +161,46 @@ async def test_robot_runtime_uses_scene_captioner_for_inspect_scene(tmp_path) ->
     assert captioner.observations[0].images
 
 
+async def test_inspect_scene_preserves_structured_object_locations(tmp_path) -> None:
+    class Captioner:
+        async def caption(self, observation, _status, *, question=None):
+            del observation
+            from hey_robot.cognition.perception.scene import (
+                SceneObject,
+                SceneUnderstanding,
+            )
+
+            assert question == "find the kettle"
+            return SceneUnderstanding(
+                summary="kitchen counter",
+                objects=[SceneObject("kettle", "left counter", 0.93)],
+                task_relevance="the requested kettle is visible",
+                confidence=0.9,
+            )
+
+    runtime = RobotRuntime(
+        _CountingCameraDriver("mock0"),
+        LocalMediaStore(tmp_path / "media"),
+        scene_captioner=Captioner(),
+    )
+    await runtime.start()
+    action = RobotSkillAction(
+        "inspect_scene",
+        {"question": "find the kettle"},
+        safety_level="observe",
+    ).to_robot_action(_intent("structured1", "inspect_scene", "find the kettle"))
+
+    status = await runtime.apply_action(action)
+
+    summary = status.metrics["last_skill_result"]["summary"]
+    assert "objects=[kettle@left counter(0.93)]" in summary
+    assert "task_relevance=the requested kettle is visible" in summary
+
+
 async def test_inspect_scene_publishes_frame_scoped_entities(tmp_path) -> None:
     class Captioner:
-        async def caption(self, observation, _status):
+        async def caption(self, observation, _status, *, question=None):
+            del question
             from hey_robot.cognition.perception.scene import SceneUnderstanding
 
             return SceneUnderstanding(
@@ -389,7 +426,8 @@ class _FakeSceneCaptioner:
     def __init__(self) -> None:
         self.observations: list[RobotObservation] = []
 
-    async def caption(self, observation, _status):
+    async def caption(self, observation, _status, *, question=None):
+        del question
         from hey_robot.cognition.perception.scene import SceneUnderstanding
 
         self.observations.append(observation)

@@ -50,6 +50,9 @@ def test_agent_surface_has_only_generic_manipulate() -> None:
         "robocasa_option" not in spec.provides
         for spec in config.model_services.values()
     )
+    assert config.model_services["robocasa365"].settings["prompt_mode"] == (
+        "environment_root"
+    )
     assert not [
         issue for issue in validate_deployment(config) if issue.level == "error"
     ]

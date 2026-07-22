@@ -69,6 +69,33 @@ class _Tasks:
         self.completed.append(_args)
         self.current = None
 
+
+def test_duplicate_observation_gate_stops_third_caption_on_same_frame() -> None:
+    observe = ActionProposal(
+        "observation", "inspect_scene", "find kettle", {"question": "find kettle"}
+    )
+    steps = [
+        SimpleNamespace(
+            proposal=observe,
+            outcome=ToolOutcome("completed", "seen", data={"frame_id": 7}),
+        ),
+        SimpleNamespace(
+            proposal=observe,
+            outcome=ToolOutcome("completed", "seen again", data={"frame_id": 7}),
+        ),
+    ]
+    service = object.__new__(AutonomousAgentService)
+    service.tasks = SimpleNamespace(recent_steps=lambda _task_id, limit: steps[-limit:])
+
+    outcome = service._duplicate_observation_gate(
+        SimpleNamespace(task_id="task-1"), observe
+    )
+
+    assert outcome is not None
+    assert outcome.status == "failed"
+    assert outcome.retryable is True
+    assert outcome.data["failure_mode"] == "duplicate_observation"
+
     def continue_task(self, *_args: object, **_kwargs: object) -> None:
         self.current.continuation_count += 1
 

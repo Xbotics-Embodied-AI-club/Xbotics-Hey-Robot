@@ -18,14 +18,23 @@ from hey_robot.templates.loader import TemplateStore
 
 class SceneCaptioner(Protocol):
     async def caption(
-        self, observation: RobotObservation, status: RobotStatus | None = None
+        self,
+        observation: RobotObservation,
+        status: RobotStatus | None = None,
+        *,
+        question: str | None = None,
     ) -> SceneUnderstanding: ...
 
 
 class DeterministicSceneCaptioner:
     async def caption(
-        self, observation: RobotObservation, status: RobotStatus | None = None
+        self,
+        observation: RobotObservation,
+        status: RobotStatus | None = None,
+        *,
+        question: str | None = None,
     ) -> SceneUnderstanding:
+        del question
         metrics = status.metrics if status is not None else {}
         camera = (
             metrics.get("camera")
@@ -82,7 +91,11 @@ class ReasoningSceneCaptioner:
         self.templates = templates or TemplateStore()
 
     async def caption(
-        self, observation: RobotObservation, status: RobotStatus | None = None
+        self,
+        observation: RobotObservation,
+        status: RobotStatus | None = None,
+        *,
+        question: str | None = None,
     ) -> SceneUnderstanding:
         images = self._images(observation)
         if not images:
@@ -98,7 +111,12 @@ class ReasoningSceneCaptioner:
                     content=self.templates.render(
                         "robot/scene_captioner/USER.md",
                         frame_id=observation.frame_id,
-                        task=observation.task or "unknown",
+                        task=(
+                            observation.raw.get("policy_task")
+                            or observation.task
+                            or "unknown"
+                        ),
+                        question=question or "none",
                         robot_status=status.state if status else "unknown",
                     ),
                     images=images,

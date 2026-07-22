@@ -29,7 +29,11 @@ class SceneCaptioner(Protocol):
     """可选语义图像描述能力的运行时端口。"""
 
     async def caption(
-        self, observation: RobotObservation, status: RobotStatus | None = None
+        self,
+        observation: RobotObservation,
+        status: RobotStatus | None = None,
+        *,
+        question: str | None = None,
     ) -> Any: ...
 
 
@@ -193,7 +197,10 @@ class RobotRuntime:
     async def _inspect_scene(
         self, snapshot: PerceptionSnapshot, arguments: dict[str, Any]
     ) -> dict[str, Any]:
-        caption, entities = await self._caption_scene(snapshot.observation)
+        caption, entities = await self._caption_scene(
+            snapshot.observation,
+            question=str(arguments.get("question") or "").strip() or None,
+        )
         summary = (
             f"scene={caption}"
             if caption
@@ -219,7 +226,7 @@ class RobotRuntime:
         }
 
     async def _caption_scene(
-        self, observation: RobotObservation
+        self, observation: RobotObservation, *, question: str | None = None
     ) -> tuple[str | None, tuple[SceneEntity, ...]]:
         """在启用视觉描述器时，返回模型生成的场景摘要。
 
@@ -230,7 +237,7 @@ class RobotRuntime:
             return None, ()
         try:
             understanding = await self.scene_captioner.caption(
-                observation, await self.status()
+                observation, await self.status(), question=question
             )
         except Exception:
             logger.exception(
@@ -252,7 +259,7 @@ class RobotRuntime:
                 f"reason={metadata.get('error') or metadata.get('raw') or 'unknown'}"
             )
             return None, ()
-        summary = understanding.summary.strip()
+        summary = _structured_scene_summary(understanding)
         entities = tuple(
             entity
             for entity in getattr(understanding, "entities", ())
@@ -419,6 +426,32 @@ def _observation_summary(
             )
         )
     return "; ".join(parts)
+
+
+def _structured_scene_summary(understanding: Any) -> str:
+    """Preserve grounded object/location facts for the high-level planner."""
+    parts = [str(getattr(understanding, "summary", "") or "").strip()]
+    objects = []
+    for item in tuple(getattr(understanding, "objects", ()) or ())[:8]:
+        name = str(getattr(item, "name", "") or "").strip()
+        if not name:
+            continue
+        location = str(getattr(item, "location", "") or "").strip()
+        confidence = float(getattr(item, "confidence", 0.0) or 0.0)
+        fact = name
+        if location:
+            fact += f"@{location}"
+        fact += f"({confidence:.2f})"
+        objects.append(fact)
+    if objects:
+        parts.append("objects=[" + ", ".join(objects) + "]")
+    relevance = str(getattr(understanding, "task_relevance", "") or "").strip()
+    if relevance:
+        parts.append(f"task_relevance={relevance}")
+    hint = str(getattr(understanding, "next_observation_hint", "") or "").strip()
+    if hint:
+        parts.append(f"next_observation_hint={hint}")
+    return "; ".join(part for part in parts if part)
 
 
 def _join_summaries(items: list[dict[str, Any]]) -> str:

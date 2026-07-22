@@ -38,7 +38,13 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RoboCasa365 full Hey Robot benchmark")
     parser.add_argument("--task", required=True, choices=sorted(ALLOWED_TASKS))
     parser.add_argument("--seed", type=int, default=1000)
-    parser.add_argument("--objective", required=True)
+    parser.add_argument(
+        "--objective",
+        help=(
+            "Optional language-instruction override. By default the benchmark uses "
+            "the canonical instruction returned by the live RoboCasa environment."
+        ),
+    )
     parser.add_argument("--condition", choices=("b0", "b1", "b2"), default="b1")
     parser.add_argument(
         "--manifest",
@@ -60,7 +66,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--poll-sec", type=float, default=1.0)
-    parser.add_argument("--timeout-sec", type=float, default=1800.0)
+    parser.add_argument("--timeout-sec", type=float, default=7200.0)
     return parser
 
 
@@ -71,7 +77,6 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
     if args.task not in manifest["tasks"]:
         raise ValueError(f"task {args.task!r} is not in manifest {args.manifest}")
     condition = condition_for(args.condition)
-    agent_objective = condition.prompt(args.objective)
     config = DeploymentConfig.from_yaml(args.config)
     model_candidates = [
         (service_id, spec)
@@ -110,20 +115,6 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
             raise RuntimeError(
                 f"RoboCasa model service is not ready: {model_health.error}"
             )
-        (args.output_dir / "manifest.json").write_text(
-            json.dumps(
-                {
-                    "manifest": manifest,
-                    "task": args.task,
-                    "seed": args.seed,
-                    "objective": args.objective,
-                    "condition": condition.name,
-                },
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
         (args.output_dir / "runtime_metadata.json").write_text(
             json.dumps(
                 _runtime_metadata(
@@ -150,6 +141,31 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
             split=str(manifest["split"]),
             registries=tuple(manifest["registries"]),
         )
+        official_objective = str(
+            initial.metadata.get("policy_task") or initial.task
+        ).strip()
+        root_objective = str(args.objective or official_objective).strip()
+        if not root_objective:
+            raise ValueError("RoboCasa trial objective is empty")
+        agent_objective = condition.prompt(root_objective)
+        (args.output_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "manifest": manifest,
+                    "task": args.task,
+                    "seed": args.seed,
+                    "objective": root_objective,
+                    "official_objective": official_objective,
+                    "objective_source": (
+                        "cli_override" if args.objective else "environment"
+                    ),
+                    "condition": condition.name,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         confirmed_spec = {
             "trial_id": initial.episode_id,
             "task": initial.task,
@@ -162,7 +178,17 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
             encoding="utf-8",
         )
         (args.output_dir / "root_task.json").write_text(
-            json.dumps({"objective": args.objective, "chat_id": trial_id}, indent=2)
+            json.dumps(
+                {
+                    "objective": root_objective,
+                    "official_objective": official_objective,
+                    "objective_source": (
+                        "cli_override" if args.objective else "environment"
+                    ),
+                    "chat_id": trial_id,
+                },
+                indent=2,
+            )
             + "\n",
             encoding="utf-8",
         )
@@ -218,6 +244,9 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
                     "task": agent_task,
                 }
             )
+            if agent_turn_task.done() and agent_task is None:
+                termination_reason = "agent_no_task"
+                break
             if condition.manipulate_call_limit is not None:
                 terminal_options = [
                     item

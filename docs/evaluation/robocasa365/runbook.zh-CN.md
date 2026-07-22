@@ -66,7 +66,7 @@ PI052 必须遵守其独立 LeRobot evaluator 的推理契约：
 2. option horizon 与 checkpoint 的 `n_action_steps=50` 对齐；
 3. `policy.reset()` 每个 trial 只调用一次，不能在 option 边界清空层级 subtask 状态；
 4. trial seed 同时设置 environment 以及隔离 PI052 进程的 Python、NumPy、Torch/CUDA RNG；
-5. Agent 配置使用 `hard_max_skills=64`，以覆盖最多 1000 个环境步和中间重新观察。
+5. Agent 配置使用 `hard_max_skills=220`，覆盖 target50 最长 2900 个环境步及中间重新观察。
 
 PI052 在独立 spawn 子进程中使用 CUDA，MuJoCo/EGL 留在 managed backend 主进程。这个隔离用于避免
 Torch/CUDA inference 与 EGL 共进程时出现渲染缓冲异常，不能合并回同一进程。
@@ -124,6 +124,11 @@ prompt_mode: environment_root
 option_horizon: 50
 ```
 
+`pi052_robocasa` 使用 `subtask_mem` recipe：推理时从官方根任务生成并保持自己的低层 subtask。
+因此当前 checkpoint 必须使用 `environment_root`；把外部 Agent 子目标直接替换到 `task`
+通道会形成二次分解，并破坏独立 evaluator 的输入契约。若后续接入明确支持外部短指令的
+steerable VLA，应作为同一 `manipulate` 接口的另一个模型配置验证，而不是修改动作链。
+
 若模型位于其他位置，应修改或覆盖这份 deployment YAML；不要另设一套 shell 默认值。backend
 会将同一配置映射给隔离模型进程。
 
@@ -135,11 +140,18 @@ option_horizon: 50
 bash scripts/evaluation/run_robocasa365_full_system.sh \
   --task CloseFridge \
   --seed 1000 \
-  --objective "Close the fridge." \
   --condition b1 \
   --output-dir runtime/robocasa365/close-fridge-b1-seed1000 \
-  --timeout-sec 1200
+  --timeout-sec 7200
 ```
+
+默认不传 `--objective`：评测器会在创建 live trial 后读取环境的官方语言指令，并把它作为
+根任务。只有专门评估语言改写鲁棒性时才使用 `--objective` 显式覆盖；artifact 会同时记录
+`official_objective` 和 `objective_source`，避免把错误任务描述误判成策略失败。
+
+环境步数上限也不再固定为 1000：backend 会读取 RoboCasa dataset registry 中每个任务的
+官方 `horizon`，同时配置 wrapper truncation 和底层 robosuite horizon。target50 的长任务可达
+2900 步，因此正式批量评测默认 wall-clock timeout 为 7200 秒。
 
 启动器会自动完成：
 
@@ -181,7 +193,7 @@ EpisodeManager，不存在 condition 专属 runner 或动作路径。
   --seeds 1000,1001 \
   --agent-url http://127.0.0.1:18080/turn \
   --runtime-target grpc://127.0.0.1:9092 \
-  --timeout-sec 1800
+  --timeout-sec 7200
 ```
 
 任务分组来自 `configs/evaluation/robocasa365.tasks.yaml`：
@@ -249,7 +261,7 @@ video.mp4
 - 出现彩色噪声帧：检查是否误把 PI052 CUDA 与 MuJoCo EGL 放回同一进程，以及是否加载了
   与 535.309.01 匹配的用户态 EGL；
 - 固定 seed 结果不一致：确认 trial seed 同时传入 environment 和 PI052 子进程；
-- 运行在约 500 步被阻断：检查是否退回通用 `hard_max_skills=24`；
+- 长任务在官方 horizon 前被阻断：检查是否退回通用 `hard_max_skills=24` 或固定 1000 步；
 - option 每 30 步结束：配置过时，PI052 必须使用 50 步 chunk；
 - Agent option 名改变模型行为：配置过时，PI052 根任务必须来自 environment
   `task_description`；

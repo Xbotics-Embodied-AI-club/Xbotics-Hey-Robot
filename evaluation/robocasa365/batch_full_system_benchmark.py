@@ -32,7 +32,13 @@ def _parser() -> argparse.ArgumentParser:
         "--condition", action="append", choices=("b0", "b1", "b2"), default=[]
     )
     parser.add_argument("--seeds", default="1000")
-    parser.add_argument("--objective-template", default="Complete the {task} task.")
+    parser.add_argument(
+        "--objective-template",
+        help=(
+            "Optional paraphrase template. Omit it to use each live environment's "
+            "canonical RoboCasa language instruction."
+        ),
+    )
     parser.add_argument("--agent-url", default="http://127.0.0.1:8080/turn")
     parser.add_argument("--runtime-target", default="grpc://127.0.0.1:9092")
     parser.add_argument(
@@ -41,7 +47,7 @@ def _parser() -> argparse.ArgumentParser:
         default=Path("runtime/robocasa365.agent/robocasa.credentials.json"),
     )
     parser.add_argument("--poll-sec", type=float, default=1.0)
-    parser.add_argument("--timeout-sec", type=float, default=1800.0)
+    parser.add_argument("--timeout-sec", type=float, default=7200.0)
     return parser
 
 
@@ -67,7 +73,11 @@ async def run_batch(args: argparse.Namespace) -> dict[str, object]:
                     trial_args = argparse.Namespace(
                         task=task,
                         seed=seed,
-                        objective=args.objective_template.format(task=task),
+                        objective=(
+                            args.objective_template.format(task=task)
+                            if args.objective_template
+                            else None
+                        ),
                         condition=condition,
                         manifest=args.manifest,
                         config=args.config,

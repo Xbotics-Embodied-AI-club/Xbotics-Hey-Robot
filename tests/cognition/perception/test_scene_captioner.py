@@ -50,17 +50,21 @@ async def test_reasoning_scene_captioner_parses_structured_scene() -> None:
         envelope=Envelope(robot_id="xlerobot"),
         frame_id=4,
         images=[ImageRef(uri="media://image")],
+        task="KettleBoiling",
+        raw={"policy_task": "Place the kettle on a burner."},
     )
 
     result = await ReasoningSceneCaptioner(
         provider, image_resolver=FakeResolver()
-    ).caption(observation)  # type: ignore[arg-type]
+    ).caption(observation, question="杯子在哪里？")  # type: ignore[arg-type]
 
     assert result.summary == "桌面上有一个杯子"
     assert result.objects[0].name == "杯子"
     assert result.next_observation_hint == "靠近前保持目标居中"
     assert "机器人前视相机的场景理解器" in provider.messages[0].content
     assert "frame_id: 4" in provider.messages[1].content
+    assert "杯子在哪里？" in provider.messages[1].content
+    assert "Place the kettle on a burner." in provider.messages[1].content
 
 
 def test_scene_understanding_accepts_string_risks() -> None:

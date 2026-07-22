@@ -37,6 +37,7 @@ class ActiveTrial:
     last_reward: float = 0.0
     last_info: dict[str, Any] | None = None
     started_at: float = 0.0
+    horizon: int = 1000
 
 
 @dataclass(frozen=True)
@@ -94,6 +95,7 @@ class EpisodeManager:
                 env=env,
                 observation=observation,
                 started_at=time.time(),
+                horizon=int(getattr(env, "_max_episode_steps", 1000)),
             )
             self._events = [
                 {
@@ -104,6 +106,7 @@ class EpisodeManager:
                     "seed": spec.seed,
                     "split": spec.split,
                     "registries": list(spec.registries),
+                    "horizon": self._active.horizon,
                 }
             ]
             return self._active
@@ -195,6 +198,7 @@ class EpisodeManager:
             "official_success": trial.official_success,
             "last_reward": trial.last_reward,
             "last_info": dict(trial.last_info or {}),
+            "horizon": trial.horizon,
         }
 
     def record_event(self, kind: str, payload: dict[str, Any]) -> None:
@@ -242,6 +246,15 @@ class EpisodeManager:
 
         configure_headless_egl()
         from lerobot.envs.robocasa import DEFAULT_CAMERAS, RoboCasaEnv
+        from robocasa.utils.dataset_registry import (
+            ATOMIC_TASK_DATASETS,
+            COMPOSITE_TASK_DATASETS,
+        )
+
+        task_config = (ATOMIC_TASK_DATASETS | COMPOSITE_TASK_DATASETS).get(
+            spec.task, {}
+        )
+        horizon = int(task_config.get("horizon", 1000))
 
         env = RoboCasaEnv(
             task=spec.task,
@@ -249,6 +262,8 @@ class EpisodeManager:
             obs_type="pixels_agent_pos",
             obj_registries=spec.registries,
             split=spec.split,
+            episode_length=horizon,
+            horizon=horizon,
         )
         try:
             observation, _ = env.reset(seed=spec.seed)

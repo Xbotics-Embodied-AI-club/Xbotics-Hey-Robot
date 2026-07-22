@@ -12,6 +12,7 @@ from evaluation.robocasa365.conditions import condition_for
 from evaluation.robocasa365.full_system_benchmark import (
     _find_trial_task,
     _option_records,
+    _parser as trial_parser,
     _write_evaluator_action_artifact,
 )
 from hey_robot.foundation.backends.vla.lerobot.robocasa_executor import (
@@ -132,6 +133,19 @@ def test_flat_condition_has_an_executable_single_option_limit() -> None:
     assert condition_for("b1").manipulate_call_limit is None
 
 
+def test_trial_defaults_to_live_environment_objective() -> None:
+    args = trial_parser().parse_args(
+        [
+            "--task",
+            "KettleBoiling",
+            "--output-dir",
+            "runtime/test-trial",
+        ]
+    )
+
+    assert args.objective is None
+
+
 def test_agent_task_is_correlated_by_the_submitted_condition_prompt() -> None:
     objective = condition_for("b2").prompt("Close the fridge.")
     task = {"objective": objective, "created_at": 11.0, "status": "active"}
@@ -205,6 +219,51 @@ def test_policy_executor_returns_one_action_without_owning_environment() -> None
     second = runner.execute(request)
     assert second["success"] is True
     assert policy.reset_count == 1
+
+
+def test_agent_subgoal_change_resets_policy_action_queue() -> None:
+    class Policy:
+        def __init__(self) -> None:
+            self.reset_count = 0
+
+        def reset(self) -> None:
+            self.reset_count += 1
+
+        def select_action(self, _sample):
+            return np.zeros((1, 12), dtype=np.float32)
+
+    policy = Policy()
+    runner = RoboCasaLeRobotPolicyExecutor(
+        environ={
+            "ROBOCASA_POLICY": "fake",
+            "ROBOCASA_POLICY_DEVICE": "cpu",
+            "ROBOCASA_PROMPT_MODE": "agent_subgoal",
+        },
+        policy_loader=lambda path, device: _PolicyBundle(
+            policy_path=path,
+            policy_type="fake",
+            device=device,
+            input_features={},
+            policy=policy,
+            preprocessor=lambda sample: sample,
+            postprocessor=lambda action: action,
+        ),
+    )
+    request = {
+        "skill_name": "manipulate",
+        "episode_id": "trial-1",
+        "arguments": {
+            "task_prompt": "Pick up the kettle.",
+            "observation": _encoded_observation(),
+        },
+    }
+
+    assert runner.execute(request)["success"] is True
+    assert runner.execute(request)["success"] is True
+    request["arguments"]["task_prompt"] = "Place the kettle on the burner."
+    assert runner.execute(request)["success"] is True
+
+    assert policy.reset_count == 2
 
 
 def test_generic_manipulate_executes_native_action_option() -> None:

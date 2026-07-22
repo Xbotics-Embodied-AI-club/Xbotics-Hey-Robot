@@ -25,15 +25,15 @@ identity:
   bindings:
     "web:sender:robocasa365-benchmark": owner
 
-# A RoboCasa episode permits 1000 environment steps. One PI052 option consumes
-# 50 steps and the re-observation gate adds an inspect_scene call between
-# options, so the generic 24-skill default can stop a valid rollout halfway.
+# RoboCasa365 horizons are task-specific and reach 2900 environment steps. A
+# short PI052 option plus its re-observation can consume two Agent steps, so the
+# generic 24-skill default is not a valid long-horizon evaluation budget.
 agent_runtime:
   enabled: true
   robot_id: robocasa365
-  hard_max_wall_time_sec: 1800
+  hard_max_wall_time_sec: 7200
   hard_max_continuations: 40
-  hard_max_skills: 64
+  hard_max_skills: 220
   # Includes the one-time 4-5 minute PI0.5 cold load.
   skill_result_timeout_sec: 1800
 
@@ -92,6 +92,8 @@ model_services:
       auth_token_env: ROBOCASA_DATA_TOKEN
       policy_path: lerobot/pi052_robocasa
       policy_device: cuda
+      # PI052's subtask_mem checkpoint generates and retains its own low-level
+      # subtask state from the canonical RoboCasa root instruction.
       prompt_mode: environment_root
       option_horizon: 50
       load_timeout_sec: 600
