@@ -15,25 +15,19 @@ from google.protobuf.json_format import ParseDict
 from google.protobuf.struct_pb2 import Struct
 from PIL import Image
 
-try:
-    from episode_manager import ActiveTrial, EpisodeManager
-except ModuleNotFoundError:
-    from evaluation.robocasa365.worker.episode_manager import (
-        ActiveTrial,
-        EpisodeManager,
-    )
-
-try:
-    from contract import ALLOWED_TASKS, CAMERA_RENAME_MAP
-except ModuleNotFoundError:
-    from evaluation.robocasa365.worker.contract import (
-        ALLOWED_TASKS,
-        CAMERA_RENAME_MAP,
-    )
-
 from hey_robot.robocasa_runtime.v1 import (
     robocasa_runtime_pb2 as _robocasa_runtime_pb2,
     robocasa_runtime_pb2_grpc,
+)
+from hey_robot.robot_runtime.robocasa_remote.contract import (
+    ALLOWED_TASKS,
+    CAMERA_RENAME_MAP,
+    DEFAULT_REGISTRIES,
+    DEFAULT_SPLIT,
+)
+from hey_robot.robot_runtime.robocasa_remote.episode_manager import (
+    ActiveTrial,
+    EpisodeManager,
 )
 
 robocasa_runtime_pb2: Any = _robocasa_runtime_pb2
@@ -50,7 +44,7 @@ _CAMERA_ALIASES = {
 
 
 class RoboCasaRuntimeService(robocasa_runtime_pb2_grpc.RoboCasaRuntimeServicer):
-    """One causal RoboCasa episode at a time, isolated inside the worker image."""
+    """One causal RoboCasa episode at a time, isolated inside the backend."""
 
     def __init__(
         self,
@@ -104,7 +98,7 @@ class RoboCasaRuntimeService(robocasa_runtime_pb2_grpc.RoboCasaRuntimeServicer):
             if self.manager.active:
                 raise RuntimeError("RoboCasa runtime already has an active episode")
             if self._resource_lock.locked():
-                raise RuntimeError("RoboCasa worker is busy with a task-level rollout")
+                raise RuntimeError("RoboCasa backend is busy with a task-level rollout")
             await self._resource_lock.acquire()
             self._owns_resource = True
             try:
@@ -112,6 +106,8 @@ class RoboCasaRuntimeService(robocasa_runtime_pb2_grpc.RoboCasaRuntimeServicer):
                     task=request.task,
                     seed=int(request.seed),
                     trial_id=request.trial_id or None,
+                    split=request.split or DEFAULT_SPLIT,
+                    registries=tuple(request.registries) or DEFAULT_REGISTRIES,
                 )
                 trial = await asyncio.to_thread(
                     self.manager.begin_trial,
@@ -142,23 +138,27 @@ class RoboCasaRuntimeService(robocasa_runtime_pb2_grpc.RoboCasaRuntimeServicer):
     async def Step(self, request, context):  # noqa: N802
         await self._authorize(context, role="data")
         action = [float(value) for value in request.action]
+        raw_action = [float(value) for value in request.raw_action]
         if len(action) != 12 or not all(math.isfinite(value) for value in action):
             raise ValueError("action must contain exactly 12 finite values")
+        if len(raw_action) != 12 or not all(
+            math.isfinite(value) for value in raw_action
+        ):
+            raise ValueError("raw_action must contain exactly 12 finite values")
         async with self._lock:
             outcome = await asyncio.to_thread(
                 self.manager.step,
                 action,
                 expected_frame_id=int(request.expected_frame_id),
+                raw_action=raw_action or action,
+                action_clipped=bool(request.action_clipped),
             )
             trial = self.manager.current_trial()
             return robocasa_runtime_pb2.StepResponse(
                 observation=self._response_observation(trial),
                 reward=outcome.reward,
                 done=outcome.done,
-                success=outcome.official_success,
-                metrics=_struct(
-                    {"truncated": outcome.truncated, "info": _json_safe(outcome.info)}
-                ),
+                metrics=_struct({"truncated": outcome.truncated}),
             )
 
     async def ReadTruth(self, request, context):  # noqa: N802
@@ -190,7 +190,7 @@ class RoboCasaRuntimeService(robocasa_runtime_pb2_grpc.RoboCasaRuntimeServicer):
             self._resource_lock.release()
 
     async def _authorize(self, context: Any, *, role: str) -> None:
-        """Require a role-specific bearer token when worker auth is configured."""
+        """Require a role-specific bearer token when backend auth is configured."""
         expected = self._evaluator_token if role == "evaluator" else self._data_token
         if not expected:
             return
@@ -208,8 +208,8 @@ class RoboCasaRuntimeService(robocasa_runtime_pb2_grpc.RoboCasaRuntimeServicer):
         images = [
             robocasa_runtime_pb2.ImageFrame(
                 camera=_CAMERA_ALIASES[camera],
-                data=_jpeg(pixels[camera]),
-                content_type="image/jpeg",
+                data=_png(pixels[camera]),
+                content_type="image/png",
                 width=int(pixels[camera].shape[1]),
                 height=int(pixels[camera].shape[0]),
             )
@@ -223,15 +223,25 @@ class RoboCasaRuntimeService(robocasa_runtime_pb2_grpc.RoboCasaRuntimeServicer):
             images=images,
             task=trial.spec.task,
             done=trial.done,
-            success=False,
-            metadata=_struct({"native_cameras": list(_CAMERA_NAMES)}),
+            metadata=_struct(
+                {
+                    "native_cameras": list(_CAMERA_NAMES),
+                    "trial_id": trial.spec.trial_id,
+                    "seed": trial.spec.seed,
+                    "split": trial.spec.split,
+                    "registries": list(trial.spec.registries),
+                    "policy_task": str(
+                        getattr(trial.env, "task_description", "") or trial.spec.task
+                    ),
+                }
+            ),
         )
 
 
-def _jpeg(frame: Any) -> bytes:
+def _png(frame: Any) -> bytes:
     image = Image.fromarray(np.asarray(frame, dtype=np.uint8))
     buffer = io.BytesIO()
-    image.save(buffer, format="JPEG", quality=90)
+    image.save(buffer, format="PNG")
     return buffer.getvalue()
 
 

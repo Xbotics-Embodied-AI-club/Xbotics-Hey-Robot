@@ -69,11 +69,21 @@ class GrpcRoboCasaRuntimeClient:
         }
 
     async def begin_trial(
-        self, *, trial_id: str, task: str, seed: int
+        self,
+        *,
+        trial_id: str,
+        task: str,
+        seed: int,
+        split: str = "target",
+        registries: tuple[str, ...] = ("lightwheel",),
     ) -> RemoteObservation:
         response = await self._runtime_stub().BeginTrial(
             robocasa_runtime_pb2.BeginTrialRequest(
-                trial_id=trial_id, task=task, seed=seed
+                trial_id=trial_id,
+                task=task,
+                seed=seed,
+                split=split,
+                registries=registries,
             ),
             timeout=self.timeout_sec,
             metadata=self._metadata(),
@@ -88,11 +98,20 @@ class GrpcRoboCasaRuntimeClient:
         )
         return _observation(response)
 
-    async def step(self, *, action: list[float], expected_frame_id: int) -> RemoteStep:
+    async def step(
+        self,
+        *,
+        action: list[float],
+        expected_frame_id: int,
+        raw_action: list[float] | None = None,
+        action_clipped: bool = False,
+    ) -> RemoteStep:
         response = await self._runtime_stub().Step(
             robocasa_runtime_pb2.StepRequest(
                 action=action,
                 expected_frame_id=expected_frame_id,
+                raw_action=raw_action or action,
+                action_clipped=action_clipped,
             ),
             timeout=self.timeout_sec,
             metadata=self._metadata(),
@@ -101,7 +120,6 @@ class GrpcRoboCasaRuntimeClient:
             observation=_observation(response.observation),
             reward=float(response.reward),
             done=bool(response.done),
-            success=bool(response.success),
             metrics=_struct_to_dict(response.metrics),
         )
 
@@ -151,7 +169,6 @@ def _observation(value) -> RemoteObservation:
         ],
         task=value.task or None,
         done=bool(value.done),
-        success=bool(value.success),
         metadata=_struct_to_dict(value.metadata),
     )
 

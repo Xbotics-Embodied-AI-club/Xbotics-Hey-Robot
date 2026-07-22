@@ -6,6 +6,14 @@ from typing import Any, Protocol
 class RobotSkillAPI(Protocol):
     async def run(self, name: str, arguments: dict[str, Any] | None = None) -> Any: ...
 
+    async def apply_policy_action(
+        self,
+        values: list[float],
+        *,
+        expected_frame_id: int,
+        raw_values: list[float] | None = None,
+    ) -> Any: ...
+
     async def move_base(self, **arguments: Any) -> Any: ...
 
     async def turn_base(self, **arguments: Any) -> Any: ...

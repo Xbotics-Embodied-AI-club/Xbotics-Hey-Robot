@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-import math
+import base64
+import hashlib
+import io
 import multiprocessing
 import os
 import random
@@ -8,60 +10,29 @@ import sys
 import time
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
 from threading import Event, Lock
 from typing import Any
 
 import numpy as np
+from PIL import Image
 
-try:
-    from contract import (
-        ALLOWED_TASKS,
-        DEFAULT_POLICY,
-    )
-    from episode_manager import EpisodeError, EpisodeManager
-    from policy_probe import _load_raw_config, register_policy_processors
-except ModuleNotFoundError:
-    from evaluation.robocasa365.worker.contract import (
-        ALLOWED_TASKS,
-        DEFAULT_POLICY,
-    )
-    from evaluation.robocasa365.worker.episode_manager import (
-        EpisodeError,
-        EpisodeManager,
-    )
-    from evaluation.robocasa365.worker.policy_probe import (
-        _load_raw_config,
-        register_policy_processors,
-    )
+from hey_robot.foundation.backends.vla.lerobot.robocasa_policy_probe import (
+    _load_raw_config,
+    offline_processor_overrides,
+    register_policy_processors,
+)
+from hey_robot.robot_runtime.robocasa_remote.contract import (
+    CAMERA_RENAME_MAP,
+)
 
 
 class OptionExecutionError(RuntimeError):
     def __init__(self, failure_mode: str, message: str) -> None:
         super().__init__(message)
         self.failure_mode = failure_mode
-
-
-@dataclass(frozen=True)
-class OptionRequest:
-    skill_id: str
-    option_command: str
-
-
-@dataclass(frozen=True)
-class OptionResult:
-    success: bool
-    status: str
-    summary: str
-    failure_mode: str | None = None
-    error: str | None = None
-    metrics: dict[str, Any] | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        payload = asdict(self)
-        return {key: value for key, value in payload.items() if value is not None}
 
 
 @dataclass
@@ -150,56 +121,42 @@ class _IsolatedPolicyBundle:
         return np.asarray(result, dtype=np.float32)
 
 
-class VLAOptionExecutor:
-    """Stateful, option-level RoboCasa executor for Hey Robot agent evaluation.
+class RoboCasaLeRobotPolicyExecutor:
+    """Pure RoboCasa policy inference behind the standard ModelService contract.
 
-    Unlike ``RoboCasaRolloutRunner`` this runner keeps one simulator episode open
-    across bounded option calls. The VLA emits the native 12-D RoboCasa action,
-    so no real-robot primitive adapter is involved. CUDA inference is isolated
-    in a spawned child process because sharing one process with MuJoCo EGL
-    corrupts rendered frames on the evaluation host.
+    This object deliberately has no simulator or ``EpisodeManager`` reference.
+    One request contains one observation and produces one native 12-D action;
+    Robot Runtime remains the only component allowed to advance the environment.
+    CUDA inference is isolated from MuJoCo EGL in a spawned process.
     """
 
     def __init__(
         self,
         *,
         environ: dict[str, str] | None = None,
-        env_factory: Callable[[str, int], tuple[Any, dict[str, Any]]] | None = None,
-        policy_loader: Callable[[str, str], _PolicyBundle] | None = None,
-        manager: EpisodeManager | None = None,
+        policy_loader: Any | None = None,
     ) -> None:
         self.environ = dict(environ or os.environ)
-        self.default_policy = self.environ.get("ROBOCASA_POLICY", DEFAULT_POLICY)
+        self.default_policy = str(self.environ.get("ROBOCASA_POLICY") or "").strip()
+        if not self.default_policy:
+            raise ValueError("RoboCasa policy_path must come from deployment config")
         self.default_device = self.environ.get("ROBOCASA_POLICY_DEVICE", "cuda")
-        # PI052 was trained and evaluated with 50-action chunks. Cutting an
-        # option at 30 and resetting the policy discards the final 20 actions
-        # of every trajectory before contact-rich completion can happen.
         self.option_horizon = int(self.environ.get("ROBOCASA_OPTION_HORIZON", "50"))
-        if env_factory is not None and manager is not None:
-            raise ValueError("env_factory and manager cannot both be provided")
-        manager_factory = None
-        if env_factory is not None:
-
-            def manager_factory(spec):
-                return env_factory(spec.task, spec.seed)
-
-        self.manager = manager or EpisodeManager(
-            allowed_tasks=ALLOWED_TASKS, env_factory=manager_factory
-        )
+        self.prompt_mode = self.environ.get("ROBOCASA_PROMPT_MODE", "environment_root")
+        if self.prompt_mode not in {"environment_root", "agent_subgoal"}:
+            raise ValueError(
+                "ROBOCASA_PROMPT_MODE must be environment_root or agent_subgoal"
+            )
         self._policy_loader = policy_loader or self._load_isolated_policy
         self._policies: dict[tuple[str, str], Any] = {}
         self._lock = Lock()
-        self._cancel_lock = Lock()
-        self._cancel_events: dict[str, Event] = {}
+        self._cancel_event = Event()
+        self._session_id: str | None = None
         self._last_error: str | None = None
 
     @property
     def busy(self) -> bool:
         return False
-
-    @property
-    def active_sessions(self) -> int:
-        return int(self.manager.active)
 
     def health(self) -> dict[str, Any]:
         imports_ok, import_error = self._imports_available()
@@ -212,147 +169,136 @@ class VLAOptionExecutor:
             or (None if loaded else "RoboCasa option runner is waiting for assets"),
             "metrics": {
                 "benchmark": "robocasa365",
-                "mode": "embodied_agent_option",
+                "mode": "single_action_policy",
                 "asset_profile": "lightwheel",
                 "policy_path": self.default_policy,
-                "active_sessions": self.active_sessions,
+                "prompt_mode": self.prompt_mode,
+                "option_horizon": self.option_horizon,
+                "active_session": self._session_id,
                 "imports_available": imports_ok,
                 "assets_available": assets_ok,
                 "versions": _versions(),
             },
         }
 
-    def cancel(self, operation_id: str) -> bool:
-        with self._cancel_lock:
-            event = self._cancel_events.get(operation_id)
-        if event is None:
-            return False
-        event.set()
-        return True
+    def cancel(self) -> None:
+        self._cancel_event.set()
 
-    def prepare(self) -> None:
-        """Load and reset the fixed policy once at the simulator trial boundary."""
-        bundle = self._policy_bundle(self.default_policy, self.default_device)
-        # Match LeRobot's standalone evaluator: PI052.reset() is an episode
-        # operation. It clears both the action queue and hierarchical subtask
-        # state, so invoking it at every Agent option boundary breaks policy
-        # continuity even when the 50-action queue has already been consumed.
-        trial = self.manager.current_trial()
-        bundle.reset_action_queue(seed=int(trial.spec.seed))
+    def close(self) -> None:
+        """Release isolated policy processes during managed backend shutdown."""
+        self.cancel()
+        with self._lock:
+            bundles = list(self._policies.values())
+            self._policies.clear()
+        for bundle in bundles:
+            if not isinstance(bundle, _IsolatedPolicyBundle):
+                continue
+            with suppress(Exception):
+                if bundle.process.is_alive():
+                    bundle.connection.send(("close",))
+                    if bundle.connection.poll(5.0):
+                        bundle.connection.recv()
+                    bundle.process.join(timeout=5.0)
+                if bundle.process.is_alive():
+                    bundle.process.terminate()
+                    bundle.process.join(timeout=5.0)
+            with suppress(Exception):
+                bundle.connection.close()
 
-    def run(self, request: OptionRequest) -> OptionResult:
+    def execute(self, payload: dict[str, Any]) -> dict[str, Any]:
         started_at = time.monotonic()
         try:
-            self._validate_request(request)
-            operation_id = request.skill_id
-            cancel_event = Event()
-            with self._cancel_lock:
-                self._cancel_events[operation_id] = cancel_event
+            if str(payload.get("skill_name") or "") != "manipulate":
+                raise OptionExecutionError(
+                    "invalid_task", "RoboCasa policy only serves manipulate"
+                )
+            arguments = dict(payload.get("arguments", {}) or {})
+            observation_payload = dict(arguments.get("observation") or {})
+            observation = _observation_from_payload(observation_payload)
+            observation_raw = dict(observation_payload.get("raw") or {})
+            agent_subgoal = str(
+                arguments.get("agent_subgoal")
+                or arguments.get("task_prompt")
+                or payload.get("objective")
+                or ""
+            ).strip()
+            environment_root = str(
+                observation_raw.get("policy_task")
+                or arguments.get("policy_task")
+                or payload.get("objective")
+                or ""
+            ).strip()
+            policy_task = (
+                environment_root
+                if self.prompt_mode == "environment_root"
+                else agent_subgoal
+            )
+            if not policy_task:
+                raise OptionExecutionError("invalid_task", "policy task is required")
+            session_id = str(
+                arguments.get("policy_session_id")
+                or payload.get("episode_id")
+                or "default"
+            )
+            seed = int(arguments.get("seed") or 0)
             bundle = self._policy_bundle(self.default_policy, self.default_device)
-            trial = self.manager.current_trial()
-            policy_task = _policy_task_prompt(trial, request.option_command)
-            trace: list[dict[str, Any]] = []
-            last_reward = 0.0
-            clipped_action_count = 0
-
-            for option_step in range(self.option_horizon):
-                if cancel_event.is_set():
-                    return OptionResult(
-                        False,
-                        "cancelled",
-                        "RoboCasa option cancelled",
-                        "cancelled",
-                        metrics={"steps_executed": len(trace)},
-                    )
-                raw_action = bundle.select_action(trial.observation, policy_task)
-                action, clipped = _clip_action_to_space(
-                    raw_action, trial.env.action_space
-                )
-                clipped_action_count += int(clipped)
-                outcome = self.manager.step(action, expected_frame_id=trial.frame_id)
-                last_reward = outcome.reward
-                trace.append(
-                    {
-                        "option_step": option_step,
-                        "frame_id": outcome.frame_id,
-                        "reward": last_reward,
-                        "terminated": outcome.terminated,
-                        "truncated": outcome.truncated,
-                        "action": [float(value) for value in action.tolist()],
-                        "action_clipped": clipped,
-                        **(
-                            {
-                                "raw_action": [
-                                    float(value) for value in raw_action.tolist()
-                                ]
-                            }
-                            if clipped
-                            else {}
+            if session_id != self._session_id:
+                bundle.reset_action_queue(seed=seed)
+                self._session_id = session_id
+            if self._cancel_event.is_set():
+                self._cancel_event.clear()
+                return {
+                    "success": False,
+                    "status": "cancelled",
+                    "summary": "RoboCasa inference cancelled",
+                    "failure_mode": "cancelled",
+                }
+            raw_action = bundle.select_action(observation, policy_task)
+            action = np.clip(raw_action, -1.0, 1.0).astype(np.float32, copy=False)
+            clipped = not np.array_equal(action, raw_action)
+            return {
+                "success": True,
+                "status": "completed",
+                "summary": "RoboCasa policy produced one native action",
+                "metrics": {
+                    "benchmark": "robocasa365",
+                    "mode": "single_action_policy",
+                    "policy_result": {
+                        "kind": "native_action",
+                        "values": [float(value) for value in action.tolist()],
+                        "raw_values": [float(value) for value in raw_action.tolist()],
+                        "expected_frame_id": int(
+                            dict(arguments.get("observation") or {}).get("frame_id", 0)
                         ),
-                    }
-                )
-                if outcome.done:
-                    break
-
-            option_state = "failed" if trial.done else "boundary_reached"
-            status = "failed" if trial.done else "completed"
-            failure_mode = "episode_terminal" if trial.done else None
-            termination_reason = "episode_terminal" if trial.done else "max_steps"
-            metrics = {
-                "benchmark": "robocasa365",
-                "mode": "embodied_agent_option",
-                "policy_type": bundle.policy_type,
-                "policy_prompt_source": "environment_task_description",
-                "steps_executed": len(trace),
-                "option_state": option_state,
-                "termination_reason": termination_reason,
-                "requires_reobservation": True,
-                "before_frame_id": trace[0]["frame_id"] - 1
-                if trace
-                else trial.frame_id,
-                "after_frame_id": trial.frame_id,
-                "last_reward": last_reward,
-                "clipped_action_count": clipped_action_count,
-                "duration_sec": round(time.monotonic() - started_at, 3),
-                "trace": trace,
+                    },
+                    "policy_type": bundle.policy_type,
+                    "prompt_mode": self.prompt_mode,
+                    "option_horizon": self.option_horizon,
+                    "effective_policy_prompt_sha256": hashlib.sha256(
+                        policy_task.encode("utf-8")
+                    ).hexdigest(),
+                    "action_clipped": clipped,
+                    "duration_sec": round(time.monotonic() - started_at, 3),
+                },
             }
-            summary = f"RoboCasa bounded option ended after {len(trace)} steps"
-            return OptionResult(
-                success=not trial.done,
-                status=status,
-                summary=summary,
-                failure_mode=failure_mode,
-                metrics=metrics,
-            )
-        except (OptionExecutionError, EpisodeError) as exc:
+        except OptionExecutionError as exc:
             self._last_error = str(exc)
-            return OptionResult(
-                success=False,
-                status="failed",
-                summary=f"RoboCasa option did not run: {exc}",
-                failure_mode=exc.failure_mode,
-                error=str(exc),
-                metrics={"duration_sec": round(time.monotonic() - started_at, 3)},
-            )
+            return {
+                "success": False,
+                "status": "failed",
+                "summary": f"RoboCasa inference rejected: {exc}",
+                "failure_mode": exc.failure_mode,
+                "error": str(exc),
+            }
         except Exception as exc:
             self._last_error = f"{type(exc).__name__}: {exc}"
-            return OptionResult(
-                success=False,
-                status="failed",
-                summary=f"RoboCasa option failed: {type(exc).__name__}: {exc}",
-                failure_mode="execution_failed",
-                error=str(exc),
-                metrics={"duration_sec": round(time.monotonic() - started_at, 3)},
-            )
-        finally:
-            with self._cancel_lock:
-                self._cancel_events.pop(request.skill_id, None)
-
-    def _validate_request(self, request: OptionRequest) -> None:
-        if not request.option_command.strip():
-            raise OptionExecutionError("invalid_task", "option_command is required")
-        if not request.skill_id:
-            raise OptionExecutionError("invalid_task", "skill_id is required")
+            return {
+                "success": False,
+                "status": "failed",
+                "summary": f"RoboCasa inference failed: {type(exc).__name__}: {exc}",
+                "failure_mode": "execution_failed",
+                "error": str(exc),
+            }
 
     def _policy_bundle(self, policy_path: str, device: str) -> Any:
         key = (policy_path, device)
@@ -407,9 +353,6 @@ class VLAOptionExecutor:
                 self.environ.get("ROBOCASA_POLICY_REQUEST_TIMEOUT", "300")
             ),
         )
-
-    def _load_policy(self, policy_path: str, device: str) -> _PolicyBundle:
-        return _load_policy_bundle(policy_path, device)
 
     def _imports_available(self) -> tuple[bool, str | None]:
         try:
@@ -519,30 +462,36 @@ def _policy_process_main(connection: Any, policy_path: str, device: str) -> None
         connection.close()
 
 
-def request_from_payload(payload: dict[str, Any]) -> OptionRequest:
-    arguments = dict(payload.get("arguments", {}) or {})
-    option_command = str(
-        arguments.get("option_command")
-        or arguments.get("task_prompt")
-        or arguments.get("command")
-        or payload.get("objective")
-        or ""
-    )
-    return OptionRequest(
-        skill_id=str(payload.get("skill_id") or arguments.get("skill_id") or ""),
-        option_command=option_command,
-    )
-
-
-def _policy_task_prompt(trial: Any, option_command: str) -> str:
-    """Preserve the task-language contract used by standalone LeRobot eval.
-
-    PI052 treats ``task`` as a high-level root task and generates its own
-    low-level subtask internally. Agent option labels must therefore not replace
-    RoboCasa's native task description.
-    """
-    task_description = str(getattr(trial.env, "task_description", "") or "").strip()
-    return task_description or option_command.strip()
+def _observation_from_payload(value: Any) -> dict[str, Any]:
+    payload = dict(value or {})
+    state = np.asarray(payload.get("proprioception", []), dtype=np.float32)
+    if state.shape != (16,) or not np.isfinite(state).all():
+        raise OptionExecutionError(
+            "observation_schema_mismatch",
+            f"RoboCasa proprioception must have shape (16,), got {state.shape}",
+        )
+    pixels: dict[str, np.ndarray] = {}
+    for item in list(payload.get("images", []) or []):
+        image = dict(item or {})
+        camera = str(image.get("camera") or "")
+        encoded = str(image.get("data") or "")
+        if camera not in {"camera1", "camera2", "camera3"} or not encoded:
+            continue
+        try:
+            raw = base64.b64decode(encoded, validate=True)
+            with Image.open(io.BytesIO(raw)) as source:
+                pixels[camera] = np.asarray(source.convert("RGB"), dtype=np.uint8)
+        except Exception as exc:
+            raise OptionExecutionError(
+                "observation_schema_mismatch", f"invalid {camera} image: {exc}"
+            ) from exc
+    expected = {"camera1", "camera2", "camera3"}
+    if set(pixels) != expected:
+        raise OptionExecutionError(
+            "observation_schema_mismatch",
+            f"RoboCasa observation requires {sorted(expected)}, got {sorted(pixels)}",
+        )
+    return {"agent_pos": state, "pixels": pixels}
 
 
 def _policy_observation(
@@ -551,13 +500,17 @@ def _policy_observation(
     *,
     input_features: dict[str, tuple[int, ...]],
 ) -> dict[str, Any]:
-    del input_features
     try:
         from lerobot.envs import preprocess_observation
     except ModuleNotFoundError:
         sample = _fallback_preprocess_observation(observation)
     else:
         sample = preprocess_observation(observation)
+    # Runtime exposes stable camera1/2/3 names. The checkpoint retains the
+    # native RoboCasa feature keys, so translate only at the policy boundary.
+    for native_key, runtime_key in CAMERA_RENAME_MAP.items():
+        if native_key in input_features and runtime_key in sample:
+            sample[native_key] = sample.pop(runtime_key)
     # Match lerobot_eval: language-conditioned policies receive a batch-sized
     # list, not a bare string.
     sample["task"] = [option_command]
@@ -570,7 +523,7 @@ def _fallback_preprocess_observation(observation: dict[str, Any]) -> dict[str, A
 
     sample: dict[str, Any] = {}
     for camera, frame in dict(observation.get("pixels", {}) or {}).items():
-        tensor = torch.from_numpy(np.asarray(frame, dtype=np.uint8))
+        tensor = torch.from_numpy(np.array(frame, dtype=np.uint8, copy=True))
         if tensor.ndim == 3:
             tensor = tensor.unsqueeze(0)
         tensor = tensor.permute(0, 3, 1, 2).contiguous().float() / 255.0
@@ -592,7 +545,11 @@ def _make_runtime_processors(
     make_pre_post_processors: Callable[..., tuple[Any, Any]],
 ) -> tuple[Any, Any]:
     try:
-        return make_pre_post_processors(config, pretrained_path=policy_path)
+        return make_pre_post_processors(
+            config,
+            pretrained_path=policy_path,
+            **offline_processor_overrides(policy_type),
+        )
     except Exception:
         if policy_type != "pi052":
             raise
@@ -643,41 +600,6 @@ def _action_to_numpy(action: Any) -> np.ndarray:
             "action_schema_mismatch", f"policy action must be rank 1, got {array.shape}"
         )
     return array
-
-
-def _clip_action_to_space(
-    action: np.ndarray, action_space: Any
-) -> tuple[np.ndarray, bool]:
-    """Project an unnormalized policy action onto the environment Box contract."""
-    low = np.asarray(action_space.low, dtype=np.float32)
-    high = np.asarray(action_space.high, dtype=np.float32)
-    if low.shape != action.shape or high.shape != action.shape:
-        raise OptionExecutionError(
-            "action_schema_mismatch",
-            f"environment action bounds must match {action.shape}",
-        )
-    clipped = np.clip(action, low, high).astype(np.float32, copy=False)
-    return clipped, not np.array_equal(clipped, action)
-
-
-def _close_env(env: Any) -> None:
-    close = getattr(env, "close", None)
-    if callable(close):
-        close()
-
-
-def _json_safe(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {str(key): _json_safe(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_safe(item) for item in value]
-    if isinstance(value, np.generic):
-        return value.item()
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, float) and not math.isfinite(value):
-        return str(value)
-    return value
 
 
 def _versions() -> dict[str, str | None]:

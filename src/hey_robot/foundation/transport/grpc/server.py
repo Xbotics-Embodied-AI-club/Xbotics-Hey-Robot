@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import grpc
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct
 
-from hey_robot.config import DeploymentConfig, ModelServiceSpec
 from hey_robot.foundation.contract.v1 import model_service_pb2, model_service_pb2_grpc
 from hey_robot.logging import HeyRobotLogger
+
+if TYPE_CHECKING:
+    from hey_robot.config import DeploymentConfig, ModelServiceSpec
 
 logger = HeyRobotLogger(name="model_service")
 
@@ -36,13 +38,19 @@ class ModelServiceExecutor(Protocol):
 
 class ModelServiceServicer(model_service_pb2_grpc.ModelServiceServicer):
     def __init__(
-        self, state: ModelServiceState, executor: ModelServiceExecutor
+        self,
+        state: ModelServiceState,
+        executor: ModelServiceExecutor,
+        *,
+        bearer_token: str | None = None,
     ) -> None:
         self.state = state
         self.executor = executor
+        self.bearer_token = bearer_token
 
     async def GetHealth(self, request, context):
-        del request, context
+        del request
+        await self._authorize(context)
         payload = self.executor.health()
         metrics = {
             **dict(payload.get("metrics", {}) or {}),
@@ -63,7 +71,7 @@ class ModelServiceServicer(model_service_pb2_grpc.ModelServiceServicer):
         )
 
     async def ExecuteSkill(self, request, context):
-        del context
+        await self._authorize(context)
         if self.state.busy:
             return model_service_pb2.ExecuteSkillResponse(
                 success=False,
@@ -122,10 +130,23 @@ class ModelServiceServicer(model_service_pb2_grpc.ModelServiceServicer):
         )
 
     async def CancelSkill(self, request, context):
-        del request, context
+        del request
+        await self._authorize(context)
         self.executor.cancel()
         return model_service_pb2.CancelSkillResponse(
             accepted=True, summary="cancel requested"
+        )
+
+    async def _authorize(self, context: Any) -> None:
+        if not self.bearer_token:
+            return
+        metadata = dict(context.invocation_metadata())
+        token = metadata.get("authorization", "").removeprefix("Bearer ")
+        if token == self.bearer_token:
+            return
+        await context.abort(
+            grpc.StatusCode.PERMISSION_DENIED,
+            "ModelService data-plane credential is required",
         )
 
 

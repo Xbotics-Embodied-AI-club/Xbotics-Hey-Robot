@@ -270,6 +270,7 @@ def test_runtime_executes_manipulate_skill() -> None:
             {
                 "skill_name": "manipulate",
                 "task_prompt": "Pick up the red cup.",
+                "agent_subgoal": "Pick up the red cup.",
                 "vla_step": 0,
                 "policy_session_id": None,
             },
@@ -320,6 +321,7 @@ def test_manipulate_routes_to_required_vla_model_service() -> None:
         {
             "skill_name": "manipulate",
             "task_prompt": "Pick up the red cup.",
+            "agent_subgoal": "Pick up the red cup.",
             "vla_step": 0,
             "policy_session_id": "pick-1",
         },
@@ -1500,7 +1502,7 @@ def test_encode_images_with_resolve_images_callback() -> None:
     encoded = _encode_images(images, resolve_images=resolve)
     assert len(encoded) == 2
     for entry in encoded:
-        assert entry["format"] == "jpeg"
+        assert entry["format"] == "png"
         assert "data" in entry
         assert len(entry["data"]) > 0
 

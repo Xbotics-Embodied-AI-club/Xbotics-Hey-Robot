@@ -1,8 +1,8 @@
 """Run one or more RoboCasa trials through the real Hey Robot Agent entrypoint.
 
-The worker is started separately.  This harness owns trial lifecycle, while
-the user request itself is submitted to the HTTP conversation channel.  The
-worker's Runtime and ModelService share one EpisodeManager.
+The managed backend is started by ``hey-robot run``. This harness owns the
+evaluator trial lifecycle, while the user request itself is submitted to the
+HTTP conversation channel. Runtime and ModelService share one EpisodeManager.
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ import argparse
 import asyncio
 import json
 import logging
-import os
 import platform
 import shutil
 import subprocess
@@ -25,9 +24,14 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
-from evaluation.robocasa365.producers import producer_for
-from evaluation.robocasa365.worker.contract import ALLOWED_TASKS, load_manifest
+from evaluation.robocasa365.conditions import condition_for
+from hey_robot.config import DeploymentConfig
+from hey_robot.foundation.transport.grpc.client import GrpcModelServiceClient
 from hey_robot.robot_runtime.robocasa_remote.client import GrpcRoboCasaRuntimeClient
+from hey_robot.robot_runtime.robocasa_remote.contract import (
+    ALLOWED_TASKS,
+    load_manifest,
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -35,14 +39,25 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--task", required=True, choices=sorted(ALLOWED_TASKS))
     parser.add_argument("--seed", type=int, default=1000)
     parser.add_argument("--objective", required=True)
-    parser.add_argument("--producer", choices=("b0", "b1", "b2"), default="b1")
+    parser.add_argument("--condition", choices=("b0", "b1", "b2"), default="b1")
     parser.add_argument(
         "--manifest",
         type=Path,
         default=Path("configs/evaluation/robocasa365.tasks.yaml"),
     )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=Path("configs/evaluation/robocasa365.agent.yaml"),
+        help="Canonical Hey Robot deployment configuration",
+    )
     parser.add_argument("--agent-url", default="http://127.0.0.1:8080/turn")
     parser.add_argument("--runtime-target", default="grpc://127.0.0.1:9092")
+    parser.add_argument(
+        "--credentials-file",
+        type=Path,
+        default=Path("runtime/robocasa365.agent/robocasa.credentials.json"),
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--poll-sec", type=float, default=1.0)
     parser.add_argument("--timeout-sec", type=float, default=1800.0)
@@ -55,12 +70,34 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
     manifest = load_manifest(args.manifest)
     if args.task not in manifest["tasks"]:
         raise ValueError(f"task {args.task!r} is not in manifest {args.manifest}")
-    producer = producer_for(args.producer)
+    condition = condition_for(args.condition)
+    agent_objective = condition.prompt(args.objective)
+    config = DeploymentConfig.from_yaml(args.config)
+    model_candidates = [
+        (service_id, spec)
+        for service_id, spec in config.model_services.items()
+        if spec.enabled and spec.type == "robocasa_lerobot_policy"
+    ]
+    if len(model_candidates) != 1:
+        raise ValueError("config must contain exactly one robocasa_lerobot_policy")
+    model_service_id, model_spec = model_candidates[0]
+    credentials = json.loads(args.credentials_file.read_text(encoding="utf-8"))
     runtime = GrpcRoboCasaRuntimeClient(
-        args.runtime_target, timeout_sec=600.0, role="evaluator"
+        args.runtime_target,
+        timeout_sec=600.0,
+        role="evaluator",
+        token=str(credentials["evaluator_token"]),
     )
     data_runtime = GrpcRoboCasaRuntimeClient(
-        args.runtime_target, timeout_sec=30.0, role="data"
+        args.runtime_target,
+        timeout_sec=30.0,
+        role="data",
+        token=str(credentials["data_token"]),
+    )
+    model_service = GrpcModelServiceClient(
+        model_service_id,
+        model_spec,
+        auth_token=str(credentials["data_token"]),
     )
     started = time.time()
     agent_trace: list[dict[str, object]] = []
@@ -68,6 +105,11 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
         health = await runtime.health()
         if not health.get("online") or not health.get("loaded"):
             raise RuntimeError(f"RoboCasa runtime is not ready: {health.get('error')}")
+        model_health = await model_service.health()
+        if not model_health.online or not model_health.loaded:
+            raise RuntimeError(
+                f"RoboCasa model service is not ready: {model_health.error}"
+            )
         (args.output_dir / "manifest.json").write_text(
             json.dumps(
                 {
@@ -75,7 +117,7 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
                     "task": args.task,
                     "seed": args.seed,
                     "objective": args.objective,
-                    "producer": producer.name,
+                    "condition": condition.name,
                 },
                 indent=2,
             )
@@ -83,17 +125,40 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
             encoding="utf-8",
         )
         (args.output_dir / "runtime_metadata.json").write_text(
-            json.dumps(_runtime_metadata(), indent=2, sort_keys=True) + "\n",
+            json.dumps(
+                _runtime_metadata(
+                    config_path=args.config,
+                    model_service_id=model_service_id,
+                    model_settings=dict(model_spec.settings),
+                    model_health={
+                        "name": model_health.name,
+                        "version": model_health.version,
+                        "metrics": dict(model_health.metrics),
+                    },
+                    runtime_health=health,
+                ),
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
             encoding="utf-8",
         )
         initial = await runtime.begin_trial(
-            trial_id=trial_id, task=args.task, seed=args.seed
+            trial_id=trial_id,
+            task=args.task,
+            seed=args.seed,
+            split=str(manifest["split"]),
+            registries=tuple(manifest["registries"]),
         )
+        confirmed_spec = {
+            "trial_id": initial.episode_id,
+            "task": initial.task,
+            "seed": initial.metadata.get("seed"),
+            "split": initial.metadata.get("split"),
+            "registries": initial.metadata.get("registries"),
+        }
         (args.output_dir / "trial_spec.json").write_text(
-            json.dumps(
-                {"trial_id": trial_id, "task": args.task, "seed": args.seed}, indent=2
-            )
-            + "\n",
+            json.dumps(confirmed_spec, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
         (args.output_dir / "root_task.json").write_text(
@@ -105,7 +170,7 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
             _send_agent_turn(
                 args.agent_url,
                 {
-                    "text": producer.prompt(args.objective),
+                    "text": agent_objective,
                     "chat_id": trial_id,
                     "sender_id": "robocasa365-benchmark",
                     "metadata": {
@@ -120,7 +185,8 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
         observation = initial
         observations = [{"frame_id": initial.frame_id, "done": initial.done}]
         frames = [initial.images[0].data] if initial.images else []
-        event_trace: list[dict[str, object]] = []
+        last_recorded_frame = initial.frame_id
+        runtime_summary: dict[str, object] = {}
         agent_task: dict[str, object] | None = None
         termination_reason = "wall_clock_timeout"
         while time.time() - started < args.timeout_sec:
@@ -131,17 +197,19 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
                 break
             await asyncio.sleep(max(0.05, args.poll_sec))
             observation = await data_runtime.observe()
-            observations.append(
-                {"frame_id": observation.frame_id, "done": observation.done}
-            )
-            if observation.images:
-                frames.append(observation.images[0].data)
+            if observation.frame_id != last_recorded_frame or observation.done:
+                observations.append(
+                    {"frame_id": observation.frame_id, "done": observation.done}
+                )
+                if observation.images:
+                    frames.append(observation.images[0].data)
+                last_recorded_frame = observation.frame_id
             tasks = await asyncio.to_thread(_read_agent_tasks, args.agent_url)
-            event_trace.append(
-                await asyncio.to_thread(_read_runtime_summary, args.agent_url)
+            runtime_summary = await asyncio.to_thread(
+                _read_runtime_summary, args.agent_url
             )
             agent_task = _find_trial_task(
-                tasks, objective=args.objective, started=started
+                tasks, objective=agent_objective, started=started
             )
             agent_trace.append(
                 {
@@ -150,6 +218,16 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
                     "task": agent_task,
                 }
             )
+            if condition.manipulate_call_limit is not None:
+                terminal_options = [
+                    item
+                    for item in _option_records([runtime_summary], trial_id=trial_id)
+                    if item.get("phase") in {"completed", "failed", "cancelled"}
+                    or item.get("ended_at") is not None
+                ]
+                if len(terminal_options) >= condition.manipulate_call_limit:
+                    termination_reason = "condition_manipulate_limit"
+                    break
             if agent_task is not None and agent_task.get("status") != "active":
                 termination_reason = f"agent_{agent_task['status']}"
                 break
@@ -157,11 +235,7 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
             await agent_turn_task
         truth = await runtime.read_truth()
         evaluator_events = _evaluator_events(truth)
-        model_options = [
-            item
-            for item in evaluator_events
-            if item.get("kind") == "model_service_option"
-        ]
+        model_options = _option_records([runtime_summary], trial_id=trial_id)
         actions = [item for item in evaluator_events if item.get("kind") == "action"]
         planner_steps = (
             int(_as_float(agent_task.get("step_count"))) if agent_task else 0
@@ -176,7 +250,7 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
             "duration_sec": round(time.time() - started, 3),
             "termination_reason": termination_reason,
             "agent_task": agent_task,
-            "producer": producer.name,
+            "condition": condition.name,
             "agent_completion": bool(
                 agent_task
                 and agent_task.get("status") in {"completed", "failed", "cancelled"}
@@ -208,21 +282,21 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
             "".join(json.dumps(item, sort_keys=True) + "\n" for item in observations),
             encoding="utf-8",
         )
+        compact_events = runtime_summary.get("events", [])
         (args.output_dir / "agent_events.jsonl").write_text(
-            "".join(json.dumps(item, sort_keys=True) + "\n" for item in event_trace),
+            "".join(
+                json.dumps(item, sort_keys=True) + "\n"
+                for item in compact_events
+                if isinstance(item, dict)
+            ),
             encoding="utf-8",
         )
-        _write_event_artifacts(args.output_dir, event_trace, trial_id=trial_id)
+        _write_event_artifacts(args.output_dir, [runtime_summary], trial_id=trial_id)
         _write_video(args.output_dir / "video.mp4", frames)
-        for name in (
-            "model_service_events.jsonl",
-            "actions.jsonl",
-        ):
-            (args.output_dir / name).write_text("", encoding="utf-8")
         (args.output_dir / "evaluator_truth.json").write_text(
             json.dumps(truth, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
-        _write_worker_event_artifacts(args.output_dir, truth)
+        _write_evaluator_action_artifact(args.output_dir, truth)
         (args.output_dir / "summary.json").write_text(
             json.dumps({"trials": [result], "count": 1}, indent=2, sort_keys=True)
             + "\n",
@@ -242,6 +316,7 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
             logging.getLogger(__name__).exception("failed to close RoboCasa trial")
         await runtime.close()
         await data_runtime.close()
+        await model_service.close()
 
 
 async def _send_agent_turn(
@@ -286,7 +361,7 @@ def _write_video(path: Path, frames: list[bytes]) -> None:
     try:
         for encoded in frames:
             try:
-                writer.append_data(imageio.imread(encoded, format="jpg"))  # type: ignore[arg-type]
+                writer.append_data(imageio.imread(encoded))  # type: ignore[arg-type]
             except Exception:  # noqa: S112
                 continue
     finally:
@@ -316,7 +391,7 @@ def _write_event_artifacts(
     options = [
         item
         for item in skills
-        if isinstance(item, dict) and item.get("name") == "robocasa_option"
+        if isinstance(item, dict) and item.get("name") == "manipulate"
     ]
     (root / "options.jsonl").write_text(
         "".join(json.dumps(item, sort_keys=True) + "\n" for item in options),
@@ -324,25 +399,32 @@ def _write_event_artifacts(
     )
 
 
-def _write_worker_event_artifacts(root: Path, truth: dict[str, object]) -> None:
+def _write_evaluator_action_artifact(root: Path, truth: dict[str, object]) -> None:
     entries = _evaluator_events(truth)
-    model_events = [
-        item for item in entries if item.get("kind") == "model_service_option"
-    ]
     actions = [item for item in entries if item.get("kind") == "action"]
-    (root / "model_service_events.jsonl").write_text(
-        "".join(json.dumps(item, sort_keys=True) + "\n" for item in model_events),
-        encoding="utf-8",
-    )
     (root / "actions.jsonl").write_text(
         "".join(json.dumps(item, sort_keys=True) + "\n" for item in actions),
         encoding="utf-8",
     )
-    # Worker ledger entries are the canonical one-record-per-option artifact.
-    (root / "options.jsonl").write_text(
-        "".join(json.dumps(item, sort_keys=True) + "\n" for item in model_events),
-        encoding="utf-8",
-    )
+    # Option lifecycle belongs to Skill OS and is written by
+    # _write_event_artifacts. The evaluator ledger is canonical only for
+    # simulator actions and privileged truth.
+
+
+def _option_records(
+    snapshots: list[dict[str, object]], *, trial_id: str
+) -> list[dict[str, object]]:
+    latest = snapshots[-1] if snapshots else {}
+    skills = latest.get("skills", [])
+    if not isinstance(skills, list):
+        return []
+    return [
+        item
+        for item in skills
+        if isinstance(item, dict)
+        and item.get("name") == "manipulate"
+        and _skill_belongs_to_trial(item, trial_id)
+    ]
 
 
 def _skill_belongs_to_trial(item: dict[str, object], trial_id: str) -> bool:
@@ -373,6 +455,8 @@ def _failure_stage(
 ) -> str | None:
     if official_success:
         return None
+    if termination_reason == "condition_manipulate_limit":
+        return "condition_budget"
     if termination_reason == "wall_clock_timeout":
         return "planner_or_budget"
     if agent_task and agent_task.get("status") == "completed":
@@ -409,25 +493,57 @@ def _as_float(value: object) -> float:
         return 0.0
 
 
-def _runtime_metadata() -> dict[str, object]:
+def _runtime_metadata(
+    *,
+    config_path: Path,
+    model_service_id: str,
+    model_settings: dict[str, object],
+    model_health: dict[str, object],
+    runtime_health: dict[str, object],
+) -> dict[str, object]:
     revision = "unknown"
     git = shutil.which("git")
     with suppress(OSError, subprocess.CalledProcessError):
         if git is None:
-            return _runtime_metadata_without_git(revision)
+            return _runtime_metadata_without_git(
+                revision,
+                config_path=config_path,
+                model_service_id=model_service_id,
+                model_settings=model_settings,
+                model_health=model_health,
+                runtime_health=runtime_health,
+            )
         revision = subprocess.check_output(  # noqa: S603
             [git, "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL
         ).strip()
-    return _runtime_metadata_without_git(revision)
+    return _runtime_metadata_without_git(
+        revision,
+        config_path=config_path,
+        model_service_id=model_service_id,
+        model_settings=model_settings,
+        model_health=model_health,
+        runtime_health=runtime_health,
+    )
 
 
-def _runtime_metadata_without_git(revision: str) -> dict[str, object]:
+def _runtime_metadata_without_git(
+    revision: str,
+    *,
+    config_path: Path,
+    model_service_id: str,
+    model_settings: dict[str, object],
+    model_health: dict[str, object],
+    runtime_health: dict[str, object],
+) -> dict[str, object]:
     return {
         "git_revision": revision,
         "python": sys.version,
         "platform": platform.platform(),
-        "policy_path": os.environ.get("ROBOCASA_POLICY", ""),
-        "policy_revision": os.environ.get("ROBOCASA_POLICY_REVISION", ""),
+        "config_path": str(config_path),
+        "model_service_id": model_service_id,
+        "model_settings": model_settings,
+        "model_health": model_health,
+        "runtime_health": runtime_health,
     }
 
 

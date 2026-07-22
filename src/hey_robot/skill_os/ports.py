@@ -6,6 +6,9 @@ from typing import Any
 from hey_robot.foundation.clients import ServiceInvocationResult
 
 RobotInvoker = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
+NativeActionInvoker = Callable[
+    [list[float], int, list[float] | None], Awaitable[dict[str, Any]]
+]
 ModelServiceInvoker = Callable[
     [str, dict[str, Any]],
     Awaitable[ServiceInvocationResult],
@@ -13,13 +16,31 @@ ModelServiceInvoker = Callable[
 
 
 class RobotActionPort:
-    def __init__(self, invoke: RobotInvoker) -> None:
+    def __init__(
+        self,
+        invoke: RobotInvoker,
+        native_action_invoke: NativeActionInvoker | None = None,
+    ) -> None:
         self._invoke = invoke
+        self._native_action_invoke = native_action_invoke
 
     async def run(
         self, name: str, arguments: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         return await self._invoke(name, dict(arguments or {}))
+
+    async def apply_policy_action(
+        self,
+        values: list[float],
+        *,
+        expected_frame_id: int,
+        raw_values: list[float] | None = None,
+    ) -> dict[str, Any]:
+        if self._native_action_invoke is None:
+            raise RuntimeError("native policy actions are unavailable for this runtime")
+        return await self._native_action_invoke(
+            list(values), int(expected_frame_id), raw_values
+        )
 
     async def move_base(self, **arguments: Any) -> dict[str, Any]:
         return await self.run("move_base", arguments)

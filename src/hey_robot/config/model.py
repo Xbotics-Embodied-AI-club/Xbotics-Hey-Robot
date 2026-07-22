@@ -197,6 +197,7 @@ class AgentRuntimeSpec:
     hard_max_wall_time_sec: float = 3600.0
     hard_max_continuations: int = 40
     hard_max_skills: int = 24
+    skill_result_timeout_sec: float = 45.0
     min_battery_percentage: float = 20.0
     entity_catalog: tuple[str, ...] = ()
     entity_aliases: dict[str, str] = field(default_factory=dict)
@@ -494,6 +495,9 @@ class DeploymentConfig:
                     agent_runtime_data.get("hard_max_continuations", 40)
                 ),
                 hard_max_skills=int(agent_runtime_data.get("hard_max_skills", 24)),
+                skill_result_timeout_sec=float(
+                    agent_runtime_data.get("skill_result_timeout_sec", 45.0)
+                ),
                 min_battery_percentage=float(
                     agent_runtime_data.get("min_battery_percentage", 20.0)
                 ),

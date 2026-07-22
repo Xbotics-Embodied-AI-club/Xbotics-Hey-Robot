@@ -6,6 +6,7 @@ import argparse
 import importlib
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -88,6 +89,30 @@ def register_policy_processors(policy_type: str) -> str | None:
         return None
     importlib.import_module(module_name)
     return module_name
+
+
+def offline_processor_overrides(policy_type: str) -> dict[str, Any]:
+    """Resolve PI052 tokenizer repos to concrete snapshots in offline mode."""
+    if policy_type != "pi052" or not (
+        os.environ.get("ROBOCASA_OFFLINE") == "1"
+        or os.environ.get("HF_HUB_OFFLINE") == "1"
+    ):
+        return {}
+    from huggingface_hub import snapshot_download
+
+    paligemma = snapshot_download("google/paligemma-3b-pt-224", local_files_only=True)
+    action_tokenizer = snapshot_download(
+        "lerobot/fast-action-tokenizer", local_files_only=True
+    )
+    return {
+        "preprocessor_overrides": {
+            "pi052_text_tokenizer": {"tokenizer_name": paligemma},
+            "action_tokenizer_processor": {
+                "action_tokenizer_name": action_tokenizer,
+                "paligemma_tokenizer_name": paligemma,
+            },
+        }
+    }
 
 
 def _shape_errors(
@@ -193,7 +218,11 @@ def main() -> None:
         policy.eval()
         result["processor_module"] = register_policy_processors(policy_type)
         try:
-            make_pre_post_processors(config, pretrained_path=args.policy_path)
+            make_pre_post_processors(
+                config,
+                pretrained_path=args.policy_path,
+                **offline_processor_overrides(policy_type),
+            )
         except Exception:
             if policy_type != "pi052" or not getattr(
                 config, "enable_fast_action_loss", False

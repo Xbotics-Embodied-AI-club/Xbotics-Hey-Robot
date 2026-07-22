@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import math
 import time
+import uuid
 from typing import Literal
 
 import grpc
@@ -34,10 +35,15 @@ class RoboCasaRemoteDriver:
     CAMERA_NAMES = ("camera1", "camera2", "camera3")
 
     def __init__(
-        self, context: RobotDriverContext, client: RemoteEpisodeClient
+        self,
+        context: RobotDriverContext,
+        client: RemoteEpisodeClient,
+        *,
+        control_client: RemoteEpisodeClient | None = None,
     ) -> None:
         self.context = context
         self.client = client
+        self.control_client = control_client
         self.robot_id = context.robot_id
         self.task: str | None = None
         self.state: Literal[
@@ -101,6 +107,7 @@ class RoboCasaRemoteDriver:
             error=self.last_error,
             metrics={
                 "done": self.done,
+                "success": self.success,
                 "last_reward": self.last_reward,
                 "simulator_only": True,
             },
@@ -140,7 +147,7 @@ class RoboCasaRemoteDriver:
             envelope=self._envelope(),
             frame_id=self.frame_id,
             state=status_state,
-            task=None,
+            task=self.task,
             success=None,
             error=self.last_error,
             metrics={
@@ -164,10 +171,17 @@ class RoboCasaRemoteDriver:
             step = await self.client.step(
                 action=[float(value) for value in action.values],
                 expected_frame_id=self.frame_id,
+                raw_action=[
+                    float(value)
+                    for value in action.metadata.get("raw_action", action.values)
+                ],
+                action_clipped=bool(action.metadata.get("action_clipped", False)),
             )
             self.last_reward = float(step.reward)
             self.done = bool(step.done)
-            self.success = bool(step.success) if self.done else None
+            # Official simulator success belongs exclusively to evaluator
+            # ReadTruth and is deliberately unavailable on the data plane.
+            self.success = None
             self._accept_observation(step.observation)
             self.state = "idle" if not self.done else "completed"
             self.last_error = None
@@ -197,12 +211,39 @@ class RoboCasaRemoteDriver:
             )
 
     async def reset(self) -> RobotStatus:
-        self.last_error = "reset is evaluator-owned; begin a new trial"
-        self.state = "error"
+        if self.control_client is None:
+            self.last_error = "RoboCasa reset control plane is unavailable"
+            self.state = "error"
+            return await self.status()
+        settings = self.context.spec.settings
+        try:
+            if self.episode_id is not None:
+                await self.control_client.end_trial(reason="robot_reset")
+                # The next observation intentionally belongs to a new trial.
+                # Clear the old causal identity only after EndTrial succeeds.
+                self.episode_id = None
+                self._last_observation = None
+            observation = await self.control_client.begin_trial(
+                trial_id=f"runtime-reset-{uuid.uuid4().hex}",
+                task=str(settings.get("default_task") or "CloseFridge"),
+                seed=int(settings.get("default_seed") or 1000),
+                split=str(settings.get("task_split") or "target"),
+                registries=tuple(settings.get("object_registries") or ("lightwheel",)),
+            )
+            self._accept_observation(observation)
+            self.done = False
+            self.success = None
+            self.last_error = None
+            self.state = "idle"
+        except Exception as exc:
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            self.state = "error"
         return await self.status()
 
     async def close(self) -> None:
         await self.client.close()
+        if self.control_client is not None and self.control_client is not self.client:
+            await self.control_client.close()
         self.episode_id = None
         self.state = "closed"
 
@@ -248,8 +289,7 @@ class RoboCasaRemoteDriver:
         self.task = observation.task
         self.frame_id = int(observation.frame_id)
         self.done = bool(observation.done)
-        if self.done:
-            self.success = bool(observation.success)
+        self.success = None
         self._last_observation = observation
 
     def _driver_observation(self, observation: RemoteObservation) -> DriverObservation:
@@ -268,7 +308,7 @@ class RoboCasaRemoteDriver:
                 for image in observation.images
             ],
             proprioception=[float(value) for value in observation.state],
-            task=None,
+            task=observation.task,
             metadata={
                 "driver": "robocasa_remote",
                 "done": observation.done,
@@ -282,7 +322,7 @@ class RoboCasaRemoteDriver:
 
 
 def _decode_rgb_image(payload: bytes) -> np.ndarray:
-    """Convert worker JPEG/PNG transport bytes to the media-store image contract."""
+    """Convert backend JPEG/PNG transport bytes to the media-store image contract."""
     try:
         with Image.open(io.BytesIO(payload)) as image:
             return np.asarray(image.convert("RGB"), dtype=np.uint8)

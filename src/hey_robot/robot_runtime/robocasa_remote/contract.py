@@ -1,7 +1,13 @@
+"""Canonical RoboCasa task and observation contract.
+
+This is runtime code shared by the remote simulator, policy adapter, and
+evaluation clients.  Benchmark manifests consume this contract; they do not
+own it.
+"""
+
 from pathlib import Path
 from typing import Any
 
-DEFAULT_POLICY = "lerobot/pi052_robocasa"
 DEFAULT_SPLIT = "target"
 DEFAULT_REGISTRIES = ("lightwheel",)
 
@@ -54,7 +60,7 @@ def load_manifest(path: str | Path) -> dict[str, Any]:
         if isinstance(task, str)
     }
     if not tasks or not tasks.issubset(ALLOWED_TASKS):
-        raise ValueError("manifest contains tasks outside the worker allowlist")
+        raise ValueError("manifest contains tasks outside the backend allowlist")
     return {
         "version": str(payload.get("version") or ""),
         "split": str(payload.get("split") or DEFAULT_SPLIT),

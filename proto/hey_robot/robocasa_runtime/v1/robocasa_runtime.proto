@@ -28,6 +28,8 @@ message BeginTrialRequest {
   string trial_id = 1;
   string task = 2;
   int64 seed = 3;
+  string split = 4;
+  repeated string registries = 5;
 }
 
 message ImageFrame {
@@ -45,20 +47,24 @@ message ObservationResponse {
   repeated ImageFrame images = 4;
   string task = 5;
   bool done = 6;
-  bool success = 7;
+  reserved 7;
+  reserved "success";
   google.protobuf.Struct metadata = 8;
 }
 
 message StepRequest {
   repeated float action = 1;
   int64 expected_frame_id = 2;
+  repeated float raw_action = 3;
+  bool action_clipped = 4;
 }
 
 message StepResponse {
   ObservationResponse observation = 1;
   double reward = 2;
   bool done = 3;
-  bool success = 4;
+  reserved 4;
+  reserved "success";
   google.protobuf.Struct metrics = 5;
 }
 

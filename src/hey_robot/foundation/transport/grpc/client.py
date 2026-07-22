@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import grpc
@@ -16,7 +17,13 @@ from hey_robot.foundation.contract.v1 import model_service_pb2, model_service_pb
 
 
 class GrpcModelServiceClient:
-    def __init__(self, service_id: str, spec: ModelServiceSpec) -> None:
+    def __init__(
+        self,
+        service_id: str,
+        spec: ModelServiceSpec,
+        *,
+        auth_token: str | None = None,
+    ) -> None:
         if not spec.target:
             raise ValueError(f"model service {service_id} missing gRPC target")
         self.service_id = service_id
@@ -24,6 +31,8 @@ class GrpcModelServiceClient:
         self.target = str(spec.target).strip()
         # gRPC target 不接受 grpc:// scheme。
         self.target = self.target.removeprefix("grpc://")
+        token_env = str(spec.settings.get("auth_token_env") or "").strip()
+        self._token = auth_token or (os.environ.get(token_env) if token_env else None)
         self._channel = grpc.aio.insecure_channel(self.target)
         self._stub = model_service_pb2_grpc.ModelServiceStub(self._channel)
 
@@ -33,6 +42,7 @@ class GrpcModelServiceClient:
             response = await self._stub.GetHealth(
                 model_service_pb2.GetHealthRequest(service_id=self.service_id),
                 timeout=timeout,
+                metadata=self._metadata(),
             )
         except grpc.aio.AioRpcError as exc:
             return ServiceHealth(
@@ -79,7 +89,9 @@ class GrpcModelServiceClient:
         )
         try:
             response = await self._stub.ExecuteSkill(
-                payload, timeout=request.timeout_sec + 5.0
+                payload,
+                timeout=request.timeout_sec + 5.0,
+                metadata=self._metadata(),
             )
         except grpc.aio.AioRpcError as exc:
             return ServiceInvocationResult(
@@ -106,7 +118,14 @@ class GrpcModelServiceClient:
                 service_id=self.service_id, skill_id=skill_id
             ),
             timeout=2.0,
+            metadata=self._metadata(),
         )
+
+    async def close(self) -> None:
+        await self._channel.close()
+
+    def _metadata(self) -> tuple[tuple[str, str], ...]:
+        return (("authorization", f"Bearer {self._token}"),) if self._token else ()
 
 
 def _dict_to_struct(value: dict[str, Any]) -> Struct:

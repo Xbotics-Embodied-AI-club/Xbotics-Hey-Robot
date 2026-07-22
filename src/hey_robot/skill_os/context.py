@@ -19,6 +19,7 @@ class SkillContext:
     robot: RobotSkillAPI | None = None
     perception: PerceptionAPI | None = None
     model_services: ModelServiceAPI | None = None
+    model_settings: dict[str, Any] | None = None
     observation: RobotObservation | None = None
     current_observation: Callable[[], RobotObservation | None] | None = None
     resolve_images: Callable[[list[Any]], list[Any]] | None = None

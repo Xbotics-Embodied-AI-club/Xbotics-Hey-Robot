@@ -166,3 +166,28 @@ def test_observation_pipeline_reuses_last_image_ref_when_sampling(tmp_path) -> N
 
     assert len(list((tmp_path / "images" / "mock0" / "front").glob("*.jpg"))) == 2
     assert second.images[0].uri == third.images[0].uri
+
+
+def test_observation_pipeline_materializes_each_camera_frame_once(tmp_path) -> None:
+    media_store = LocalMediaStore(tmp_path)
+    pipeline = ObservationPipeline(media_store, image_save_every_n=1)
+    observation = DriverObservation(
+        envelope=Envelope(robot_id="robocasa365"),
+        frame_id=20,
+        assets=[
+            ObservationAsset(
+                kind="image",
+                role="camera",
+                name="camera1",
+                data=np.zeros((8, 8, 3), dtype=np.uint8),
+            )
+        ],
+    )
+
+    first = pipeline.build(observation)
+    second = pipeline.build(observation)
+
+    assert first.images[0].uri == second.images[0].uri
+    assert (
+        len(list((tmp_path / "images" / "robocasa365" / "camera1").glob("*.jpg"))) == 1
+    )

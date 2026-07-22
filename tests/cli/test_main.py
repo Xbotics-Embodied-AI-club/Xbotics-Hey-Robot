@@ -15,6 +15,7 @@ def test_main_cli_exposes_current_runtime_actions_only() -> None:
     assert "tts" not in CLI_ACTIONS
     assert "policy" not in CLI_ACTIONS
     assert "task-supervisor" not in CLI_ACTIONS
+    assert "robocasa-backend" not in CLI_ACTIONS
 
 
 def test_main_cli_reports_unknown_action(monkeypatch: pytest.MonkeyPatch) -> None:

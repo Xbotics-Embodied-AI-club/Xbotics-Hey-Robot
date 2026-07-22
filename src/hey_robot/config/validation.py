@@ -41,6 +41,7 @@ def validate_deployment(config: DeploymentConfig) -> list[ValidationIssue]:
                     f"policy {policy_id} references missing robot {policy.robot_id}",
                 )
             )
+    issues.extend(_robocasa_configuration_issues(config))
     for path in (
         config.resources.runtime_dir,
         config.resources.media_root,
@@ -143,6 +144,67 @@ def validate_deployment(config: DeploymentConfig) -> list[ValidationIssue]:
                 robots=skill_robots,
             )
         )
+    return issues
+
+
+def _robocasa_configuration_issues(
+    config: DeploymentConfig,
+) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    for service_id, service in config.model_services.items():
+        if service.type != "robocasa_lerobot_policy":
+            continue
+        if tuple(service.provides) != ("manipulate",):
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    f"model service {service_id} must provide only manipulate",
+                )
+            )
+        robot = config.robots.get(service.robot_id)
+        if robot is None or robot.robot_family != "robocasa":
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    f"model service {service_id} requires a RoboCasa robot",
+                )
+            )
+        prompt_mode = str(service.settings.get("prompt_mode") or "")
+        if prompt_mode not in {"environment_root", "agent_subgoal"}:
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    f"model service {service_id} has invalid prompt_mode {prompt_mode!r}",
+                )
+            )
+        issues.extend(
+            ValidationIssue(
+                "error",
+                f"model service {service_id} requires setting {required}",
+            )
+            for required in ("policy_path", "policy_device", "option_horizon")
+            if required not in service.settings
+        )
+    for robot_id, robot in config.robots.items():
+        if robot.robot_family != "robocasa" or not bool(
+            robot.settings.get("managed_backend", False)
+        ):
+            continue
+        matching = [
+            service
+            for service in config.model_services.values()
+            if service.enabled
+            and service.robot_id == robot_id
+            and service.type == "robocasa_lerobot_policy"
+        ]
+        if len(matching) != 1:
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    f"managed RoboCasa robot {robot_id} requires exactly one "
+                    "robocasa_lerobot_policy",
+                )
+            )
     return issues
 
 

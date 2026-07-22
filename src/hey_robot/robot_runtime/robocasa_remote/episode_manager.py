@@ -52,7 +52,7 @@ class StepOutcome:
 
 
 class EpisodeManager:
-    """The sole owner of the active RoboCasa environment in one worker."""
+    """The sole owner of the active RoboCasa environment in one backend."""
 
     def __init__(
         self,
@@ -102,6 +102,8 @@ class EpisodeManager:
                     "trial_id": spec.trial_id,
                     "task": spec.task,
                     "seed": spec.seed,
+                    "split": spec.split,
+                    "registries": list(spec.registries),
                 }
             ]
             return self._active
@@ -115,7 +117,14 @@ class EpisodeManager:
     def observe(self) -> ActiveTrial:
         return self.current_trial()
 
-    def step(self, action: Any, *, expected_frame_id: int) -> StepOutcome:
+    def step(
+        self,
+        action: Any,
+        *,
+        expected_frame_id: int,
+        raw_action: Any | None = None,
+        action_clipped: bool = False,
+    ) -> StepOutcome:
         with self._lock:
             trial = self.current_trial()
             if trial.done:
@@ -150,6 +159,14 @@ class EpisodeManager:
                     "timestamp": time.time(),
                     "frame_id": trial.frame_id,
                     "action": [float(value) for value in action_array.tolist()],
+                    "raw_action": [
+                        float(value)
+                        for value in np.asarray(
+                            action if raw_action is None else raw_action,
+                            dtype=np.float32,
+                        ).tolist()
+                    ],
+                    "action_clipped": bool(action_clipped),
                     "reward": float(reward),
                     "done": trial.done,
                 }
@@ -170,6 +187,9 @@ class EpisodeManager:
         return {
             "trial_id": trial.spec.trial_id,
             "task": trial.spec.task,
+            "seed": trial.spec.seed,
+            "split": trial.spec.split,
+            "registries": list(trial.spec.registries),
             "frame_id": trial.frame_id,
             "episode_done": trial.done,
             "official_success": trial.official_success,
@@ -198,14 +218,27 @@ class EpisodeManager:
         return True
 
     @staticmethod
-    def new_spec(*, task: str, seed: int, trial_id: str | None = None) -> TrialSpec:
+    def new_spec(
+        *,
+        task: str,
+        seed: int,
+        trial_id: str | None = None,
+        split: str = "target",
+        registries: tuple[str, ...] = ("lightwheel",),
+    ) -> TrialSpec:
         return TrialSpec(
-            trial_id=trial_id or f"rc-{uuid.uuid4().hex}", task=task, seed=seed
+            trial_id=trial_id or f"rc-{uuid.uuid4().hex}",
+            task=task,
+            seed=seed,
+            split=split,
+            registries=registries,
         )
 
     @staticmethod
     def _create_environment(spec: TrialSpec) -> tuple[Any, dict[str, Any]]:
-        from evaluation.robocasa365.worker.egl_config import configure_headless_egl
+        from hey_robot.robot_runtime.robocasa_remote.egl_config import (
+            configure_headless_egl,
+        )
 
         configure_headless_egl()
         from lerobot.envs.robocasa import DEFAULT_CAMERAS, RoboCasaEnv

@@ -10,6 +10,7 @@ from typing import Any, TypedDict
 
 logger = logging.getLogger(__name__)
 
+from hey_robot.app.sidecars import managed_robocasa_backend
 from hey_robot.cognition.autonomous_agent_service import AutonomousAgentService
 from hey_robot.cognition.perception.scene import build_scene_captioner
 from hey_robot.config import DeploymentConfig
@@ -51,11 +52,18 @@ class DeploymentRunner:
     """在一个 asyncio 进程中运行完整的本地部署。"""
 
     def __init__(
-        self, config: DeploymentConfig, *, episode_dir: str | Path | None = None
+        self,
+        config: DeploymentConfig,
+        *,
+        episode_dir: str | Path | None = None,
+        config_path: str | Path | None = None,
     ) -> None:
         self.config = config
         self.episode_dir = episode_dir or config.resources.episodes_root
         HeyRobotLogger.from_spec(self.config.logging)
+        self.sidecar = managed_robocasa_backend(config, config_path=config_path)
+        # Sidecar identity must exist before RobotService and ModelService
+        # clients capture their role-specific credentials.
         self.services = self._build_services()
         self._tasks: list[asyncio.Task] = []
 
@@ -83,6 +91,11 @@ class DeploymentRunner:
         ]
         if errors:
             raise ValueError("invalid deployment: " + "; ".join(errors))
+        if self.sidecar is not None:
+            await self.sidecar.start()
+            self._tasks.append(
+                asyncio.create_task(self.sidecar.wait(), name="robocasa-backend")
+            )
         for service in self.services:
             self._tasks.append(asyncio.create_task(service.start(), name=service.name))
         try:
@@ -106,6 +119,8 @@ class DeploymentRunner:
                 asyncio.gather(*self._tasks, return_exceptions=True),
                 timeout=timeout_s,
             )
+        if self.sidecar is not None:
+            await self.sidecar.stop()
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(
                 asyncio.gather(

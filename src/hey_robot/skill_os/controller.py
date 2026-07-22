@@ -24,6 +24,7 @@ from hey_robot.foundation.clients import (
 from hey_robot.human_follow import HumanFollowServiceClient
 from hey_robot.logging import HeyRobotLogger
 from hey_robot.protocol import (
+    RobotAction,
     RobotObservation,
     RobotStatus,
     ShortOperationCommand,
@@ -74,6 +75,19 @@ def _orchestration_result_metadata(data: object) -> dict[str, Any]:
         for key in _ORCHESTRATION_RESULT_KEYS
         if key in data or key in nested
     }
+
+
+def _model_trace_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Keep execution plans auditable without copying images into every event."""
+    traced = {
+        key: value
+        for key, value in arguments.items()
+        if key not in {"observation", "image_path", "images"}
+    }
+    observation = arguments.get("observation")
+    if isinstance(observation, dict) and observation.get("frame_id") is not None:
+        traced["observation_frame_id"] = observation["frame_id"]
+    return traced
 
 
 @dataclass
@@ -907,6 +921,81 @@ class SkillControllerService:
             "message": step_summary or f"{name} completed",
         }
 
+    async def _invoke_native_policy_action(
+        self,
+        policy_id: str,
+        state: _SkillControllerState,
+        run: SkillRun,
+        values: list[float],
+        expected_frame_id: int,
+        raw_values: list[float] | None,
+    ) -> dict[str, Any]:
+        """Route a model-native action through the canonical Robot Runtime bus."""
+        del state
+        if len(values) != 12:
+            raise RuntimeError(
+                f"native policy action must have 12 values, got {len(values)}"
+            )
+        action = RobotAction(
+            envelope=run.intent.envelope,
+            values=[float(value) for value in values],
+            skill_id=run.intent.skill_id,
+            task_id=run.intent.task_id,
+            intent_kind="skill",
+            metadata={
+                "action_type": "native_policy",
+                "expected_frame_id": int(expected_frame_id),
+                "raw_action": list(raw_values or values),
+                "action_clipped": list(raw_values or values) != list(values),
+            },
+        )
+        future: asyncio.Future[RobotStatus] = asyncio.get_running_loop().create_future()
+        run.pending_status = future
+        run.current_step = "native_policy_action"
+        run.execution_plan = SkillExecutionPlan(
+            actions=(
+                RobotSkillAction(
+                    "native_policy_action",
+                    {"expected_frame_id": int(expected_frame_id)},
+                ),
+            ),
+            strategy="runtime_trace",
+            notes=("Native action routed through Robot Runtime.",),
+        )
+        await self.bus.publish(self.topics.robot_action, to_payload(action))
+        run.action_published_at = time.time()
+        await self.events.publish(
+            RuntimeEvent.make(
+                EventKind.POLICY_ACTION,
+                source="skill-controller",
+                trace_id=action.envelope.trace_id,
+                episode_id=action.envelope.episode_id,
+                agent_id=action.envelope.agent_id,
+                robot_id=action.envelope.robot_id,
+                payload={
+                    "policy_id": policy_id,
+                    "skill_id": run.intent.skill_id,
+                    "skill": run.skill_name,
+                    "action_type": "native_policy",
+                    "expected_frame_id": int(expected_frame_id),
+                },
+            )
+        )
+        try:
+            status = await future
+        finally:
+            if run.pending_status is future:
+                run.pending_status = None
+                run.current_step = None
+        if status.success is False:
+            raise RuntimeError(status.error or "native policy action failed")
+        run.steps_executed += 1
+        return {
+            "success": True,
+            "frame_id": status.frame_id,
+            "done": bool(status.metrics.get("done", False)),
+        }
+
     async def _invoke_model_service(
         self,
         run: SkillRun,
@@ -930,11 +1019,9 @@ class SkillControllerService:
         # 将 skill 层 enriched 的参数（如 observation/images）显式传给 ModelService。
         enriched_arguments = {**run.intent.arguments, **_arguments}
         contract = self.plugin_skill_catalog.resolve(name)
+        trace_arguments = _model_trace_arguments(_arguments)
         run.execution_plan = SkillExecutionPlan(
-            actions=(
-                *run.execution_plan.actions,
-                RobotSkillAction(name, dict(_arguments)),
-            ),
+            actions=(RobotSkillAction(name, trace_arguments),),
             strategy="runtime_trace",
             notes=("Recorded from actual model service invocation.",),
         )
@@ -1118,10 +1205,22 @@ class SkillControllerService:
         robot = RobotActionPort(
             lambda name, arguments: self._invoke_robot_skill(
                 policy_id, state, run, name, arguments
-            )
+            ),
+            lambda values, expected_frame_id, raw_values: (
+                self._invoke_native_policy_action(
+                    policy_id, state, run, values, expected_frame_id, raw_values
+                )
+            ),
         )
 
         contract = run.contract
+        model_settings: dict[str, Any] = {}
+        if contract is not None and contract.required_model_service:
+            resolved_model = self.model_services.service_for(
+                contract.required_model_service, state.spec.robot_id
+            )
+            if resolved_model is not None:
+                model_settings = dict(resolved_model[1].settings)
         requires_camera = contract is not None and "camera" in (
             contract.required_resources or ()
         )
@@ -1178,6 +1277,7 @@ class SkillControllerService:
             robot=robot,
             perception=PerceptionPort(robot),
             model_services=ModelServicePort(model_invoke),
+            model_settings=model_settings,
             observation=state.latest_observation,
             current_observation=lambda: state.latest_observation,
             resolve_images=self.media_resolver.resolve_images,

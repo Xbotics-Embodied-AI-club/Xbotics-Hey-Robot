@@ -6,6 +6,7 @@ from hey_robot.protocol import ActionProposal, Envelope, ShortOperationCommand, 
 from hey_robot.protocol.messages import to_payload
 from hey_robot.skill_os.controller import (
     SkillControllerService,
+    _model_trace_arguments,
     _orchestration_result_metadata,
     _short_operation_intent,
 )
@@ -52,6 +53,24 @@ def test_orchestration_metadata_is_selected_without_large_worker_payloads() -> N
         "option_state": "boundary_reached",
         "root_task_success": False,
         "requires_reobservation": True,
+    }
+
+
+def test_model_trace_arguments_drop_binary_observation_payloads() -> None:
+    traced = _model_trace_arguments(
+        {
+            "option_command": "close the fridge",
+            "observation": {
+                "frame_id": 12,
+                "images": [{"data": "a" * 10_000}],
+            },
+            "image_path": "/large/image.png",
+        }
+    )
+
+    assert traced == {
+        "option_command": "close the fridge",
+        "observation_frame_id": 12,
     }
 
 

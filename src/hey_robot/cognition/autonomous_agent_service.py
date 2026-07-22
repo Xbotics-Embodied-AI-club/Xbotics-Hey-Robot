@@ -101,6 +101,7 @@ class AutonomousAgentService:
             self.topics,
             catalog,
             self.conversations,
+            timeout_sec=config.agent_runtime.skill_result_timeout_sec,
         )
         self._session_locks: dict[str, asyncio.Lock] = {}
 

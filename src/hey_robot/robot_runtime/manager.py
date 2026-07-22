@@ -70,6 +70,11 @@ class RobotManager:
                         timeout_sec=float(spec.settings.get("timeout_sec", 10.0)),
                         role="data",
                     ),
+                    control_client=GrpcRoboCasaRuntimeClient(
+                        target,
+                        timeout_sec=float(spec.settings.get("timeout_sec", 10.0)),
+                        role="evaluator",
+                    ),
                 )
                 continue
             raise ValueError(

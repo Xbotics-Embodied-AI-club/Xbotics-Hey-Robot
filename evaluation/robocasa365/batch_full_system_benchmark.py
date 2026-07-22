@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from evaluation.robocasa365.full_system_benchmark import run_trial
-from evaluation.robocasa365.worker.contract import load_manifest
+from hey_robot.robot_runtime.robocasa_remote.contract import load_manifest
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -22,14 +22,24 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("configs/evaluation/robocasa365.tasks.yaml"),
     )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=Path("configs/evaluation/robocasa365.agent.yaml"),
+    )
     parser.add_argument("--suite", action="append", default=[])
     parser.add_argument(
-        "--producer", action="append", choices=("b0", "b1", "b2"), default=[]
+        "--condition", action="append", choices=("b0", "b1", "b2"), default=[]
     )
     parser.add_argument("--seeds", default="1000")
     parser.add_argument("--objective-template", default="Complete the {task} task.")
     parser.add_argument("--agent-url", default="http://127.0.0.1:8080/turn")
     parser.add_argument("--runtime-target", default="grpc://127.0.0.1:9092")
+    parser.add_argument(
+        "--credentials-file",
+        type=Path,
+        default=Path("runtime/robocasa365.agent/robocasa.credentials.json"),
+    )
     parser.add_argument("--poll-sec", type=float, default=1.0)
     parser.add_argument("--timeout-sec", type=float, default=1800.0)
     return parser
@@ -41,27 +51,29 @@ async def run_batch(args: argparse.Namespace) -> dict[str, object]:
     invalid = sorted(set(suites) - set(manifest["suites"]))
     if invalid:
         raise ValueError(f"unknown manifest suites: {invalid}")
-    producers = args.producer or ["b1"]
+    conditions = args.condition or ["b1"]
     seeds = [int(value) for value in args.seeds.split(",") if value.strip()]
     args.output_root.mkdir(parents=True, exist_ok=False)
     results: list[dict[str, object]] = []
     for suite in suites:
         for task in manifest["suites"][suite]:
             for seed in seeds:
-                for producer in producers:
+                for condition in conditions:
                     child = (
                         args.output_root
                         / "trials"
-                        / f"{suite}-{producer}-{task}-{seed}"
+                        / f"{suite}-{condition}-{task}-{seed}"
                     )
                     trial_args = argparse.Namespace(
                         task=task,
                         seed=seed,
                         objective=args.objective_template.format(task=task),
-                        producer=producer,
+                        condition=condition,
                         manifest=args.manifest,
+                        config=args.config,
                         agent_url=args.agent_url,
                         runtime_target=args.runtime_target,
+                        credentials_file=args.credentials_file,
                         output_dir=child,
                         poll_sec=args.poll_sec,
                         timeout_sec=args.timeout_sec,

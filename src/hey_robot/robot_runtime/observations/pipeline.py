@@ -42,6 +42,7 @@ class ObservationPipeline:
         self.media_store = media_store
         self.image_save_every_n = max(1, int(image_save_every_n))
         self._latest_image_refs: dict[tuple[str, str], ImageRef] = {}
+        self._latest_image_frames: dict[tuple[str, str], int] = {}
 
     def build(self, observation: DriverObservation) -> RobotObservation:
         robot_id = observation.envelope.robot_id or "robot"
@@ -90,6 +91,8 @@ class ObservationPipeline:
         camera = asset.name or asset.role or f"cam{index}"
         key = (robot_id, camera)
         latest = self._latest_image_refs.get(key)
+        if latest is not None and self._latest_image_frames.get(key) == frame_id:
+            return latest
         if latest is not None and frame_id % self.image_save_every_n != 0:
             return latest
         ref = self.media_store.put_image(
@@ -97,9 +100,13 @@ class ObservationPipeline:
             robot_id=robot_id,
             frame_id=frame_id,
             camera=camera,
+            content_type=asset.content_type
+            if asset.content_type in {"image/jpeg", "image/png"}
+            else "image/jpeg",
             metadata={"role": asset.role, **asset.metadata},
         )
         self._latest_image_refs[key] = ref
+        self._latest_image_frames[key] = frame_id
         return ref
 
     def _put_artifact(

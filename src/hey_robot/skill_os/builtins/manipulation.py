@@ -10,6 +10,10 @@ from hey_robot.protocol import RobotObservation
 from hey_robot.skill_os.base import BaseSkill, SkillResult
 from hey_robot.skill_os.builtins.common import spec
 from hey_robot.skill_os.builtins.manipulation_adapter import vla_output_to_primitives
+from hey_robot.skill_os.termination import (
+    FixedHorizonTerminationEvaluator,
+    TerminationState,
+)
 from hey_robot.vla.so101_schema import (
     SO101_STATE_SCHEMA,
     state_from_arm_status,
@@ -128,7 +132,13 @@ class _ManipulateSkillBase(BaseSkill):
                 error="robot runtime port is unavailable",
             )
 
-        max_steps = max(1, int(arguments.get("max_steps") or 30))
+        model_settings = dict(getattr(ctx, "model_settings", None) or {})
+        max_steps = max(
+            1,
+            int(
+                arguments.get("max_steps") or model_settings.get("option_horizon") or 30
+            ),
+        )
         task_prompt = str(
             arguments.get("task_prompt") or arguments.get("objective") or self.spec.name
         )
@@ -146,13 +156,17 @@ class _ManipulateSkillBase(BaseSkill):
             observation = _current_observation(ctx)
             before_frame_id = _frame_id(observation)
             payload = _vla_payload(ctx, arguments, observation=observation)
+            policy_session_id = _policy_session_id(
+                observation, fallback=getattr(ctx, "skill_id", None)
+            )
             payload.update(
                 {
                     "skill_name": self.spec.name,
                     "task_prompt": task_prompt,
+                    "agent_subgoal": task_prompt,
                     "vla_step": step_index,
                     "policy_session_id": payload.get("policy_session_id")
-                    or getattr(ctx, "skill_id", None),
+                    or policy_session_id,
                 }
             )
             result = await ctx.model_services.call(
@@ -174,6 +188,82 @@ class _ManipulateSkillBase(BaseSkill):
 
             vla_data = _extract_vla_policy_data(result)
             last_vla = vla_data
+
+            native_action = _native_action(vla_data)
+            if native_action is not None:
+                action_result = await ctx.robot.apply_policy_action(
+                    native_action["values"],
+                    expected_frame_id=native_action["expected_frame_id"],
+                    raw_values=native_action.get("raw_values"),
+                )
+                steps.append(
+                    {
+                        "success": bool(action_result.get("success", False)),
+                        "primitive": "embodiment_native_action",
+                        "arguments": {
+                            "dimensions": len(native_action["values"]),
+                            "expected_frame_id": native_action["expected_frame_id"],
+                        },
+                        "result": dict(action_result),
+                    }
+                )
+                executed_action = True
+                after_frame_id = int(
+                    action_result.get("frame_id") or native_action["expected_frame_id"]
+                )
+                if not bool(action_result.get("done", False)):
+                    fresh_observation = await _wait_for_fresh_observation(
+                        ctx,
+                        after_frame_id=before_frame_id,
+                        timeout_sec=fresh_observation_timeout_sec,
+                    )
+                    if (
+                        ctx.current_observation is not None
+                        and before_frame_id is not None
+                    ):
+                        if fresh_observation is None:
+                            return _termination_result(
+                                success=False,
+                                state=TerminationState.FAILED,
+                                reason="observation_stale",
+                                steps=steps,
+                                last_vla=last_vla,
+                                before_frame_id=before_frame_id,
+                                after_frame_id=after_frame_id,
+                                episode_done=False,
+                            )
+                        after_frame_id = int(fresh_observation.frame_id)
+                decision = FixedHorizonTerminationEvaluator(max_steps).evaluate(
+                    steps_executed=step_index + 1,
+                    policy_result=native_action,
+                    action_result=action_result,
+                )
+                if decision.state is TerminationState.FAILED:
+                    return _termination_result(
+                        success=False,
+                        state=decision.state,
+                        reason=decision.reason,
+                        steps=steps,
+                        last_vla=last_vla,
+                        before_frame_id=before_frame_id,
+                        after_frame_id=after_frame_id,
+                        episode_done=bool(action_result.get("done", False)),
+                    )
+                if decision.state in {
+                    TerminationState.SUCCESS,
+                    TerminationState.UNKNOWN,
+                }:
+                    return _termination_result(
+                        success=not bool(action_result.get("done", False)),
+                        state=decision.state,
+                        reason=decision.reason,
+                        steps=steps,
+                        last_vla=last_vla,
+                        before_frame_id=before_frame_id,
+                        after_frame_id=after_frame_id,
+                        episode_done=bool(action_result.get("done", False)),
+                    )
+                continue
 
             primitives = vla_output_to_primitives(vla_data)
 
@@ -356,6 +446,76 @@ def _vla_payload(
     return payload
 
 
+def _policy_session_id(
+    observation: RobotObservation | None,
+    *,
+    fallback: object | None,
+) -> str | None:
+    if observation is not None:
+        raw = dict(observation.raw)
+        trial_id = str(raw.get("trial_id") or "").strip()
+        if trial_id:
+            return trial_id
+        episode_id = str(observation.envelope.episode_id or "").strip()
+        if episode_id:
+            return episode_id
+    value = str(fallback or "").strip()
+    return value or None
+
+
+def _native_action(vla_data: dict[str, Any]) -> dict[str, Any] | None:
+    policy_result = vla_data.get("policy_result")
+    if (
+        not isinstance(policy_result, dict)
+        or policy_result.get("kind") != "native_action"
+    ):
+        return None
+    values = policy_result.get("values")
+    if not isinstance(values, list) or not values:
+        raise ValueError("native policy result must contain a non-empty values list")
+    return {
+        **policy_result,
+        "values": [float(value) for value in values],
+        "expected_frame_id": int(policy_result.get("expected_frame_id", 0)),
+    }
+
+
+def _termination_result(
+    *,
+    success: bool,
+    state: TerminationState,
+    reason: str,
+    steps: list[dict[str, Any]],
+    last_vla: dict[str, Any],
+    before_frame_id: int | None,
+    after_frame_id: int | None,
+    episode_done: bool,
+) -> SkillResult:
+    boundary = state is TerminationState.UNKNOWN and not episode_done
+    return SkillResult(
+        success=success,
+        status="completed" if success else "failed",
+        summary=(
+            f"manipulate reached a bounded option boundary after {len(steps)} actions"
+            if boundary
+            else f"manipulate terminated with {state.value}: {reason}"
+        ),
+        failure_mode=None if success else reason,
+        data={
+            "vla": last_vla,
+            "steps": steps,
+            "option_state": "boundary_reached" if boundary else state.value,
+            "termination_state": state.value,
+            "termination_reason": reason,
+            "root_task_success": None,
+            "episode_done": episode_done,
+            "requires_reobservation": True,
+            "before_frame_id": before_frame_id,
+            "after_frame_id": after_frame_id,
+        },
+    )
+
+
 def _current_observation(ctx: Any) -> RobotObservation | None:
     if ctx.current_observation is not None:
         return cast(RobotObservation | None, ctx.current_observation())
@@ -442,11 +602,11 @@ def _encode_images(
                         continue
                     pil = Image.fromarray(arr)
                     buf = io.BytesIO()
-                    pil.save(buf, format="JPEG", quality=85)
+                    pil.save(buf, format="PNG")
                     b64 = base64.b64encode(buf.getvalue()).decode("ascii")
                     entry = asdict(ref)
                     entry["data"] = b64
-                    entry["format"] = "jpeg"
+                    entry["format"] = "png"
                     result.append(entry)
                 return result
         except Exception:
@@ -528,12 +688,16 @@ class ManipulateSkill(_ManipulateSkillBase):
             },
             "required": [],
         },
-        required_resources=("arm", "gripper", "camera"),
+        required_resources=("robot_control", "camera"),
         dependencies=("inspect_scene",),
-        driver_primitives=("move_arm_joints", "set_gripper", "stop_motion"),
+        # Model output adapters select either named driver primitives or the
+        # embodiment-native action port. These are alternatives, not a list of
+        # primitives every embodiment must implement.
+        driver_primitives=(),
         required_model_service="manipulate",
+        supported_robots=("xlerobot", "robocasa"),
         safety_level="motion",
-        timeout_sec=60.0,
+        timeout_sec=1800.0,
         agent_visible=True,
         feedback_mode="vision",
         goal_effects=("manipulates_object",),
