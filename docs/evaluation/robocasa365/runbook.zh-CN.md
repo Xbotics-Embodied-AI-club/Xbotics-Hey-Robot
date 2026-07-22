@@ -11,15 +11,17 @@ RoboCasa365 用于在仿真厨房中评估 Hey Robot 完整 embodied-agent 系�
 用户根任务
   -> DeepSeek Agent / 快系统规划
   -> DashScope 场景理解
-  -> Skill OS: inspect_scene / robocasa_option
-  -> ModelService RPC
-  -> lerobot/pi052_robocasa
+  -> Skill OS: inspect_scene / manipulate
+  -> 标准 ModelService RPC（每次只推理一个 action）
+  -> lerobot/pi052_robocasa（12D action）
+  -> RobotAction / Robot Runtime
+  -> RoboCasaRemoteDriver / Runtime.Step
   -> EpisodeManager
   -> RoboCasa365 environment
   -> RoboCasa 官方成功谓词
 ```
 
-worker 内只有一个 `EpisodeManager`，它是 simulator、observation、frame ID 和 action step
+backend 内只有一个 `EpisodeManager`，它是 simulator、observation、frame ID 和 action step
 的唯一状态源。Agent 看不到 RoboCasa 官方成功标签；成功与失败由 benchmark 独立读取并写入
 评测结果。
 
@@ -33,23 +35,27 @@ worker 内只有一个 `EpisodeManager`，它是 simulator、observation、frame
 
 ## 2. 已验证状态
 
-真实 checkpoint `lerobot/pi052_robocasa` 已通过完整 B1 链路验证：
+真实 checkpoint `lerobot/pi052_robocasa` 已通过完整链路验证：
 
 - task：`CloseFridge`；
 - split：`target`；
 - environment 与 PI052 RNG seed：`1000`；
 - 结果：`official_success=true`；
-- 完成位置：第 227 个 environment step；
-- PI052 option 数：5；
-- Agent step 数：10。
+- condition：`b2`；
+- 完成位置：第 218 个 environment step；
+- `manipulate` option 数：5；
+- Agent step 数：9；
+- 所有 218 个 action 都经过 Robot Runtime；
+- 验证环境由 `uv.lock` 从空目录重新创建，不依赖旧虚拟环境中残留的包。
 
 验证产物位于：
 
 ```text
-runtime/robocasa365/long-horizon-close-fridge-b1-r14/
+runtime/robocasa365/fresh-group-close-fridge-b2-seed1000/
 ```
 
-其中 `result.json` 是汇总结果，`video.mp4` 是成功视频。
+其中 `result.json` 记录了本次真实成功。PI0.5/CUDA 的推理并非逐 bit 确定，因此固定 seed
+用于追踪输入条件，但不承诺每次都在完全相同的 frame 成功。
 
 ## 3. 关键运行约束
 
@@ -62,13 +68,37 @@ PI052 必须遵守其独立 LeRobot evaluator 的推理契约：
 4. trial seed 同时设置 environment 以及隔离 PI052 进程的 Python、NumPy、Torch/CUDA RNG；
 5. Agent 配置使用 `hard_max_skills=64`，以覆盖最多 1000 个环境步和中间重新观察。
 
-PI052 在独立 spawn 子进程中使用 CUDA，MuJoCo/EGL 留在 worker 主进程。这个隔离用于避免
+PI052 在独立 spawn 子进程中使用 CUDA，MuJoCo/EGL 留在 managed backend 主进程。这个隔离用于避免
 Torch/CUDA inference 与 EGL 共进程时出现渲染缓冲异常，不能合并回同一进程。
 
-当前宿主 kernel driver 为 NVIDIA 535.309.01。启动器会自动优先加载已经解压的匹配版本
-用户态 EGL 库；双 GPU 主机默认让 PI052 使用 GPU 0、MuJoCo EGL 使用 GPU 1。
+启动器会查询当前 NVIDIA kernel driver，并自动优先加载已经解压的匹配版本用户态 EGL 库；
+`mujoco_device: auto_separate` 会在多 GPU 主机上尽量让 MuJoCo 与 PI052 分离。配置中没有固定
+某个主机驱动版本。
 
 ## 4. 运行前准备
+
+### 4.1 从锁文件创建独立后端环境
+
+RoboCasa365 的 Python 依赖只有一个事实源：
+`pyproject.toml` 中的 `robocasa365` dependency group 和仓库根目录的 `uv.lock`。
+本地与 Docker 都执行同一条安装语义：
+
+```bash
+uv sync --frozen --only-group robocasa365 --no-install-project
+```
+
+第一次安装，或者需要彻底重建时运行：
+
+```bash
+scripts/evaluation/setup_robocasa365_env.sh --recreate
+```
+
+该脚本只删除并重建项目根目录下的 `.robocasa365-venv`，不会删除模型权重或约 5 GB 的
+RoboCasa assets。它会验证 assets 完整性，并把新环境中的 RoboCasa package 指向统一的
+`artifacts/robocasa365/merged-assets`。CUDA driver、EGL/OpenGL 系统库、模型权重和
+RoboCasa assets 是运行资源，不属于 Python dependency group。
+
+### 4.2 Provider 配置
 
 项目根目录的 `.env` 需要配置以下变量：
 
@@ -84,17 +114,18 @@ DEEPSEEK_BASE_URL=...
 
 不要把真实 API key 写入本文、命令行参数或评测 artifact。唯一启动器会自动读取 `.env`。
 
-本地 PI052 checkpoint 默认使用：
+PI052 checkpoint、device、prompt mode、horizon 和 timeout 只在
+`configs/evaluation/robocasa365.agent.yaml` 中配置：
 
 ```text
-/root/.cache/huggingface/hub/models--lerobot--pi052_robocasa/snapshots/693102ebcd9b28aeec3728638dd433a04ffbdee6
+policy_path: lerobot/pi052_robocasa
+policy_device: cuda
+prompt_mode: environment_root
+option_horizon: 50
 ```
 
-若模型位于其他位置，可设置：
-
-```bash
-export ROBOCASA_POLICY=/absolute/path/to/pi052_robocasa
-```
+若模型位于其他位置，应修改或覆盖这份 deployment YAML；不要另设一套 shell 默认值。backend
+会将同一配置映射给隔离模型进程。
 
 ## 5. 启动一个完整评测
 
@@ -105,7 +136,7 @@ bash scripts/evaluation/run_robocasa365_full_system.sh \
   --task CloseFridge \
   --seed 1000 \
   --objective "Close the fridge." \
-  --producer b1 \
+  --condition b1 \
   --output-dir runtime/robocasa365/close-fridge-b1-seed1000 \
   --timeout-sec 1200
 ```
@@ -113,13 +144,13 @@ bash scripts/evaluation/run_robocasa365_full_system.sh \
 启动器会自动完成：
 
 1. 读取 `.env`；
-2. 生成本轮短生命周期 Runtime credentials；
+2. 由 `DeploymentRunner` 生成 mode `0600` 的短生命周期 Runtime/ModelService credentials；
 3. 配置 NVIDIA/EGL；
-4. 启动 RoboCasa worker；
+4. 通过 `hey-robot run` 托管并健康检查 RoboCasa backend；
 5. 启动 Hey Robot、DeepSeek planner 和 DashScope scene captioner；
-6. 创建 trial 并预热真实 PI052；
+6. 同时通过 Runtime 和标准 ModelService 健康门禁，然后创建 trial；
 7. 运行完整 Agent 闭环；
-8. 保存结果并关闭本轮服务。
+8. 保存结果，并由 Hey Robot 回收 backend 和模型子进程。
 
 PI052 checkpoint 约 10.9 GB，当前宿主首次冷加载通常需要 4～5 分钟。frame 在加载期间保持
 为 0，属于正常现象。
@@ -128,24 +159,25 @@ PI052 checkpoint 约 10.9 GB，当前宿主首次冷加载通常需要 4～5 分
 
 ## 6. B0、B1、B2
 
-`--producer` 可选：
+`--condition` 可选：
 
-- `b0`：直接使用根任务文本；
-- `b1`：真实 Hey Robot AutonomousAgentService，正式系统评测默认使用该项；
-- `b2`：冻结的上限规划提示，用于区分规划问题和 VLA 执行问题。
+- `b0`：一次完整根目标 `manipulate`，benchmark 在第一次调用结束后强制结束 trial，保证
+  flat-policy 对照不依赖 Agent 是否遵守自然语言提示；
+- `b1`：使用正常层级规划并在 option 边界重新观察；
+- `b2`：冻结“观察—根目标操作—再观察”的 oracle pattern。
 
-三者共用相同的 Gateway、Skill OS、RPC、VLA 和 EpisodeManager，不存在绕过完整系统的
-direct runner。
+三者只是同一 Agent 入口的实验提示，共用相同 Gateway、Skill OS、RPC、VLA 和
+EpisodeManager，不存在 condition 专属 runner 或动作路径。
 
 ## 7. 批量评测
 
-当 worker 与 Hey Robot 服务已经启动时，可以运行：
+当 `hey-robot run` 已经启动时，可以运行：
 
 ```bash
-.venv/bin/python evaluation/robocasa365/batch_full_system_benchmark.py \
+.venv/bin/python -m evaluation.robocasa365.batch_full_system_benchmark \
   --output-root runtime/robocasa365/atomic-b1-seeds \
   --suite atomic_gate \
-  --producer b1 \
+  --condition b1 \
   --seeds 1000,1001 \
   --agent-url http://127.0.0.1:18080/turn \
   --runtime-target grpc://127.0.0.1:9092 \
@@ -172,14 +204,17 @@ agent_trace.jsonl
 observations.jsonl
 agent_events.jsonl
 skill_events.jsonl
-model_service_events.jsonl
 actions.jsonl
 options.jsonl
 evaluator_truth.json
 result.json
 summary.json
+runtime_metadata.json
 video.mp4
 ```
+
+其中已删除重复且没有独立事实来源的 `model_service_events.jsonl`；option 生命周期以 Skill OS
+的 `options.jsonl` 为准，动作以 evaluator-only action ledger 的 `actions.jsonl` 为准。
 
 最重要的字段位于 `result.json`：
 
@@ -205,12 +240,12 @@ video.mp4
 .venv/bin/ruff check \
   evaluation/robocasa365 \
   src/hey_robot/robot_runtime/robocasa_remote \
-  src/hey_robot/skill_os/builtins/robocasa.py
+  src/hey_robot/skill_os/builtins/manipulation.py
 ```
 
 常见现象：
 
-- frame 长时间为 0：通常是 PI052 冷加载；先检查 worker 日志和 GPU 显存；
+- frame 长时间为 0：通常是 PI052 冷加载；先检查 managed backend 日志和 GPU 显存；
 - 出现彩色噪声帧：检查是否误把 PI052 CUDA 与 MuJoCo EGL 放回同一进程，以及是否加载了
   与 535.309.01 匹配的用户态 EGL；
 - 固定 seed 结果不一致：确认 trial seed 同时传入 environment 和 PI052 子进程；
