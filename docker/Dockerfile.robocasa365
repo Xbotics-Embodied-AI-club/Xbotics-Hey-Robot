@@ -1,108 +1,25 @@
-# RoboCasa stays outside the main Hey Robot environment: it pins a separate
-# LeRobot/RoboCasa/robosuite stack and owns the high-frequency control loop.
+# RoboCasa365 uses an isolated uv dependency group while running the same Hey
+# Robot backend, standard ModelService, and Robot Runtime implementation.
 ARG LEROBOT_BASE_IMAGE=python:3.12-bookworm
 FROM ${LEROBOT_BASE_IMAGE}
 
-# PI052 is currently available on this upstream post-v0.6.0 commit. Keep the
-# build arg overridable so a tagged release can replace it once available.
-ARG LEROBOT_REF=cb73cf3ffa1cec60640a06b924c2174548ae2b1b
-ARG ROBOCASA_SHA=56e355ccc64389dfc1b8a61a33b9127b975ba681
-ARG ROBOSUITE_SHA=aaa8b9b214ce8e77e82926d677b4d61d55e577ab
 ARG IMAGE_REVISION=unknown
 
 LABEL org.opencontainers.image.title="hey-robot-robocasa365" \
       org.opencontainers.image.revision="${IMAGE_REVISION}" \
-      org.opencontainers.image.description="Standalone RoboCasa365 ModelService worker"
+      org.opencontainers.image.description="Hey Robot RoboCasa365 backend"
 
 ENV MUJOCO_GL=egl \
     PYTHONUNBUFFERED=1 \
     HF_HOME=/cache/huggingface \
-    ROBOCASA_OUTPUT_ROOT=/outputs \
-    ROBOCASA_ASSET_ROOT=/root/.robocasa
+    ROBOCASA_ASSET_ROOT=/root/.robocasa \
+    PATH=/opt/bridge/.venv/bin:${PATH}
 
 WORKDIR /opt/bridge
 
-RUN python -m pip install --no-cache-dir --upgrade pip uv
-
-RUN uv pip install --system --no-cache \
-        --index-url https://download.pytorch.org/whl/cu126 \
-        "torch==2.7.1" "torchvision==0.22.1" \
-    && printf 'torch==2.7.1\ntorchvision==0.22.1\n' > /tmp/torch-constraints.txt
-
-RUN python - <<'PY'
-from pathlib import Path
-import os
-import tarfile
-import tempfile
-import urllib.request
-
-ref = os.environ.get("LEROBOT_REF", "v0.6.0")
-url = f"https://github.com/huggingface/lerobot/archive/{ref}.tar.gz"
-dst = Path("/opt/lerobot")
-tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".tar.gz")
-urllib.request.urlretrieve(url, tmp.name)
-tmp.close()
-with tarfile.open(tmp.name, "r:gz") as tf:
-    members = tf.getmembers()
-    root = members[0].name.split("/", 1)[0] + "/"
-    for member in members:
-        if not member.name.startswith(root):
-            continue
-        rel = member.name[len(root):]
-        if not rel:
-            continue
-        member.name = rel
-        tf.extract(member, dst)
-Path(tmp.name).unlink()
-PY
-RUN uv pip install --system --no-cache -c /tmp/torch-constraints.txt \
-    -e "/opt/lerobot[dataset,evaluation,pi,smolvla]"
-
-RUN python - <<'PY'
-from pathlib import Path
-import os
-import tarfile
-import tempfile
-import urllib.request
-
-repos = [
-    ("robocasa/robocasa", os.environ["ROBOCASA_SHA"], Path("/opt/robocasa")),
-    ("ARISE-Initiative/robosuite", os.environ["ROBOSUITE_SHA"], Path("/opt/robosuite")),
-]
-for repo, ref, dst in repos:
-    url = f"https://github.com/{repo}/archive/{ref}.tar.gz"
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".tar.gz")
-    urllib.request.urlretrieve(url, tmp.name)
-    tmp.close()
-    with tarfile.open(tmp.name, "r:gz") as tf:
-        members = tf.getmembers()
-        root = members[0].name.split("/", 1)[0] + "/"
-        for member in members:
-            if not member.name.startswith(root):
-                continue
-            rel = member.name[len(root):]
-            if not rel:
-                continue
-            member.name = rel
-            tf.extract(member, dst)
-    Path(tmp.name).unlink()
-PY
-RUN uv pip install --system --no-cache --no-deps -e /opt/robocasa \
-    && uv pip install --system --no-cache -e /opt/robosuite
-
-COPY evaluation/robocasa365/worker/requirements.txt /tmp/requirements.txt
-RUN uv pip uninstall --system -y opencv-python \
-    && uv pip install --system --no-cache \
-        "numpy==2.2.5" "numba==0.61.2" "scipy==1.15.3" "mujoco==3.3.1" \
-        "pygame==2.6.1" "Pillow==12.2.0" "opencv-python-headless==4.13.0.92" \
-        "pyyaml==6.0.3" "pynput==1.8.1" "tqdm==4.67.3" "termcolor==3.3.0" \
-        "protobuf>=6.31.0,<7" \
-        "imageio==2.37.3" "h5py==3.16.0" "lxml==6.0.4" \
-        "hidapi==0.14.0.post4" "tianshou==0.4.10" "gymnasium==1.2.3" \
-    && uv pip install --system --no-cache -r /tmp/requirements.txt
-
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        git \
         libegl1 \
         libgl1 \
         libgles2 \
@@ -114,28 +31,13 @@ RUN apt-get update \
         libxrender1 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN printf '{"lerobot_ref":"%s","robocasa_commit":"%s","robosuite_commit":"%s"}\n' \
-        "${LEROBOT_REF}" "${ROBOCASA_SHA}" "${ROBOSUITE_SHA}" \
-        > /opt/bridge/bridge_versions.json
+RUN python -m pip install --no-cache-dir --upgrade pip uv
+COPY pyproject.toml uv.lock README.md /opt/bridge/
+RUN uv sync --frozen --only-group robocasa365 --no-install-project
 
-COPY proto /opt/bridge/proto
-RUN mkdir -p /opt/bridge/hey_robot/model_service/v1 /opt/bridge/hey_robot/robocasa_runtime/v1 \
-    && touch /opt/bridge/hey_robot/__init__.py \
-        /opt/bridge/hey_robot/model_service/__init__.py \
-        /opt/bridge/hey_robot/model_service/v1/__init__.py \
-        /opt/bridge/hey_robot/robocasa_runtime/__init__.py \
-        /opt/bridge/hey_robot/robocasa_runtime/v1/__init__.py \
-    && python -m grpc_tools.protoc \
-        -I/opt/bridge/proto \
-        -I"$(python -c 'import grpc_tools, pathlib; print(pathlib.Path(grpc_tools.__file__).parent / "_proto")')" \
-        --python_out=/opt/bridge \
-        --grpc_python_out=/opt/bridge \
-        /opt/bridge/proto/hey_robot/model_service/v1/model_service.proto \
-        /opt/bridge/proto/hey_robot/robocasa_runtime/v1/robocasa_runtime.proto
-
-COPY evaluation/robocasa365/worker /opt/bridge/
-RUN chmod +x /opt/bridge/lerobot_eval_wrapper.py \
-    && mkdir -p /outputs /cache/huggingface
+COPY src/hey_robot /opt/bridge/hey_robot
+COPY configs/evaluation/robocasa365.agent.yaml /opt/bridge/configs/robocasa365.agent.yaml
+RUN mkdir -p /outputs /cache/huggingface
 
 EXPOSE 9092
-CMD ["python", "server.py", "--host", "0.0.0.0", "--port", "9092"]
+CMD ["python", "-m", "hey_robot.app.robocasa_backend", "--config", "/opt/bridge/configs/robocasa365.agent.yaml", "--host", "0.0.0.0", "--port", "9092"]

@@ -92,7 +92,6 @@ services:
       args:
         # Resolve this to an immutable digest before a reproducible benchmark.
         LEROBOT_BASE_IMAGE: ${HEY_ROBOT_ROBOCASA_BASE_IMAGE:-python:3.12-bookworm}
-        LEROBOT_REF: ${HEY_ROBOT_ROBOCASA_LEROBOT_REF:-cb73cf3ffa1cec60640a06b924c2174548ae2b1b}
         IMAGE_REVISION: ${HEY_ROBOT_ROBOCASA_IMAGE_REVISION:-unknown}
     image: ${HEY_ROBOT_ROBOCASA_IMAGE:-hey-robot-robocasa365:latest}
     environment:
@@ -102,17 +101,13 @@ services:
       ROBOCASA_DATA_TOKEN: ${ROBOCASA_DATA_TOKEN:?set a Robot Runtime data-plane token}
       HF_HOME: /cache/huggingface
       HF_TOKEN: ${HF_TOKEN:-}
-      ROBOCASA_POLICY: ${ROBOCASA_POLICY:-lerobot/smolvla_robocasa}
-      ROBOCASA_EVAL_BINARY: ${ROBOCASA_EVAL_BINARY:-/opt/bridge/lerobot_eval_wrapper.py}
-      ROBOCASA_DEFAULT_TASK: ${ROBOCASA_DEFAULT_TASK:-CloseFridge}
-      ROBOCASA_OUTPUT_ROOT: /outputs
       ROBOCASA_ASSET_ROOT: /root/.robocasa
-      ROBOCASA_MODEL_ASSET_ROOT: /opt/robocasa/robocasa/models/assets
-      ROBOCASA_ASSET_READY_FILE: /opt/robocasa/robocasa/models/assets/.robocasa-assets-ready
+      ROBOCASA_MODEL_ASSET_ROOT: /opt/bridge/.venv/lib/python3.12/site-packages/robocasa/models/assets
+      ROBOCASA_ASSET_READY_FILE: /opt/bridge/.venv/lib/python3.12/site-packages/robocasa/models/assets/.robocasa-assets-ready
     volumes:
       - ${HF_CACHE_DIR:-/home/liber/.cache/huggingface}:/cache/huggingface
       # RoboCasa creates derived MJCF XML next to object assets during environment reset.
-      - ./artifacts/robocasa365/merged-assets:/opt/robocasa/robocasa/models/assets
+      - ./artifacts/robocasa365/merged-assets:/opt/bridge/.venv/lib/python3.12/site-packages/robocasa/models/assets
       - ./runtime/robocasa365:/outputs
     ports:
       - "${HEY_ROBOT_ROBOCASA_PORT:-9092}:9092"
@@ -122,7 +117,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ["${HEY_ROBOT_ROBOCASA_GPU:-0}"]
+              count: all
               capabilities: [gpu]
     restart: unless-stopped
     profiles:

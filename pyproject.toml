@@ -13,6 +13,7 @@ license = { text = "MIT" }
 #   uv sync --group sim      → main runtime + MuJoCo simulation
 #   uv sync --group vla      → VLA model service  (lerobot ACT policy)
 #   uv sync --group vln      → VLN model service  (InternVLA-N1 planner)
+#   uv sync --only-group robocasa365 → isolated RoboCasa365 backend
 #   uv sync --group dev      → lint / type-check / test tooling
 #
 # Note: --group vla and --group vln are mutually exclusive (conflicting
@@ -68,6 +69,14 @@ conflicts = [
         { group = "vla" },
         { group = "vln" },
     ],
+    [
+        { group = "robocasa365" },
+        { group = "vla" },
+    ],
+    [
+        { group = "robocasa365" },
+        { group = "vln" },
+    ],
 ]
 override-dependencies = [
     # lerobot 强制依赖 opencv-python-headless（无 cv2.imshow），
@@ -78,6 +87,38 @@ override-dependencies = [
 
 [tool.uv.extra-build-dependencies]
 flash-attn = ["torch"]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu126", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+]
+torchvision = [
+    { index = "pytorch-cu126", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+]
+
+# RoboCasa 1.0.0 incorrectly pins lerobot==0.3.3, which is incompatible with
+# the PI0.5 implementation used by RoboCasa365. robosuite also declares the UI
+# OpenCV wheel although this backend is headless. The real, pinned runtime
+# dependencies are declared explicitly in the robocasa365 group below.
+[[tool.uv.dependency-metadata]]
+name = "lerobot"
+version = "0.6.1"
+requires-dist = []
+
+[[tool.uv.dependency-metadata]]
+name = "robocasa"
+version = "1.0.0"
+requires-dist = []
+
+[[tool.uv.dependency-metadata]]
+name = "robosuite"
+version = "1.5.2"
+requires-dist = []
 
 [tool.poe.executor]
 type = "simple"
@@ -102,6 +143,54 @@ data_file = "artifacts/test/.coverage"
 [dependency-groups]
 sim = ["mujoco>=3.3.0"]
 
+# Isolated Linux backend for RoboCasa365 + PI0.5. Keep source revisions and
+# Python pins here so local environments and Docker consume the same uv.lock.
+# CUDA drivers, EGL system libraries, model weights, and RoboCasa assets are
+# runtime resources and intentionally do not belong in a Python dependency
+# group.
+robocasa365 = [
+    "torch==2.7.1; sys_platform == 'linux'",
+    "torchvision==0.22.1; sys_platform == 'linux'",
+    "lerobot @ git+https://github.com/huggingface/lerobot.git@cb73cf3ffa1cec60640a06b924c2174548ae2b1b",
+    "robocasa @ git+https://github.com/robocasa/robocasa.git@56e355ccc64389dfc1b8a61a33b9127b975ba681",
+    "robosuite @ git+https://github.com/ARISE-Initiative/robosuite.git@aaa8b9b214ce8e77e82926d677b4d61d55e577ab",
+    "numpy==2.2.5",
+    "numba==0.61.2",
+    "scipy==1.15.3",
+    "mujoco==3.3.1",
+    "pygame==2.6.1",
+    "pillow==12.2.0",
+    "opencv-python-headless==4.13.0.92",
+    "pyyaml==6.0.3",
+    "pynput==1.8.1",
+    "tqdm==4.67.3",
+    "termcolor==3.3.0",
+    "imageio==2.37.3",
+    "h5py==3.16.0",
+    "lxml==6.0.4",
+    "hidapi==0.14.0.post4",
+    "gymnasium==1.2.3",
+    "qpsolvers[quadprog]>=4.3.1",
+    "einops>=0.8.0,<0.9.0",
+    "draccus==0.10.0",
+    "huggingface-hub>=1.0.0,<2.0.0",
+    "requests>=2.32.0,<3.0.0",
+    "packaging>=24.2,<26.0",
+    "safetensors>=0.4.3,<1.0.0",
+    "transformers>=5.4.0,<5.6.0",
+    "sentencepiece>=0.2.0,<0.3.0",
+    "datasets>=4.7.0,<5.0.0",
+    "pandas>=2.0.0,<3.0.0",
+    "pyarrow>=21.0.0,<30.0.0",
+    "jsonlines>=4.0.0,<5.0.0",
+    "av>=15.0.0,<16.0.0",
+    "cmake>=3.29.0.1,<4.2.0",
+    "setuptools>=71.0.0,<81.0.0",
+    "grpcio==1.73.1",
+    "protobuf>=6.31.0,<7",
+    "python-dotenv>=1.2.2,<2",
+]
+
 vla = [
     "lerobot>=0.6.0",
     "safetensors>=0.7.0",
@@ -116,7 +205,7 @@ vln = [
     "safetensors==0.5.3",
     "tokenizers==0.21.2",
     "einops==0.8.1",
-    "triton==3.1.0",
+    "triton==3.1.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "open3d==0.19.0",
     "tensorboard==2.20.0",
     "pandas==2.3.1",
