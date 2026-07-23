@@ -134,5 +134,5 @@ def registry_from_config(config: Any | None) -> SkillRegistry:
         modules=tuple(
             getattr(skills_config, "modules", ()) or ("hey_robot.skill_os.builtins",)
         ),
-        enabled=tuple(getattr(skills_config, "enabled", ()) or ()),
+        enabled=tuple(getattr(skills_config, "tool_names", ()) or ()),
     )

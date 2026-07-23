@@ -28,7 +28,7 @@ def test_conversation_skill_does_not_upgrade_by_category() -> None:
     )
     tools = ToolRegistry(ToolDependencies(catalog))
 
-    proposal = tools.proposal("request_skill", {"skill": "navigate_once"})
+    proposal = tools.proposal("navigate_once", {})
 
     assert proposal.intent_kind == "skill"
     assert proposal.skill_name == "navigate_once"
@@ -56,7 +56,7 @@ def test_bounded_option_result_requires_reobservation_in_next_turn() -> None:
 
     context = _tool_outcome_context(proposal, outcome)
 
-    assert "先调用 request_observation" in context
+    assert "先调用 inspect_scene" in context
     assert "不能仅凭动作调用成功" in context
 
 
@@ -97,4 +97,43 @@ def test_sustained_task_completion_requires_post_motion_observation(
 
     assert check.accepted
     assert store.active_task("session-1") is None
+    store.close()
+
+
+def test_task_store_persists_pending_run_and_ignores_replayed_events(tmp_path) -> None:
+    store = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    task = store.create_task(
+        session_key="session-1",
+        envelope=Envelope(robot_id="sim_robot"),
+        objective="inspect the desk",
+    )
+    proposal = ActionProposal("observation", "inspect_scene", "inspect", {})
+    pending = store.add_pending_step(
+        task.task_id,
+        proposal,
+        run_id="run-1",
+        tool_call_id="call-1",
+    )
+
+    assert pending.status == "pending"
+    assert pending.outcome.status == "accepted"
+    resolved = store.resolve_pending_step(
+        "run-1",
+        outcome=ToolOutcome("completed", "desk observed", operation_id="run-1"),
+        status="completed",
+        event_sequence=3,
+    )
+
+    assert resolved is not None
+    assert resolved.status == "completed"
+    assert resolved.completed_at is not None
+    assert (
+        store.resolve_pending_step(
+            "run-1",
+            outcome=ToolOutcome("failed", "stale"),
+            status="failed",
+            event_sequence=2,
+        )
+        is None
+    )
     store.close()

@@ -32,7 +32,6 @@ SOURCE_ONLY_FORBIDDEN = (
 
 FORBIDDEN_PATH_PARTS = (
     Path("src/hey_robot/agents"),
-    Path("src/hey_robot/skills"),
     Path("src/hey_robot/robots"),
     Path("src/hey_robot/capability"),
     Path("src/hey_robot/tasks"),

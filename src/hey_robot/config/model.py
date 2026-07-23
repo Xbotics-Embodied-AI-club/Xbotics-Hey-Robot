@@ -186,8 +186,17 @@ class AgentSpec:
 @dataclass(frozen=True)
 class SkillSurfaceConfig:
     modules: tuple[str, ...] = ("hey_robot.skill_os.builtins",)
+    tools: tuple[str, ...] = ()
+    implementations: dict[str, str] = field(default_factory=dict)
     enabled: tuple[str, ...] = ()
     mode: str = "production"  # 可选值："production" | "bringup"
+    execution_mode: str = "legacy"  # 可选值："legacy" | "event_driven" | "local"
+
+    @property
+    def tool_names(self) -> tuple[str, ...]:
+        """Configured Agent-facing Skill surface, with one legacy compatibility path."""
+
+        return self.tools or self.enabled
 
 
 @dataclass(frozen=True)
@@ -483,7 +492,20 @@ class DeploymentConfig:
                     for item in skills_data.get("enabled", ()) or ()
                     if str(item).strip()
                 ),
+                tools=tuple(
+                    str(item).strip()
+                    for item in skills_data.get("tools", ()) or ()
+                    if str(item).strip()
+                ),
+                implementations={
+                    str(name).strip(): str(value).strip()
+                    for name, value in (
+                        skills_data.get("implementations", {}) or {}
+                    ).items()
+                    if str(name).strip() and str(value).strip()
+                },
                 mode=str(skills_data.get("mode", "production")),
+                execution_mode=str(skills_data.get("execution_mode", "legacy")),
             ),
             agent_runtime=AgentRuntimeSpec(
                 enabled=bool(agent_runtime_data.get("enabled", False)),

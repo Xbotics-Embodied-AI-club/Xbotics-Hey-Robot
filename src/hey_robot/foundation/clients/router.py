@@ -1,0 +1,67 @@
+"""Thin ModelRouter adapter over the current model service registry."""
+
+from __future__ import annotations
+
+from hey_robot.contracts import SkillContract
+from hey_robot.foundation.clients.manager import ModelServiceRegistry
+from hey_robot.foundation.clients.models import (
+    ModelInferenceResult,
+    ServiceInvocationRequest,
+)
+from hey_robot.protocol import Envelope, SkillIntent
+
+
+class RegistryModelRouter:
+    def __init__(self, registry: ModelServiceRegistry) -> None:
+        self._registry = registry
+
+    async def infer(
+        self,
+        capability: str,
+        request: dict,
+        *,
+        run_id: str,
+        robot_id: str,
+        timeout_sec: float | None = None,
+    ) -> ModelInferenceResult:
+        service = self._registry.service_for(capability, robot_id)
+        if service is None:
+            return ModelInferenceResult(
+                False,
+                f"model capability {capability!r} is unavailable",
+                failure_mode="model_service_unavailable",
+                error="no enabled model service provides the requested capability",
+            )
+        service_id, _spec, client = service
+        result = await client.execute(
+            request=ServiceInvocationRequest(
+                service_id=service_id,
+                intent=SkillIntent(
+                    envelope=Envelope(robot_id=robot_id),
+                    skill_id=run_id,
+                    task_id=run_id,
+                    intent_kind="skill",
+                    name=capability,
+                    arguments=dict(request),
+                    objective=f"infer {capability}",
+                ),
+                contract=SkillContract(
+                    name=capability,
+                    description=f"Model capability {capability}",
+                    required_model_service=capability,
+                ),
+                timeout_sec=timeout_sec or 60.0,
+                arguments=dict(request),
+            )
+        )
+        return ModelInferenceResult(
+            result.success,
+            result.summary,
+            data=dict(result.metrics),
+            failure_mode=result.failure_mode,
+            error=result.error,
+        )
+
+    async def cancel(self, run_id: str) -> None:
+        for client in self._registry.clients.values():
+            await client.cancel(run_id)

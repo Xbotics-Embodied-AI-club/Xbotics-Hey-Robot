@@ -39,7 +39,24 @@ class Provider:
 def _tools():
     return ToolRegistry(
         ToolDependencies(
-            SkillCatalog((SkillSpec(name="move", description="move"),)),
+            SkillCatalog(
+                (
+                    SkillSpec(name="move", description="move"),
+                    SkillSpec(
+                        name="inspect_scene",
+                        description="inspect",
+                        category="perception",
+                        input_schema={
+                            "type": "object",
+                            "properties": {
+                                "question": {"type": "string", "minLength": 1}
+                            },
+                            "required": ["question"],
+                            "additionalProperties": False,
+                        },
+                    ),
+                )
+            ),
         )
     )
 
@@ -51,7 +68,7 @@ async def test_conversation_can_return_text_with_the_shared_runner() -> None:
     result = await runner.run(
         AgentTurnRequest(
             (ReasoningMessage("user", "你好"),),
-            frozenset({"request_skill", "complete_task"}),
+            frozenset({"move", "complete_task"}),
             time.monotonic() + 1,
             "turn-1",
         )
@@ -77,7 +94,7 @@ async def test_removed_start_task_tool_is_rejected() -> None:
     result = await runner.run(
         AgentTurnRequest(
             (ReasoningMessage("system", "continue goal"),),
-            frozenset({"request_observation", "request_skill"}),
+            frozenset({"inspect_scene", "move"}),
             time.monotonic() + 1,
             "goal-1",
         )
@@ -86,7 +103,7 @@ async def test_removed_start_task_tool_is_rejected() -> None:
     assert result.failure is not None
     assert result.failure.code == "UNKNOWN_TOOL"
     sent_names = {item["function"]["name"] for item in provider.calls[0]["tools"]}
-    assert sent_names == {"request_observation", "request_skill"}
+    assert sent_names == {"inspect_scene", "move"}
 
 
 @pytest.mark.asyncio
@@ -117,7 +134,7 @@ async def test_provider_and_protocol_failures_are_typed(
     result = await AgentRunner(provider, _tools()).run(
         AgentTurnRequest(
             (ReasoningMessage("system", "test"),),
-            frozenset({"request_observation", "request_skill"}),
+            frozenset({"inspect_scene", "move"}),
             time.monotonic() + deadline_offset,
             "failure-turn",
         )
@@ -133,7 +150,7 @@ async def test_elapsed_deadline_does_not_call_provider() -> None:
     result = await AgentRunner(provider, _tools()).run(
         AgentTurnRequest(
             (ReasoningMessage("system", "test"),),
-            frozenset({"request_skill"}),
+            frozenset({"move"}),
             time.monotonic() - 1,
             "expired",
         )
@@ -148,7 +165,7 @@ async def test_invalid_context_and_tool_set_are_rejected_before_provider() -> No
     provider = Provider(ReasoningResponse(content="unused"))
     runner = AgentRunner(provider, _tools())
     invalid_messages = await runner.run(
-        AgentTurnRequest((), frozenset({"request_skill"}), time.monotonic() + 1, "m")
+        AgentTurnRequest((), frozenset({"move"}), time.monotonic() + 1, "m")
     )
     invalid_tools = await runner.run(
         AgentTurnRequest(
@@ -170,19 +187,19 @@ async def test_multiple_and_invalid_tool_calls_do_not_produce_proposals() -> Non
     multiple = Provider(
         ReasoningResponse(
             tool_calls=[
-                ReasoningToolCall("a", "request_observation", {"question": "front"}),
-                ReasoningToolCall("b", "request_observation", {"question": "back"}),
+                ReasoningToolCall("a", "inspect_scene", {"question": "front"}),
+                ReasoningToolCall("b", "inspect_scene", {"question": "back"}),
             ]
         )
     )
     invalid = Provider(
         ReasoningResponse(
-            tool_calls=[ReasoningToolCall("c", "request_observation", {"question": ""})]
+            tool_calls=[ReasoningToolCall("c", "inspect_scene", {"question": ""})]
         )
     )
     request = AgentTurnRequest(
         (ReasoningMessage("system", "test"),),
-        frozenset({"request_observation", "request_skill"}),
+        frozenset({"inspect_scene", "move"}),
         time.monotonic() + 1,
         "tool-errors",
     )
@@ -201,8 +218,8 @@ async def test_one_valid_skill_call_returns_one_proposal() -> None:
             tool_calls=[
                 ReasoningToolCall(
                     "move-1",
-                    "request_skill",
-                    {"skill": "move", "objective": "go", "slots": {}},
+                    "move",
+                    {},
                 )
             ]
         )
@@ -210,7 +227,7 @@ async def test_one_valid_skill_call_returns_one_proposal() -> None:
     result = await AgentRunner(provider, _tools()).run(
         AgentTurnRequest(
             (ReasoningMessage("system", "test"),),
-            frozenset({"request_skill"}),
+            frozenset({"move"}),
             time.monotonic() + 1,
             "one-action",
         )

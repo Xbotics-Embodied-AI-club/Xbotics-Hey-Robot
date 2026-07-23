@@ -194,7 +194,7 @@ def test_deployment_validation_requires_explicit_skill_surface() -> None:
 
     issues = validate_deployment(config)
 
-    assert any("skills.enabled must explicitly list" in item.message for item in issues)
+    assert any("skills.tools must explicitly list" in item.message for item in issues)
 
 
 def test_deployment_validation_rejects_unknown_enabled_skill() -> None:
@@ -203,6 +203,114 @@ def test_deployment_validation_rejects_unknown_enabled_skill() -> None:
     issues = validate_deployment(config)
 
     assert any("unknown skill missing_skill" in item.message for item in issues)
+
+
+def test_deployment_config_accepts_tools_and_rejects_ambiguous_legacy_surface() -> None:
+    config = DeploymentConfig.from_dict({"skills": {"tools": ["inspect_scene"]}})
+
+    assert config.skills.tool_names == ("inspect_scene",)
+    assert not [
+        issue for issue in validate_deployment(config) if issue.level == "error"
+    ]
+
+    ambiguous = DeploymentConfig.from_dict(
+        {"skills": {"tools": ["inspect_scene"], "enabled": ["manipulate"]}}
+    )
+
+    assert any(
+        "cannot both be configured" in issue.message
+        for issue in validate_deployment(ambiguous)
+    )
+
+
+def test_deployment_config_exposes_event_driven_skill_mode() -> None:
+    config = DeploymentConfig.from_dict(
+        {"skills": {"tools": ["inspect_scene"], "execution_mode": "event_driven"}}
+    )
+
+    assert config.skills.execution_mode == "event_driven"
+    assert not [
+        issue for issue in validate_deployment(config) if issue.level == "error"
+    ]
+
+
+def test_deployment_config_exposes_local_native_skill_mode() -> None:
+    config = DeploymentConfig.from_dict(
+        {
+            "skills": {
+                "modules": ["hey_robot.skills.builtins"],
+                "tools": ["inspect_scene"],
+                "execution_mode": "local",
+            }
+        }
+    )
+
+    assert config.skills.execution_mode == "local"
+    assert not [
+        issue for issue in validate_deployment(config) if issue.level == "error"
+    ]
+
+
+def test_deployment_config_exposes_skill_implementations() -> None:
+    config = DeploymentConfig.from_dict(
+        {
+            "skills": {
+                "tools": ["inspect_scene"],
+                "implementations": {"inspect_scene": "classic"},
+            }
+        }
+    )
+
+    assert config.skills.implementations == {"inspect_scene": "classic"}
+    assert not [
+        issue for issue in validate_deployment(config) if issue.level == "error"
+    ]
+
+    invalid = DeploymentConfig.from_dict(
+        {
+            "skills": {
+                "tools": ["inspect_scene"],
+                "implementations": {"manipulate": "vla"},
+            }
+        }
+    )
+
+    assert any(
+        "non-surface skill manipulate" in issue.message
+        for issue in validate_deployment(invalid)
+    )
+
+
+def test_deployment_validation_accepts_native_skill_modules() -> None:
+    config = DeploymentConfig.from_dict(
+        {
+            "skills": {
+                "modules": ["hey_robot.skills.builtins"],
+                "tools": ["inspect_scene"],
+            }
+        }
+    )
+
+    assert config.skills.modules == ("hey_robot.skills.builtins",)
+    assert not [
+        issue for issue in validate_deployment(config) if issue.level == "error"
+    ]
+
+
+def test_deployment_validation_checks_native_skill_model_dependencies() -> None:
+    config = DeploymentConfig.from_dict(
+        {
+            "skills": {
+                "modules": ["hey_robot.skills.builtins"],
+                "tools": ["manipulate"],
+            }
+        }
+    )
+
+    assert any(
+        "requires unavailable model service manipulate" in issue.message
+        for issue in validate_deployment(config)
+    )
 
 
 def test_deployment_validation_rejects_implementation_skill_in_production() -> None:

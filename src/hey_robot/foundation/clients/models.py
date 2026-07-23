@@ -86,6 +86,29 @@ class PolicyStepResult:
         }
 
 
+@dataclass(frozen=True)
+class ModelInferenceResult:
+    success: bool
+    summary: str
+    data: dict[str, Any] = field(default_factory=dict)
+    failure_mode: str | None = None
+    error: str | None = None
+
+
+class ModelRouter(Protocol):
+    async def infer(
+        self,
+        capability: str,
+        request: dict[str, Any],
+        *,
+        run_id: str,
+        robot_id: str,
+        timeout_sec: float | None = None,
+    ) -> ModelInferenceResult: ...
+
+    async def cancel(self, run_id: str) -> None: ...
+
+
 class ModelServiceClient(Protocol):
     async def health(self) -> ServiceHealth: ...
 

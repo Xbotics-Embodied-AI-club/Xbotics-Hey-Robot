@@ -8,6 +8,7 @@ from hey_robot.config.model import DeploymentConfig, RobotSpec
 from hey_robot.robot_runtime.primitive_inventory import supported_driver_primitives
 from hey_robot.skill_os.base import SkillSpec
 from hey_robot.skill_os.registry import SkillRegistry, registry_from_config
+from hey_robot.skills import legacy_registry_from_native_config
 
 
 @dataclass(frozen=True)
@@ -60,27 +61,56 @@ def validate_deployment(config: DeploymentConfig) -> list[ValidationIssue]:
                 f"skills.mode must be 'production' or 'bringup', got {config.skills.mode!r}",
             )
         )
-    if not config.skills.enabled:
+    if config.skills.execution_mode not in {"legacy", "event_driven", "local"}:
         issues.append(
             ValidationIssue(
                 "error",
-                "skills.enabled must explicitly list the deployment skill surface",
+                "skills.execution_mode must be 'legacy', 'event_driven', or 'local'",
+            )
+        )
+    if config.skills.tools and config.skills.enabled:
+        issues.append(
+            ValidationIssue(
+                "error",
+                "skills.tools and legacy skills.enabled cannot both be configured",
+            )
+        )
+    tool_names = config.skills.tool_names
+    unknown_implementations = sorted(
+        set(config.skills.implementations) - set(tool_names)
+    )
+    issues.extend(
+        ValidationIssue(
+            "error",
+            f"skills.implementations references non-surface skill {skill_name}",
+        )
+        for skill_name in unknown_implementations
+    )
+    if not tool_names:
+        issues.append(
+            ValidationIssue(
+                "error",
+                "skills.tools must explicitly list the deployment skill surface",
             )
         )
     try:
-        registry = registry_from_config(config)
+        registry = (
+            legacy_registry_from_native_config(config)
+            if _uses_native_skill_modules(config)
+            else registry_from_config(config)
+        )
     except Exception as exc:
         issues.append(ValidationIssue("error", f"failed to load skill modules: {exc}"))
         return issues
     catalog = registry.catalog(enabled_only=False)
-    for skill_name in config.skills.enabled:
+    for skill_name in tool_names:
         try:
             contract = catalog.get(skill_name)
         except KeyError:
             issues.append(
                 ValidationIssue(
                     "error",
-                    f"skills.enabled references unknown skill {skill_name}",
+                    f"skills.tools references unknown skill {skill_name}",
                 )
             )
             continue
@@ -88,7 +118,7 @@ def validate_deployment(config: DeploymentConfig) -> list[ValidationIssue]:
             issues.append(
                 ValidationIssue(
                     "error",
-                    f"skills.enabled must list only semantic skills in production; "
+                    f"skills.tools must list only semantic skills in production; "
                     f"{skill_name} is implementation-level",
                 )
             )
@@ -212,6 +242,12 @@ def _has_model_service_for_skill(config: DeploymentConfig, name: str) -> bool:
     return any(
         service.enabled and name in service.provides
         for service in config.model_services.values()
+    )
+
+
+def _uses_native_skill_modules(config: DeploymentConfig) -> bool:
+    return any(
+        str(module).startswith("hey_robot.skills") for module in config.skills.modules
     )
 
 

@@ -7,8 +7,12 @@ import uuid
 from typing import Any
 
 from hey_robot.cognition.runtime.conversation_store import ConversationStore
+from hey_robot.cognition.tools.skill_tools import (
+    SkillCallProposal,
+    legacy_action_proposal,
+    skill_call_from_legacy,
+)
 from hey_robot.protocol import (
-    ActionProposal,
     Envelope,
     ShortOperationCommand,
     SkillResult,
@@ -39,13 +43,19 @@ class RobotExecutionGateway:
         self._waiters: dict[str, asyncio.Future[SkillResult]] = {}
 
     async def execute(
-        self, proposal: ActionProposal, envelope: Envelope, session_key: str
+        self, proposal: SkillCallProposal | object, envelope: Envelope, session_key: str
     ) -> ToolOutcome:
         del session_key
+        if not isinstance(proposal, SkillCallProposal) and (
+            proposal.__class__.__name__ == "ActionProposal"
+        ):
+            proposal = skill_call_from_legacy(proposal)
+        if not isinstance(proposal, SkillCallProposal):
+            raise TypeError(f"unsupported robot execution proposal: {type(proposal)!r}")
         return await self._execute_short_operation(proposal, envelope)
 
     async def _execute_short_operation(
-        self, proposal: ActionProposal, envelope: Envelope
+        self, proposal: SkillCallProposal, envelope: Envelope
     ) -> ToolOutcome:
         skill_id = f"conversation_skill_{uuid.uuid4().hex}"
         future: asyncio.Future[SkillResult] = asyncio.get_running_loop().create_future()
@@ -57,7 +67,7 @@ class RobotExecutionGateway:
                     ShortOperationCommand(
                         envelope=envelope,
                         operation_id=skill_id,
-                        proposal=proposal,
+                        proposal=legacy_action_proposal(proposal),
                         timeout_sec=self._timeout_sec,
                     )
                 ),

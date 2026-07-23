@@ -18,8 +18,6 @@ def test_robot_agent_has_one_canonical_tool_registry() -> None:
     registry = ToolRegistry(ToolDependencies(SkillCatalog(())))
     names = {definition["function"]["name"] for definition in registry.definitions}
     assert names == {
-        "request_observation",
-        "request_skill",
         "complete_task",
         "control_task",
     }
@@ -61,6 +59,13 @@ def test_agent_service_does_not_publish_skill_intent() -> None:
     text = agent_path.read_text(encoding="utf-8")
     assert "skill_intent" not in text, "agent_service references skill_intent"
     assert "SkillIntent(" not in text, "agent_service constructs SkillIntent"
+
+
+def test_agent_service_consumes_skill_client_events_not_bus_topic() -> None:
+    agent_path = COGNITION_ROOT / "autonomous_agent_service.py"
+    text = agent_path.read_text(encoding="utf-8")
+    assert "self.topics.skill_run_event" not in text
+    assert "_consume_skill_events" in text
 
 
 def test_removed_supervisor_path_does_not_exist() -> None:

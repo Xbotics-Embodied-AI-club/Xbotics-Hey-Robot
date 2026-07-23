@@ -10,10 +10,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from hey_robot.protocol import ActionProposal, Envelope, ToolOutcome
+from hey_robot.cognition.tools.skill_tools import (
+    SkillCallProposal,
+    skill_call_from_payload,
+    skill_call_payload,
+)
+from hey_robot.protocol import Envelope, ToolOutcome
 from hey_robot.protocol.messages import to_payload
 
 TaskStatus = Literal["active", "completed", "blocked", "cancelled", "failed"]
+StepStatus = Literal["pending", "running", "completed", "failed", "cancelled"]
 
 TERMINAL_STATUSES = frozenset({"completed", "blocked", "cancelled", "failed"})
 
@@ -26,6 +32,12 @@ class AgentTask:
     objective: str
     ui_summary: str
     status: TaskStatus
+    channel: str | None
+    chat_id: str | None
+    sender_id: str | None
+    user_id: str | None
+    agent_id: str | None
+    episode_id: str | None
     created_at: float
     updated_at: float
     step_count: int
@@ -40,11 +52,15 @@ class AgentTaskStep:
     step_id: str
     task_id: str
     sequence: int
-    proposal: ActionProposal
+    proposal: SkillCallProposal
     outcome: ToolOutcome
     started_at: float
     completed_at: float | None
     evidence_ids: tuple[str, ...]
+    status: StepStatus = "completed"
+    run_id: str | None = None
+    tool_call_id: str | None = None
+    last_event_sequence: int = 0
 
 
 @dataclass(frozen=True)
@@ -103,6 +119,8 @@ class AgentTaskStore:
             )
             """
         )
+        self._migrate_sustained_tasks()
+        self._migrate_task_steps()
         self._db.execute(
             """
             CREATE UNIQUE INDEX IF NOT EXISTS one_active_sustained_task
@@ -117,6 +135,53 @@ class AgentTaskStore:
             """
         )
         self._db.commit()
+
+    def _migrate_sustained_tasks(self) -> None:
+        columns = {
+            str(row[1])
+            for row in self._db.execute("PRAGMA table_info(sustained_tasks)").fetchall()
+        }
+        migrations = {
+            "channel": "ALTER TABLE sustained_tasks ADD COLUMN channel TEXT",
+            "chat_id": "ALTER TABLE sustained_tasks ADD COLUMN chat_id TEXT",
+            "sender_id": "ALTER TABLE sustained_tasks ADD COLUMN sender_id TEXT",
+            "user_id": "ALTER TABLE sustained_tasks ADD COLUMN user_id TEXT",
+            "agent_id": "ALTER TABLE sustained_tasks ADD COLUMN agent_id TEXT",
+            "episode_id": "ALTER TABLE sustained_tasks ADD COLUMN episode_id TEXT",
+        }
+        for name, statement in migrations.items():
+            if name not in columns:
+                self._db.execute(statement)
+
+    def _migrate_task_steps(self) -> None:
+        columns = {
+            str(row[1])
+            for row in self._db.execute("PRAGMA table_info(task_steps)").fetchall()
+        }
+        migrations = {
+            "run_id": "ALTER TABLE task_steps ADD COLUMN run_id TEXT",
+            "tool_call_id": "ALTER TABLE task_steps ADD COLUMN tool_call_id TEXT",
+            "tool_name": "ALTER TABLE task_steps ADD COLUMN tool_name TEXT",
+            "arguments_json": "ALTER TABLE task_steps ADD COLUMN arguments_json TEXT",
+            "status": (
+                "ALTER TABLE task_steps ADD COLUMN status TEXT NOT NULL "
+                "DEFAULT 'completed'"
+            ),
+            "last_event_sequence": (
+                "ALTER TABLE task_steps ADD COLUMN last_event_sequence INTEGER NOT NULL "
+                "DEFAULT 0"
+            ),
+        }
+        for name, statement in migrations.items():
+            if name not in columns:
+                self._db.execute(statement)
+        self._db.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS task_steps_run_id
+            ON task_steps(run_id)
+            WHERE run_id IS NOT NULL
+            """
+        )
 
     def create_task(
         self,
@@ -171,6 +236,7 @@ class AgentTaskStore:
         row = self._db.execute(
             """
             SELECT task_id, session_key, robot_id, objective, ui_summary, status,
+                   channel, chat_id, sender_id, user_id, agent_id, episode_id,
                    created_at, updated_at, step_count, continuation_count,
                    deadline_at, last_error, final_recap
             FROM sustained_tasks
@@ -186,6 +252,7 @@ class AgentTaskStore:
         row = self._db.execute(
             """
             SELECT task_id, session_key, robot_id, objective, ui_summary, status,
+                   channel, chat_id, sender_id, user_id, agent_id, episode_id,
                    created_at, updated_at, step_count, continuation_count,
                    deadline_at, last_error, final_recap
             FROM sustained_tasks
@@ -202,6 +269,7 @@ class AgentTaskStore:
             rows = self._db.execute(
                 """
                 SELECT task_id, session_key, robot_id, objective, ui_summary, status,
+                       channel, chat_id, sender_id, user_id, agent_id, episode_id,
                        created_at, updated_at, step_count, continuation_count,
                        deadline_at, last_error, final_recap
                 FROM sustained_tasks
@@ -215,6 +283,7 @@ class AgentTaskStore:
             rows = self._db.execute(
                 """
                 SELECT task_id, session_key, robot_id, objective, ui_summary, status,
+                       channel, chat_id, sender_id, user_id, agent_id, episode_id,
                        created_at, updated_at, step_count, continuation_count,
                        deadline_at, last_error, final_recap
                 FROM sustained_tasks
@@ -225,8 +294,22 @@ class AgentTaskStore:
             ).fetchall()
         return tuple(_task_from_row(row) for row in rows)
 
+    def task_envelope(self, task_id: str) -> Envelope | None:
+        task = self.task(task_id)
+        if task is None:
+            return None
+        return Envelope(
+            channel=task.channel,
+            chat_id=task.chat_id,
+            sender_id=task.sender_id,
+            user_id=task.user_id,
+            agent_id=task.agent_id,
+            episode_id=task.episode_id,
+            robot_id=task.robot_id,
+        )
+
     def add_step(
-        self, task_id: str, proposal: ActionProposal, outcome: ToolOutcome
+        self, task_id: str, proposal: SkillCallProposal, outcome: ToolOutcome
     ) -> AgentTaskStep:
         task = self.task(task_id)
         if task is None or task.status != "active":
@@ -247,7 +330,9 @@ class AgentTaskStore:
                 step_id,
                 task_id,
                 sequence,
-                json.dumps(to_payload(proposal), ensure_ascii=False, sort_keys=True),
+                json.dumps(
+                    skill_call_payload(proposal), ensure_ascii=False, sort_keys=True
+                ),
                 json.dumps(to_payload(outcome), ensure_ascii=False, sort_keys=True),
                 now,
                 now,
@@ -274,11 +359,163 @@ class AgentTaskStore:
             evidence_ids,
         )
 
+    def add_pending_step(
+        self,
+        task_id: str,
+        proposal: SkillCallProposal,
+        *,
+        run_id: str,
+        tool_call_id: str,
+    ) -> AgentTaskStep:
+        task = self.task(task_id)
+        if task is None or task.status != "active":
+            raise ValueError("cannot append a step to a non-active task")
+        sequence = task.step_count + 1
+        step_id = f"step_{uuid.uuid4().hex}"
+        now = time.time()
+        outcome = ToolOutcome("accepted", operation_id=run_id)
+        self._db.execute(
+            """
+            INSERT INTO task_steps (
+                step_id, task_id, sequence, proposal_json, outcome_json,
+                started_at, completed_at, evidence_json, run_id, tool_call_id,
+                tool_name, arguments_json, status, last_event_sequence
+            ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, 'pending', 0)
+            """,
+            (
+                step_id,
+                task_id,
+                sequence,
+                json.dumps(
+                    skill_call_payload(proposal), ensure_ascii=False, sort_keys=True
+                ),
+                json.dumps(to_payload(outcome), ensure_ascii=False, sort_keys=True),
+                now,
+                json.dumps([], ensure_ascii=False),
+                run_id,
+                tool_call_id,
+                proposal.skill_name,
+                json.dumps(
+                    dict(proposal.arguments), ensure_ascii=False, sort_keys=True
+                ),
+            ),
+        )
+        self._db.execute(
+            "UPDATE sustained_tasks SET step_count=?, updated_at=? WHERE task_id=?",
+            (sequence, now, task_id),
+        )
+        self._db.commit()
+        return AgentTaskStep(
+            step_id,
+            task_id,
+            sequence,
+            proposal,
+            outcome,
+            now,
+            None,
+            (),
+            status="pending",
+            run_id=run_id,
+            tool_call_id=tool_call_id,
+        )
+
+    def start_skill_step(
+        self,
+        task_id: str,
+        *,
+        run_id: str,
+        tool_call_id: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> AgentTaskStep:
+        return self.add_pending_step(
+            task_id,
+            SkillCallProposal(
+                "observation" if tool_name == "inspect_scene" else "skill",
+                tool_name,
+                _objective(tool_name, arguments),
+                dict(arguments),
+            ),
+            run_id=run_id,
+            tool_call_id=tool_call_id,
+        )
+
+    def resolve_pending_step(
+        self,
+        run_id: str,
+        *,
+        outcome: ToolOutcome,
+        status: StepStatus,
+        event_sequence: int,
+    ) -> AgentTaskStep | None:
+        row = self._db.execute(
+            """
+            SELECT step_id, task_id, sequence, proposal_json, outcome_json,
+                   started_at, completed_at, evidence_json, status, run_id,
+                   tool_call_id, last_event_sequence
+            FROM task_steps WHERE run_id=?
+            """,
+            (run_id,),
+        ).fetchone()
+        if row is None or int(row[11]) >= event_sequence:
+            return None
+        proposal = skill_call_from_payload(json.loads(row[3]))
+        evidence_ids = _evidence_ids(str(row[0]), proposal, outcome)
+        completed_at = (
+            time.time() if status in {"completed", "failed", "cancelled"} else None
+        )
+        self._db.execute(
+            """
+            UPDATE task_steps
+            SET outcome_json=?, evidence_json=?, status=?, completed_at=?, last_event_sequence=?
+            WHERE run_id=?
+            """,
+            (
+                json.dumps(to_payload(outcome), ensure_ascii=False, sort_keys=True),
+                json.dumps(list(evidence_ids), ensure_ascii=False),
+                status,
+                completed_at,
+                event_sequence,
+                run_id,
+            ),
+        )
+        self._db.commit()
+        return AgentTaskStep(
+            str(row[0]),
+            str(row[1]),
+            int(row[2]),
+            proposal,
+            outcome,
+            float(row[5]),
+            completed_at,
+            evidence_ids,
+            status=status,
+            run_id=run_id,
+            tool_call_id=str(row[10]) if row[10] is not None else None,
+            last_event_sequence=event_sequence,
+        )
+
+    def apply_skill_event(
+        self,
+        run_id: str,
+        *,
+        outcome: ToolOutcome,
+        status: StepStatus,
+        event_sequence: int,
+    ) -> AgentTaskStep | None:
+        return self.resolve_pending_step(
+            run_id,
+            outcome=outcome,
+            status=status,
+            event_sequence=event_sequence,
+        )
+
     def recent_steps(self, task_id: str, limit: int = 12) -> tuple[AgentTaskStep, ...]:
         rows = self._db.execute(
             """
             SELECT step_id, task_id, sequence, proposal_json, outcome_json,
-                   started_at, completed_at, evidence_json
+                   started_at, completed_at, evidence_json, status, run_id,
+                   tool_call_id, last_event_sequence
             FROM task_steps
             WHERE task_id=?
             ORDER BY sequence DESC
@@ -287,6 +524,17 @@ class AgentTaskStore:
             (task_id, limit),
         ).fetchall()
         return tuple(_step_from_row(row) for row in reversed(rows))
+
+    def active_run_ids(self, task_id: str) -> tuple[str, ...]:
+        rows = self._db.execute(
+            """
+            SELECT run_id FROM task_steps
+            WHERE task_id=? AND run_id IS NOT NULL AND status IN ('pending', 'running')
+            ORDER BY sequence ASC
+            """,
+            (task_id,),
+        ).fetchall()
+        return tuple(str(row[0]) for row in rows if row[0] is not None)
 
     def continue_task(self, task_id: str) -> int:
         task = self.task(task_id)
@@ -406,6 +654,22 @@ class AgentTaskStore:
 
 
 def _task_from_row(row: tuple[Any, ...]) -> AgentTask:
+    if len(row) == 13:
+        row = (
+            row[0],
+            row[1],
+            row[2],
+            row[3],
+            row[4],
+            row[5],
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            *row[6:],
+        )
     return AgentTask(
         task_id=str(row[0]),
         session_key=str(row[1]),
@@ -413,18 +677,24 @@ def _task_from_row(row: tuple[Any, ...]) -> AgentTask:
         objective=str(row[3]),
         ui_summary=str(row[4] or ""),
         status=row[5],
-        created_at=float(row[6]),
-        updated_at=float(row[7]),
-        step_count=int(row[8]),
-        continuation_count=int(row[9]),
-        deadline_at=float(row[10]) if row[10] is not None else None,
-        last_error=str(row[11]) if row[11] is not None else None,
-        final_recap=str(row[12]) if row[12] is not None else None,
+        channel=str(row[6]) if row[6] is not None else None,
+        chat_id=str(row[7]) if row[7] is not None else None,
+        sender_id=str(row[8]) if row[8] is not None else None,
+        user_id=str(row[9]) if row[9] is not None else None,
+        agent_id=str(row[10]) if row[10] is not None else None,
+        episode_id=str(row[11]) if row[11] is not None else None,
+        created_at=float(row[12]),
+        updated_at=float(row[13]),
+        step_count=int(row[14]),
+        continuation_count=int(row[15]),
+        deadline_at=float(row[16]) if row[16] is not None else None,
+        last_error=str(row[17]) if row[17] is not None else None,
+        final_recap=str(row[18]) if row[18] is not None else None,
     )
 
 
 def _step_from_row(row: tuple[Any, ...]) -> AgentTaskStep:
-    proposal = ActionProposal(**json.loads(row[3]))
+    proposal = skill_call_from_payload(json.loads(row[3]))
     outcome = ToolOutcome(**json.loads(row[4]))
     evidence_ids = tuple(str(item) for item in json.loads(row[7]))
     return AgentTaskStep(
@@ -436,11 +706,15 @@ def _step_from_row(row: tuple[Any, ...]) -> AgentTaskStep:
         started_at=float(row[5]),
         completed_at=float(row[6]) if row[6] is not None else None,
         evidence_ids=evidence_ids,
+        status=row[8] if len(row) > 8 else "completed",
+        run_id=str(row[9]) if len(row) > 9 and row[9] is not None else None,
+        tool_call_id=str(row[10]) if len(row) > 10 and row[10] is not None else None,
+        last_event_sequence=int(row[11]) if len(row) > 11 else 0,
     )
 
 
 def _evidence_ids(
-    step_id: str, proposal: ActionProposal, outcome: ToolOutcome
+    step_id: str, proposal: SkillCallProposal, outcome: ToolOutcome
 ) -> tuple[str, ...]:
     ids = [f"step:{step_id}"]
     if outcome.operation_id:
@@ -452,3 +726,13 @@ def _evidence_ids(
         if isinstance(item, str) and item.strip()
     )
     return tuple(dict.fromkeys(ids))
+
+
+def _objective(name: str, arguments: dict[str, Any]) -> str:
+    question = arguments.get("question")
+    if isinstance(question, str) and question.strip():
+        return question.strip()
+    task_prompt = arguments.get("task_prompt") or arguments.get("objective")
+    if isinstance(task_prompt, str) and task_prompt.strip():
+        return task_prompt.strip()
+    return f"execute {name}"
