@@ -4,6 +4,16 @@ from hey_robot.skill_os.builtins.dock_manipulation import (
     PickWandSkill,
     PlaceWandSkill,
 )
+from hey_robot.skill_os.builtins.habitat import (
+    HabitatFollowHumanSkill,
+    HabitatNavigateToSkill,
+    HabitatPickSkill,
+    HabitatPlaceSkill,
+    HabitatStopSkill,
+    HabitatSymbolicPickSkill,
+    HabitatSymbolicPlaceSkill,
+    HabitatWaitSkill,
+)
 from hey_robot.skill_os.builtins.manipulation import (
     ManipulateSkill,
     MoveArmJointsSkill,
@@ -49,6 +59,15 @@ def register_skills(registry: SkillRegistry) -> None:
         MoveArmJointsSkill(),
         SetGripperSkill(),
         ManipulateSkill(),
+        RoboCasaOptionSkill(),
+        HabitatNavigateToSkill(),
+        HabitatFollowHumanSkill(),
+        HabitatSymbolicPickSkill(),
+        HabitatSymbolicPlaceSkill(),
+        HabitatPickSkill(),
+        HabitatPlaceSkill(),
+        HabitatWaitSkill(),
+        HabitatStopSkill(),
         PickSkill(),
         PlaceSkill(),
         PickWandSkill(),

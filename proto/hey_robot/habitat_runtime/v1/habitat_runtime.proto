@@ -1,0 +1,113 @@
+syntax = "proto3";
+
+package hey_robot.habitat_runtime.v1;
+
+import "google/protobuf/struct.proto";
+
+service HabitatRuntime {
+  rpc GetHealth(HealthRequest) returns (HealthResponse);
+  rpc CreateEpisode(CreateEpisodeRequest) returns (EpisodeResponse);
+  rpc Observe(EpisodeRequest) returns (ObservationResponse);
+  rpc Step(StepRequest) returns (StepResponse);
+  rpc ExecuteSkill(ExecuteSkillRequest) returns (SkillResponse);
+  rpc CancelSkill(CancelSkillRequest) returns (CancelSkillResponse);
+  rpc Reset(MutateEpisodeRequest) returns (ObservationResponse);
+  rpc CloseEpisode(MutateEpisodeRequest) returns (CloseEpisodeResponse);
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  bool online = 1;
+  bool loaded = 2;
+  bool busy = 3;
+  string error_message = 4;
+  google.protobuf.Struct metrics = 5;
+}
+
+message CreateEpisodeRequest {
+  string profile = 1;
+  string task = 2;
+  string split = 3;
+  string requested_dataset_episode_id = 4;
+  int64 seed = 5;
+  string controlled_agent = 6;
+}
+
+message EpisodeRequest { string episode_id = 1; }
+
+message MutateEpisodeRequest {
+  string episode_id = 1;
+  int64 expected_frame_id = 2;
+}
+
+message ObservationAsset {
+  string kind = 1;
+  string role = 2;
+  string name = 3;
+  bytes data = 4;
+  string content_type = 5;
+  uint32 width = 6;
+  uint32 height = 7;
+  google.protobuf.Struct metadata = 8;
+}
+
+message ObservationResponse {
+  string episode_id = 1;
+  int64 frame_id = 2;
+  repeated ObservationAsset assets = 3;
+  repeated float proprioception = 4;
+  string task = 5;
+  bool done = 6;
+  bool success = 7;
+  google.protobuf.Struct metrics = 8;
+  repeated google.protobuf.Struct entities = 9;
+  google.protobuf.Struct metadata = 10;
+}
+
+message EpisodeResponse { ObservationResponse observation = 1; }
+
+message StepRequest {
+  string episode_id = 1;
+  google.protobuf.Struct action = 2;
+  int64 expected_frame_id = 3;
+}
+
+message StepResponse {
+  ObservationResponse observation = 1;
+  double reward = 2;
+  bool done = 3;
+  bool success = 4;
+  google.protobuf.Struct metrics = 5;
+}
+
+message ExecuteSkillRequest {
+  string episode_id = 1;
+  string operation_id = 2;
+  string skill_name = 3;
+  google.protobuf.Struct arguments = 4;
+  int64 expected_frame_id = 5;
+  uint32 max_steps = 6;
+}
+
+message SkillResponse {
+  ObservationResponse observation = 1;
+  uint32 steps = 2;
+  bool success = 3;
+  string failure_mode = 4;
+  google.protobuf.Struct metrics = 5;
+  repeated google.protobuf.Struct trace = 6;
+  bool cancelled = 7;
+}
+
+message CancelSkillRequest {
+  string episode_id = 1;
+  string operation_id = 2;
+}
+
+message CancelSkillResponse {
+  bool accepted = 1;
+  bool already_finished = 2;
+}
+
+message CloseEpisodeResponse { bool closed = 1; }

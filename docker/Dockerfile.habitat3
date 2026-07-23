@@ -1,0 +1,40 @@
+# Habitat-Lab/Sim remains isolated from the Python 3.12 Hey Robot runtime.
+FROM mambaorg/micromamba:1.5.10
+
+ARG HABITAT_LAB_REF=0fb6f43ffe806a8088a171b036336c093bcf604e
+ARG HABITAT_SIM_VERSION=0.3.3
+ARG IMAGE_REVISION=unknown
+
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git git-lfs libegl1 libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
+    && apt-get clean
+
+USER $MAMBA_USER
+RUN micromamba install -y -n base -c conda-forge -c aihabitat \
+    python=3.9 pip "habitat-sim=${HABITAT_SIM_VERSION}" headless withbullet \
+    && micromamba clean --all --yes
+
+USER root
+RUN git clone https://github.com/facebookresearch/habitat-lab.git /opt/habitat/habitat-lab \
+    && git -C /opt/habitat/habitat-lab checkout "${HABITAT_LAB_REF}" \
+    && git -C /opt/habitat/habitat-lab submodule update --init --recursive
+
+COPY evaluation/habitat3/worker/requirements.txt /tmp/habitat3-requirements.txt
+RUN python -m pip install --no-cache-dir -r /tmp/habitat3-requirements.txt \
+    && python -m pip install --no-cache-dir -e /opt/habitat/habitat-lab/habitat-lab
+
+COPY src/hey_robot/habitat_runtime /opt/bridge/hey_robot/habitat_runtime
+COPY evaluation/habitat3 /opt/bridge/evaluation/habitat3
+COPY evaluation/__init__.py /opt/bridge/evaluation/__init__.py
+RUN printf '{"habitat_lab_ref":"%s","habitat_sim_version":"%s","image_revision":"%s"}\n' \
+    "${HABITAT_LAB_REF}" "${HABITAT_SIM_VERSION}" "${IMAGE_REVISION}" \
+    > /opt/bridge/bridge_versions.json \
+    && mkdir -p /outputs
+
+WORKDIR /opt/bridge
+ENV PYTHONPATH=/opt/bridge \
+    MAGNUM_LOG=quiet \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
+EXPOSE 9093
+CMD ["python", "-m", "evaluation.habitat3.worker.runtime_server", "--host", "0.0.0.0", "--port", "9093"]

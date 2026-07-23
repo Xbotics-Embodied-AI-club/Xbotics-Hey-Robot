@@ -1,0 +1,47 @@
+# Host-side configuration for the isolated Habitat 3 SocialNav runtime.
+deployment:
+  id: habitat3.social
+
+resources:
+  runtime_dir: runtime/habitat3
+  media:
+    root: runtime/habitat3/media
+    max_items: 1000
+    image_save_every_n: 1
+
+skills:
+  modules:
+    - hey_robot.skill_os.builtins
+  enabled:
+    - inspect_scene
+    - habitat_navigate_to
+    - habitat_follow_human
+    - habitat_symbolic_pick
+    - habitat_symbolic_place
+    - habitat_wait
+    - habitat_stop
+
+robots:
+  habitat3_social:
+    type: habitat3
+    family: habitat3
+    environment: remote
+    driver: grpc
+    embodiment_profile: habitat3_social_spot_human_oracle
+    settings:
+      target: grpc://127.0.0.1:9093
+      timeout_sec: 300
+      profile: habitat3_social_spot_human_oracle
+      task: RearrangePddlSocialNavTask-v0
+      split: val
+      seed: 100
+      controlled_agent: agent_0
+      max_skill_steps: 750
+
+model_services: {}
+
+policies:
+  habitat_orchestration:
+    enabled: true
+    robot_id: habitat3_social
+    freq_hz: 2

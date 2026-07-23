@@ -70,6 +70,31 @@ def test_observation_pipeline_marks_valid_image_quality(tmp_path) -> None:
     assert materialized.raw["image_quality"][0]["issue"] is None
 
 
+def test_observation_pipeline_preserves_binary_depth_artifact(tmp_path) -> None:
+    media_store = LocalMediaStore(tmp_path)
+    pipeline = ObservationPipeline(media_store)
+    materialized = pipeline.build(
+        DriverObservation(
+            envelope=Envelope(robot_id="habitat"),
+            frame_id=1,
+            assets=[
+                ObservationAsset(
+                    kind="depth",
+                    role="depth",
+                    name="agent_0_depth",
+                    data=b"16-bit-png",
+                    content_type="image/png",
+                    metadata={"artifact_type": "depth"},
+                )
+            ],
+        )
+    )
+
+    artifact = materialized.artifacts[0]
+    assert artifact.content_type == "image/png"
+    assert media_store.load_bytes_artifact(artifact) == b"16-bit-png"
+
+
 def test_perception_snapshot_treats_black_frame_as_no_valid_image(tmp_path) -> None:
     class Driver:
         robot_id = "mock0"

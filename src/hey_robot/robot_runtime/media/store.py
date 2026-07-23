@@ -166,6 +166,47 @@ class LocalMediaStore:
             metadata={**dict(metadata or {}), "encoding": "typed-npz"},
         )
 
+    def put_bytes_artifact(
+        self,
+        data: bytes,
+        *,
+        artifact_type: str,
+        content_type: str,
+        role: str | None = None,
+        robot_id: str | None = None,
+        frame_id: int | None = None,
+        name: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> ArtifactRef:
+        """Store a binary observation artifact without JSON or image coercion."""
+        if content_type not in _ALLOWED_MEDIA_MIMES:
+            raise MediaStoreError(f"unsupported artifact content type: {content_type}")
+        rel_dir = (
+            Path("artifacts")
+            / _safe_segment(robot_id or "shared")
+            / _safe_segment(artifact_type)
+        )
+        target_dir = self._ensure_subdir(rel_dir)
+        stem = _safe_segment(name or role or artifact_type)
+        if frame_id is not None:
+            stem = f"frame_{int(frame_id):08d}_{stem}"
+        suffix = mimetypes.guess_extension(content_type) or ".bin"
+        path = target_dir / f"{stem}_{uuid.uuid4().hex[:12]}{suffix}"
+        self._write_bytes(path, bytes(data))
+        stat = path.stat()
+        digest = _sha256_file(path)
+        self._enforce_limit("artifacts")
+        return ArtifactRef(
+            uri=self.uri_for_path(path),
+            artifact_type=artifact_type,
+            role=role,
+            name=name,
+            content_type=content_type,
+            size_bytes=int(stat.st_size),
+            sha256=digest,
+            metadata=dict(metadata or {}),
+        )
+
     def put_bytes(
         self,
         data: bytes,
@@ -220,6 +261,9 @@ class LocalMediaStore:
         if ref.content_type in {None, "application/json"}:
             return self.load_json_artifact(ref)
         raise MediaStoreError(f"unsupported artifact content type: {ref.content_type}")
+
+    def load_bytes_artifact(self, ref: ArtifactRef) -> bytes:
+        return self.path_for_uri(ref.uri).read_bytes()
 
     def path_for_uri(self, uri: str) -> Path:
         prefix = "media://local/"

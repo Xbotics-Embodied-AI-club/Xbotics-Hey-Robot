@@ -113,6 +113,17 @@ class ObservationPipeline:
         self, asset: ObservationAsset, *, robot_id: str, frame_id: int
     ) -> ArtifactRef:
         artifact_type = asset.metadata.get("artifact_type") or asset.kind
+        if isinstance(asset.data, bytes):
+            return self.media_store.put_bytes_artifact(
+                asset.data,
+                artifact_type=str(artifact_type),
+                content_type=asset.content_type or "application/octet-stream",
+                role=asset.role,
+                name=asset.name,
+                robot_id=robot_id,
+                frame_id=frame_id,
+                metadata=dict(asset.metadata),
+            )
         if artifact_type == "policy_observation":
             return self.media_store.put_npz_artifact(
                 asset.data,

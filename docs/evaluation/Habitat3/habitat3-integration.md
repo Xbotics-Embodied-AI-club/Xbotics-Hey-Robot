@@ -7,8 +7,9 @@ Robot 作为上层 embodied agent，持续感知环境、与人类角色共处�
 
 ## 1. 结论
 
-Habitat 3 已经提供本方案需要的仿真基础能力，不需要在 Hey Robot 中重新实现导航、机械臂、
-人类角色或多智能体物理：
+Habitat 3 已经提供本方案需要的仿真基础能力，不需要在 Hey Robot 中重新实现机械臂仿真、
+人类角色或多智能体物理；但具体 profile 中是否已经配置可直接调用的导航/操作执行器，必须按
+action space 和 checkpoint 逐项确认：
 
 - Habitat-Lab 的 `Env` 统一管理 dataset、simulator、task、observation、action 和 metrics；
 - `RearrangeSim` 支持移动操作、刚体/关节物体、抓取、多个 articulated agent；
@@ -20,11 +21,23 @@ Habitat 3 已经提供本方案需要的仿真基础能力，不需要在 Hey Ro
 - Habitat 3 官方配置直接提供 Spot + KinematicHumanoid、Spot + Spot 等组合。
 
 Hey Robot 应负责语言交互、目标管理、记忆、技能选择、失败恢复和任务完成判定；Habitat 容器
-负责环境状态、物理、NPC 行为、低层技能闭环和 benchmark metrics。首版不接 VLA，也不把
-Habitat 依赖装入 Hey Robot 主 Python 环境。
+负责环境状态、物理、NPC 行为、profile 内明确配置的低层技能闭环和 benchmark metrics。
+首版不接 VLA，也不把 Habitat 依赖装入 Hey Robot 主 Python 环境。
 
 推荐架构是“独立 Habitat 容器 + gRPC episode runtime + Hey Robot Remote Driver +
 Habitat 语义 Skill”，而不是让 Agent 直接构造 Habitat 的 Gym action dict。
+
+按当前源码，本方案的可行性边界是：
+
+- 独立容器、episode runtime、Remote Driver 和 SocialNav 仿真链路可行；
+- 首版 oracle SocialNav 需要派生官方 config，为受控 Spot 增加 oracle coordinate executor，
+  不能原样使用官方 SocialNav config 就声称 agent 0 已有 OracleNav；
+- 不加载 RL checkpoint 时，pick/place 只能作为 privileged PDDL/symbolic executor 验证 Agent
+  编排，不能算机械臂物理执行；
+- 真正的物理 pick/place 需要 Habitat Baselines 的 pick/place checkpoint，或另行实现确定性的
+  机械臂闭环控制器；
+- 当前结论是源码级可行性审计。完成 Phase 1 的资产、EGL、Bullet 和 episode smoke 后，才能
+  称为运行级验证。
 
 ## 2. 本地源码与审计基线
 
@@ -67,17 +80,27 @@ artifacts/habitat3/habitat-sim
 
 ### 3.1 已有能力
 
-导航不需要单独实现。Habitat-Sim `PathFinder` 提供 navmesh、最短路径、可导航点采样和碰撞
-约束；Habitat-Lab 还提供离散导航、base velocity、oracle navigation 及 learned policy 接口。
+导航算法基础不需要从零实现。Habitat-Sim `PathFinder` 提供 navmesh、最短路径、可导航点采样
+和碰撞约束；Habitat-Lab 还提供离散导航、base velocity、oracle navigation 及 learned policy
+接口。但 action 是否存在于当前受控 agent，取决于 profile：官方 SocialNav config 只给 Spot
+配置 base velocity，不能把仓库中存在 `OracleNavAction` 等同于该 Spot profile 已经可调用它。
 
-机械臂控制也不需要从零实现。`RearrangeSim` 和 task actions 已支持相对/绝对关节位置、
-末端执行器控制、底盘与手臂组合动作以及多种抓取方式。官方 task config 已覆盖 pick、place、
-open/close fridge/cabinet 和多阶段 rearrangement。
+机械臂仿真和动作原语也不需要从零实现。`RearrangeSim` 和 task actions 已支持相对/绝对关节
+位置、末端执行器控制、底盘与手臂组合动作以及多种抓取方式。官方 task config 已覆盖 pick、
+place、open/close fridge/cabinet 和多阶段 rearrangement。但 Habitat Baselines 的物理
+`PickSkillPolicy`、`PlaceSkillPolicy` 分别依赖 `data/models/pick.pth` 和
+`data/models/place.pth`。oracle skill 配置中的 pick/place 是 `NoopSkillPolicy +
+apply_postconds`，属于 privileged symbolic state transition，不是机械臂轨迹执行。
 
 Habitat 3 的独特价值是人类角色和多智能体。官方
 `hssd_spot_human_social_nav.yaml` 配置了 `agent_0=Spot`、`agent_1=Human`，包含机器人深度
 相机、人类检测、双方定位、碰撞、跟随和 SocialNav 成功指标。PDDL multi-agent task 还能表达
 两个 agent 分工搬运和共享 stage goals。
+
+这里的官方 `HumanoidDetectorSensor` 通过 panoptic semantic id 判断人类是否在画面中，是
+模拟器语义传感器，不是 RGB learned detector。报告必须区分 `oracle_detection`、
+`sim_semantic_detection` 和 `rgb_learned_detection`，不能把前两者记为 Hey Robot 的视觉检测
+能力。
 
 ### 3.2 不直接提供的能力
 
@@ -103,7 +126,8 @@ Hey Robot RobotAgent
         |
 Skill OS
   habitat_navigate_to / habitat_follow_human
-  habitat_pick / habitat_place / habitat_wait
+  habitat_symbolic_pick / habitat_symbolic_place
+  habitat_pick / habitat_place / habitat_wait  (checkpoint/controller profile only)
         |
 RobotRuntime + HabitatRemoteDriver
         |  gRPC (typed lifecycle + Struct action/metrics)
@@ -123,25 +147,39 @@ RL checkpoint，也应视作容器内部的技能执行器，除非它真正形�
 
 ## 5. 角色与首版场景
 
-首个 profile 使用官方 SocialNav 结构：
+首个 profile 派生官方 SocialNav 结构：
 
 ```text
-profile: habitat3_social_spot_human
+profile: habitat3_social_spot_human_oracle
 controlled_agent: agent_0
 embodiment: SpotRobot
 npc_agent: agent_1
 npc_embodiment: KinematicHumanoid
 task: RearrangePddlSocialNavTask-v0
 base_config: benchmark/multi_agent/hssd_spot_human_social_nav.yaml
+config_patch:
+  - add agent_0 oracle coordinate navigation action
+  - preserve agent_0 base velocity action
+  - preserve agent_1 oracle random-coordinate humanoid action
+executor_mode: privileged_oracle
 ```
 
-Hey Robot 控制 `agent_0`，`agent_1` 由容器内 oracle/humanoid controller 驱动。这样第一阶段
-就能验证“发现人、接近人、保持社交距离、跟随、避碰、等待、重新规划”，而不是只验证
-PointNav。
+官方原始 config 中，`agent_0` 只有 `agent_0_base_velocity`；
+`agent_1_oracle_nav_action` 和 `agent_1_oracle_nav_randcoord_action` 都属于 Human。因此首版必须
+派生受控 profile：由服务端读取当前 Human 位置，使用 agent 0 的 oracle coordinate executor
+生成 Spot 底盘动作；Human 继续使用官方 oracle/humanoid controller。受控/NPC action 必须在
+同一个 `env.step()` 中提交。
 
-第二个 profile 再加入 `habitat3_spot_human_rearrange`，使用官方 Spot + Human PDDL
-rearrangement，验证导航和操作组合。Humanoid 作为 Hey Robot 本体可以作为后续 profile，
-不应阻塞第一条链路。
+这条链路能验证 Hey Robot 的“获取模拟器语义发现结果、接近人、保持社交距离、跟随、避碰、
+等待、重新规划”，但不能验证 RGB 人体检测或 learned SocialNav。第二个 SocialNav profile
+`habitat3_social_spot_human_learned` 再加载 Spot policy checkpoint，并与 oracle 结果分开报告。
+
+完成两个 SocialNav profile 后，再加入 `habitat3_spot_human_rearrange_symbolic`，使用官方
+Spot + Human PDDL rearrangement 验证导航和 privileged symbolic pick/place 编排。该 profile
+必须使用 `benchmark/multi_agent/hssd_spot_human.yaml` 和 `RearrangePddlTask-v0`；不得在
+SocialNav config 上伪造 `agent_0_pddl_apply_action`。加载低层 checkpoint 后再提供
+`habitat3_spot_human_rearrange_physical`，验证真实 arm/grip action 闭环。
+Humanoid 作为 Hey Robot 本体可以作为后续 profile，不应阻塞第一条链路。
 
 每个 profile 必须固定以下内容，禁止客户端自由传任意 Python config 路径：
 
@@ -152,6 +190,12 @@ rearrangement，验证导航和操作组合。Humanoid 作为 Hey Robot 本体�
 - 最大 episode/skill steps；
 - dataset split 和资产根目录；
 - 是否允许 privileged state。
+
+profile 还必须声明 `executor_mode`，至少支持：
+
+- `privileged_oracle`：允许服务端用 simulator/PDDL truth 执行；
+- `trained_policy`：加载并记录具体 checkpoint SHA；
+- `physical_controller`：使用实际 arm/base action 闭环，不允许 apply-postcondition 冒充执行。
 
 ## 6. gRPC 契约
 
@@ -168,26 +212,33 @@ service HabitatRuntime {
   rpc Step(StepRequest) returns (StepResponse);             // 调试/策略接口
   rpc ExecuteSkill(ExecuteSkillRequest) returns (SkillResponse);
   rpc CancelSkill(CancelSkillRequest) returns (CancelSkillResponse);
-  rpc Reset(EpisodeRequest) returns (ObservationResponse);
-  rpc CloseEpisode(EpisodeRequest) returns (CloseEpisodeResponse);
+  rpc Reset(MutateEpisodeRequest) returns (ObservationResponse);
+  rpc CloseEpisode(MutateEpisodeRequest) returns (CloseEpisodeResponse);
 }
 ```
 
 关键字段：
 
-- `CreateEpisodeRequest`: `profile`, `task`, `split`, `episode_id`, `seed`,
-  `controlled_agent`；其中 profile/task/split 必须服务端 allowlist；
+- `CreateEpisodeRequest`: `profile`, `task`, `split`, `requested_dataset_episode_id`,
+  `seed`, `controlled_agent`；其中 profile/task/split 必须服务端 allowlist，runtime episode id 由
+  服务端生成并返回，不能与 dataset episode id 混为一谈；
 - `ObservationResponse`: `episode_id`, `frame_id`, repeated image/depth artifacts,
   `proprioception`, `task`, `done`, `success`, `metrics`, `entities`；
 - `StepRequest.action`: `google.protobuf.Struct`，保留 Habitat 的嵌套 action dict；
 - `ExecuteSkillRequest`: `skill_name`, `arguments`, `expected_frame_id`,
   `max_steps`；
 - `SkillResponse`: 最终 observation、steps、success、failure mode、metrics、trace；
-- 所有变更状态的请求都带 `expected_frame_id`，拒绝 stale action；
+- `Step`、`ExecuteSkill`、`Reset` 和 `CloseEpisode` 等变更状态的请求都带
+  `expected_frame_id`，拒绝 stale action；`MutateEpisodeRequest` 至少包含 `episode_id` 和
+  `expected_frame_id`；
 - 一个 episode 同时只允许一个 step/skill，服务端用资源锁保证因果顺序。
 
 `Step` 只用于 contract test、debug 或以后接 policy；正常 Agent 路径走 `ExecuteSkill`。不能把
 每个物理 timestep 通过 Agent/消息总线往返，否则延迟、取消和因果一致性都会变差。
+
+dataset episode id 不能只是响应标签。若允许客户端指定官方 dataset episode id，服务端必须在
+`Env.reset()` 前过滤/重排 dataset episode iterator，并校验 scene 和 split；否则只能把服务端
+实际选中的 dataset episode id 返回给客户端。`seed` 也不能替代 episode id 的确定性选择。
 
 ## 7. 观测映射
 
@@ -197,7 +248,7 @@ Robot：
 | Habitat 数据 | Hey Robot 映射 |
 |---|---|
 | RGB sensor | `ObservationAsset(kind="image")` |
-| Depth sensor | 16-bit PNG artifact；可另生成可视化 image |
+| Depth sensor | 原始 16-bit PNG 或 float NPZ artifact；可另生成 uint8 可视化 image |
 | joint/base/localization | `proprioception` 和 `raw.habitat.sensors` |
 | PDDL entities/predicates | `metadata.entities` -> `SceneEntity` |
 | task measurements | `raw.habitat.metrics` 和 `RobotStatus.metrics` |
@@ -208,6 +259,15 @@ Hey Robot 的 `ObservationPipeline` 已能把 `DriverObservation.metadata.entiti
 标记 `privileged: true`；Agent 默认只消费 RGB/depth 与允许的任务传感器，oracle state 只用于
 验收和失败诊断，避免把 oracle benchmark 误报为感知能力。
 
+现有 `LocalMediaStore.put_image()` 会把输入转换为 uint8 RGB，普通 artifact 路径只支持 JSON，
+所以不能按现状无损保存 16-bit depth。实现时必须新增二进制 artifact/depth 写入路径（例如
+`put_artifact_bytes()`），或把 float depth 存为已有 NPZ artifact；不能把完整 depth array 展开成
+JSON。协议层 `ArtifactRef` 可以复用，但 `ObservationPipeline`/媒体存储实现需要小幅扩展。
+
+若 runtime 使用 Habitat Gym wrapper，`habitat.gym.obs_keys` 会过滤返回观测；若直接使用 core
+`Env`，则应由 profile observation allowlist 过滤。两条路径不能混用，否则即使 simulator 配置
+了 RGB sensor，RPC 也可能只得到 policy 所需的 depth keys。
+
 图像 key 必须保留 agent 前缀，例如 `agent_0_articulated_agent_arm_rgb`，否则多智能体下会把
 NPC 视角误当成受控角色视角。
 
@@ -217,7 +277,7 @@ NPC 视角误当成受控角色视角。
 
 ```text
 docker/Dockerfile.habitat3
-deploy/habitat3/
+evaluation/habitat3/worker/
   requirements.txt
   runtime_server.py
   environment.py
@@ -242,20 +302,25 @@ tests/robot_runtime/test_habitat_remote_driver.py
 2. `RobotManager` 支持 `family=habitat3, environment=remote, driver=grpc`；
 3. `HabitatRemoteDriver` 实现现有 `RobotDriver`，把语义 `RobotSkillAction` 转给
    `ExecuteSkill`；
-4. `ObservationPipeline` 不改协议，只使用已有 image/artifact/entity 能力；
+4. `ObservationPipeline` 不改 `RobotObservation`/`ArtifactRef` 协议，但扩展二进制 depth
+   artifact 存储；
 5. 注册 Habitat 专用 semantic skills；
-6. Compose 增加独立 profile `habitat3`，端口建议 `9093`，避免与 RoboCasa `9092`
+6. 在 `supported_driver_primitives()` 中增加 Habitat family，或在 robot settings 显式声明
+   `supported_driver_primitives`，否则 Habitat 默认暴露空原语集合；
+7. Compose 增加独立 profile `habitat3`，端口建议 `9093`，避免与 RoboCasa `9092`
    冲突。
 
 首版 Agent-visible skills：
 
 | Skill | 参数 | Habitat 执行器 |
 |---|---|---|
-| `habitat_navigate_to` | `entity_id` 或受限 `position` | OracleNav/PDDL nav |
-| `habitat_follow_human` | `human_id`, `distance_m`, `max_steps` | SocialNav action + success measure |
-| `habitat_pick` | `object_id` | PDDL entity resolve + pick skill |
-| `habitat_place` | `object_id`, `receptacle_id` | PDDL place skill |
-| `habitat_wait` | `steps` | WaitSkillPolicy/zero action |
+| `habitat_navigate_to` | `entity_id` 或受限 `position` | profile-specific OracleNav/OracleNavCoordinate |
+| `habitat_follow_human` | `human_id`, `distance_m`, `max_steps` | oracle coordinate loop 或 trained Spot policy + SocialNav measure |
+| `habitat_symbolic_pick` | `object_id` | PDDL apply/postcondition，必须标记 privileged |
+| `habitat_symbolic_place` | `object_id`, `receptacle_id` | PDDL apply/postcondition，必须标记 privileged |
+| `habitat_pick` | `object_id` | PickSkillPolicy checkpoint 或 physical controller |
+| `habitat_place` | `object_id`, `receptacle_id` | PlaceSkillPolicy checkpoint 或 physical controller |
+| `habitat_wait` | `steps` | zero action loop；使用 Baselines 时可接 WaitSkillPolicy |
 | `habitat_stop` | 无 | stop action + cooperative cancel |
 
 不要首版覆盖现有 `navigate_to`：当前 Hey Robot 的该 skill 明确依赖 VLN ModelService。
@@ -273,7 +338,7 @@ RoboCasa 镜像。
 - Python 3.9（与 Habitat-Lab 0.3.3 官方配置最保守兼容）；
 - `habitat-sim=0.3.3 withbullet headless`；
 - Habitat-Lab 固定 commit `0fb6f43...`；
-- 仅 SocialNav/Env 所需依赖；不安装 VLA；
+- 仅 SocialNav/Env 所需依赖；oracle profile 不安装 VLA，也不要求低层 RL checkpoint；
 - `MAGNUM_LOG=quiet`, EGL headless，GPU 通过 Compose reservation 注入；
 - 镜像写入 Habitat-Lab SHA、Habitat-Sim version 和 image revision labels。
 
@@ -291,11 +356,31 @@ hssd-hab
 hab3-episodes
 habitat_humanoids
 hab_spot_arm
-hab3_bench_assets
 ```
+
+`hab3_bench_assets` 仅在使用 `benchmark/rearrange/hab3_bench/*` profile 时需要，不是上述
+HSSD SocialNav profile 的必需资产。若 episode 引用了额外对象集，再根据 reset 的缺失 handle
+补充 `ycb`/`ovmm_objects` 等资源，不能仅凭 config 中存在 `additional_object_paths` 就假设资产已
+齐全。
+
+官方 downloader 对多个 Hugging Face 资源声明的 version 仍是 `main`。下载完成后必须记录每个
+Git/LFS 数据仓库的实际 commit SHA 或不可变 snapshot revision；只记录 downloader UID 不足以
+复现实验。
 
 下载前先做磁盘预算。HSSD 和 episode assets 远大于代码仓库，不能落到 `/var`。Docker
 data-root/BuildKit cache 也应继续使用项目所在大盘或已迁移的数据目录。
+
+实现中应提供可在宿主机和容器内运行的资产预检：
+
+```bash
+python -m evaluation.habitat3.worker.preflight \
+  --data-root artifacts/habitat3/data \
+  --profile habitat3_social_spot_human_oracle
+```
+
+预检至少检查 HSSD scene dataset config、实际 stage/uncluttered scene instance 目录、对应 split 的
+rearrange episode、Spot URDF 和 humanoid data；
+任一缺失时以非零状态退出，避免把“镜像能启动”误报为环境可运行。
 
 ## 10. 服务端并发和生命周期
 
@@ -312,6 +397,12 @@ Habitat Env、OpenGL context 和 simulator state 都有线程归属，不应从�
 
 `Observe` 不能隐式推进物理；`frame_id` 只在 reset/step/skill step 后递增。NPC 的 action 与
 受控 agent action 必须在同一个 Habitat `env.step()` dict 中提交，确保多智能体同步。
+
+当前 Hey Robot `RobotDriver` 没有显式 `cancel_skill()` 接口，Skill OS 超时主要取消本地 task，
+不会自动调用 Habitat `CancelSkill`。首版至少要求 gRPC client 在等待 `ExecuteSkill` 被取消时捕获
+`CancelledError`，用 episode/operation id 调用 `CancelSkill`；稳妥实现应为 RobotRuntime/Driver
+增加显式 cancel hook。`habitat_stop` 还必须能绕过正在等待的长 RPC，不能排在同一串行 action
+队列尾部后失去停止意义。
 
 ## 11. 分阶段实施与验收
 
@@ -336,16 +427,27 @@ Habitat Env、OpenGL context 和 simulator state 都有线程归属，不应从�
 验收：Hey Robot `observe/status/reset` 可用；stale frame、错误 agent key、重复 episode 和
 并发 step 都会被明确拒绝。
 
-### Phase 3：Embodied Agent 语义技能
+### Phase 3A：Oracle/Symbolic Embodied Agent 语义技能
 
-- 实现 navigate/follow/wait/stop；
-- 再实现 pick/place；
+- 使用派生 oracle profile 实现 navigate/follow/wait/stop；
+- 再实现 privileged symbolic pick/place，并在名称、trace 和报告中明确标记；
 - 每个 skill 返回 steps、PDDL/measure evidence、碰撞和 failure mode；
 - 支持中途取消和 timeout；
 - Agent 根据一次失败结果继续观察并重规划。
 
-验收：自然语言请求通过 Hey Robot Agent 形成 SkillIntent，完成“找到人并保持距离跟随”、
-“走到目标物体并搬到 receptacle”等组合过程，而不是直接运行整集脚本。
+验收：自然语言请求通过 Hey Robot Agent 形成 SkillIntent，完成“根据模拟器语义结果找到人并
+保持距离跟随”和“导航到目标后完成 symbolic rearrangement”等组合过程，而不是直接运行整集
+脚本。此阶段不声称 RGB 感知成功或物理搬运成功。
+
+### Phase 3B：Learned SocialNav 与物理操作
+
+- 加载并固定 Spot SocialNav checkpoint，替换 agent 0 privileged oracle executor；
+- 加载并固定 pick/place checkpoint，或实现并测试 deterministic physical controller；
+- 使用 arm/base/grip observation 和 action 验证物体确实被抓取、移动和放置；
+- 与 Phase 3 的 oracle/symbolic 指标、视频和 trace 分开报告。
+
+验收：learned SocialNav 不读取 simulator human pose；物理 pick/place 不调用 apply-postcondition
+代替轨迹执行，且 success 由 grasp/object pose/task measure 共同证明。
 
 ### Phase 4：基准与回归
 
@@ -369,6 +471,10 @@ Habitat Env、OpenGL context 和 simulator state 都有线程归属，不应从�
 | 大资产占满系统盘 | artifacts/data 外挂大盘，Docker data-root 不放 `/var` |
 | 语义 entity 不存在或过期 | entity id + expected frame + PDDL current state 校验 |
 | 长技能无法取消 | 每个 env step 检查 cancel/deadline，返回 typed cancellation |
+| SocialNav config 没有 agent 0 OracleNav | 派生受控 profile，启动时断言 action schema |
+| symbolic pick/place 被误报为物理执行 | 技能分名、executor_mode 标记、分开报告 |
+| depth 被降为 uint8 或展开成 JSON | 二进制 16-bit PNG 或 float NPZ artifact |
+| dataset UID 指向可变 main | 记录下载后的实际 Git/LFS revision |
 
 ## 13. 最终建议
 
@@ -376,6 +482,8 @@ Habitat 3 很适合 Hey Robot 的 embodied agent 方向，而且比 RoboCasa 更
 原生支持人类 avatar、社交导航、多智能体协作和移动操作。接入难度主要不在算法能力，而在
 依赖隔离、动态 action/observation schema、多智能体角色映射和长技能生命周期。
 
-首条实施路线应是：独立容器跑官方 Spot + Human SocialNav，以 oracle/PDDL 作为可控低层
-执行器，让 Hey Robot 真正负责对话、任务分解、技能编排和失败恢复。等这条链路稳定后，再接
-trained SocialNav/HRL checkpoint；当前没有必要引入 VLA。
+首条实施路线应是：独立容器运行派生自官方 Spot + Human SocialNav 的 oracle profile，为
+agent 0 显式增加 coordinate executor，让 Hey Robot 负责对话、任务分解、技能编排和失败
+恢复。随后接 trained SocialNav checkpoint。操作侧先用明确标记的 symbolic PDDL 技能验证
+编排，再接 pick/place checkpoint 或 physical controller；不能把 apply-postcondition 成功称为
+机械臂搬运成功。当前没有必要引入 VLA。

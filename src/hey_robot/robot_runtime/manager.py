@@ -4,6 +4,10 @@ from hey_robot.config import DeploymentConfig
 from hey_robot.contracts import SkillContractCatalog
 from hey_robot.robot_runtime.base import RobotDriver, RobotDriverContext
 from hey_robot.robot_runtime.embodiments import get_embodiment_profile
+from hey_robot.robot_runtime.habitat_remote import (
+    GrpcHabitatRuntimeClient,
+    HabitatRemoteDriver,
+)
 from hey_robot.robot_runtime.mock import MockRobotDriver
 from hey_robot.robot_runtime.robocasa_remote import (
     GrpcRoboCasaRuntimeClient,
@@ -74,6 +78,20 @@ class RobotManager:
                         target,
                         timeout_sec=float(spec.settings.get("timeout_sec", 10.0)),
                         role="evaluator",
+                    ),
+                )
+                continue
+            if (
+                spec.robot_family == "habitat3"
+                and spec.robot_environment == "remote"
+                and spec.driver_kind == "grpc"
+            ):
+                target = str(spec.settings.get("target", "grpc://127.0.0.1:9093"))
+                self._drivers[robot_id] = HabitatRemoteDriver(
+                    context,
+                    GrpcHabitatRuntimeClient(
+                        target,
+                        timeout_sec=float(spec.settings.get("timeout_sec", 60.0)),
                     ),
                 )
                 continue

@@ -23,6 +23,17 @@ XLEROBOT_SIM_PRIMITIVES = tuple(
     )
 )
 
+HABITAT_REMOTE_PRIMITIVES = (
+    "habitat_navigate_to",
+    "habitat_follow_human",
+    "habitat_symbolic_pick",
+    "habitat_symbolic_place",
+    "habitat_pick",
+    "habitat_place",
+    "habitat_wait",
+    "habitat_stop",
+)
+
 
 def supported_driver_primitives(robot: RobotSpec) -> tuple[str, ...]:
     """返回部署机器人支持的规范 Skill 原语名称。"""
@@ -36,5 +47,8 @@ def supported_driver_primitives(robot: RobotSpec) -> tuple[str, ...]:
 
     if robot.robot_family == "xlerobot" and robot.driver_kind in {"mock", "native"}:
         return SUPPORTED_CLASSIC_PRIMITIVES
+
+    if robot.robot_family == "habitat3" and robot.driver_kind == "grpc":
+        return HABITAT_REMOTE_PRIMITIVES
 
     return ()

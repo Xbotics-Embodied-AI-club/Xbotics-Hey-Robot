@@ -4,6 +4,40 @@ from hey_robot.config import RobotSpec
 from hey_robot.robot_runtime.embodiments.base import EmbodimentProfile
 
 DEFAULT_EMBODIMENT_PROFILES: dict[str, EmbodimentProfile] = {
+    "habitat3_social_spot_human_oracle": EmbodimentProfile(
+        name="habitat3_social_spot_human_oracle",
+        robot_family="habitat3",
+        environment="remote",
+        camera_layout={
+            "default_camera": "agent_0_articulated_agent_arm_rgb",
+            "owner": "remote_simulator",
+            "agent_prefix": "agent_0_",
+        },
+        readiness_resources=("remote_runtime", "base", "camera", "arm", "gripper"),
+        metadata={
+            "driver_kind": "grpc",
+            "simulator_only": True,
+            "controlled_agent": "agent_0",
+            "executor_mode": "privileged_oracle",
+        },
+    ),
+    "habitat3_spot_human_rearrange_symbolic": EmbodimentProfile(
+        name="habitat3_spot_human_rearrange_symbolic",
+        robot_family="habitat3",
+        environment="remote",
+        camera_layout={
+            "default_camera": "agent_0_articulated_agent_arm_rgb",
+            "owner": "remote_simulator",
+            "agent_prefix": "agent_0_",
+        },
+        readiness_resources=("remote_runtime", "base", "camera", "arm", "gripper"),
+        metadata={
+            "driver_kind": "grpc",
+            "simulator_only": True,
+            "controlled_agent": "agent_0",
+            "executor_mode": "privileged_symbolic",
+        },
+    ),
     "robocasa_remote": EmbodimentProfile(
         name="robocasa_remote",
         robot_family="robocasa",

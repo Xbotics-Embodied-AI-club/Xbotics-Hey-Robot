@@ -135,7 +135,18 @@ disallow_untyped_defs = true
 exclude = [
     "^src/hey_robot/foundation/contract/v1/model_service_pb2.py$",
     "^src/hey_robot/foundation/contract/v1/model_service_pb2_grpc.py$",
+    "^src/hey_robot/habitat_runtime/v1/habitat_runtime_pb2.py$",
+    "^src/hey_robot/habitat_runtime/v1/habitat_runtime_pb2_grpc.py$",
 ]
+
+[[tool.mypy.overrides]]
+module = [
+    "hey_robot.habitat_runtime.v1.habitat_runtime_pb2",
+    "hey_robot.habitat_runtime.v1.habitat_runtime_pb2_grpc",
+]
+# protoc mutates its module namespace dynamically; the typed boundary is the
+# checked .proto contract and the handwritten transport adapter.
+ignore_errors = true
 
 [tool.coverage.run]
 data_file = "artifacts/test/.coverage"

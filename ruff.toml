@@ -129,6 +129,15 @@ ignore = [
 # Generated from proto/; source is reviewed at the .proto boundary.
 "src/hey_robot/robocasa_runtime/v1/*_pb2.py" = ["ALL"]
 "src/hey_robot/robocasa_runtime/v1/*_pb2_grpc.py" = ["ALL"]
+# Generated from proto/; source is reviewed at the .proto boundary.
+"src/hey_robot/habitat_runtime/v1/*_pb2.py" = ["ALL"]
+"src/hey_robot/habitat_runtime/v1/*_pb2_grpc.py" = ["ALL"]
+
+# Habitat RPC names are fixed by the cross-process proto contract. The runtime
+# deliberately binds in its isolated container and is not a host-side server.
+"evaluation/habitat3/worker/runtime_server.py" = ["N802", "S104"]
+"evaluation/habitat3/worker/preflight.py" = ["T201"]
+"evaluation/habitat3/worker/smoke.py" = ["T201"]
 
 # 这是第三方协议/硬件语义映射层，字段命名需要贴近设备协议。
 "src/hey_robot/robot_runtime/components/servo_bus.py" = ["N815"]

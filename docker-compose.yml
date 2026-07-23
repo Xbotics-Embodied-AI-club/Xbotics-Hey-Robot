@@ -123,6 +123,44 @@ services:
     profiles:
       - robocasa
 
+  habitat3:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.habitat3
+      args:
+        HABITAT_LAB_REF: ${HEY_ROBOT_HABITAT_LAB_REF:-0fb6f43ffe806a8088a171b036336c093bcf604e}
+        HABITAT_SIM_VERSION: ${HEY_ROBOT_HABITAT_SIM_VERSION:-0.3.3}
+        IMAGE_REVISION: ${HEY_ROBOT_HABITAT_IMAGE_REVISION:-unknown}
+    image: ${HEY_ROBOT_HABITAT_IMAGE:-hey-robot-habitat3:latest}
+    environment:
+      MAGNUM_LOG: quiet
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,graphics
+    volumes:
+      - ./artifacts/habitat3/data:/opt/habitat/data:ro
+      - ./runtime/habitat3:/outputs
+    ports:
+      - "${HEY_ROBOT_HABITAT_PORT:-9093}:9093"
+    command:
+      - python
+      - -m
+      - evaluation.habitat3.worker.runtime_server
+      - --host
+      - 0.0.0.0
+      - --port
+      - "9093"
+      - --profile
+      - "${HEY_ROBOT_HABITAT_PROFILE:-habitat3_social_spot_human_oracle}"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${HEY_ROBOT_HABITAT_GPU:-0}"]
+              capabilities: [gpu]
+    restart: unless-stopped
+    profiles:
+      - habitat3
+
   runtime:
     build:
       context: .
