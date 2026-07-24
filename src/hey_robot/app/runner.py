@@ -191,6 +191,7 @@ class DeploymentRunner:
             services.append(ManagedService("gateway", gateway.start, gateway.stop))
         return services
 
+
 def _uses_native_skill_modules(config: DeploymentConfig) -> bool:
     return any(
         str(module).startswith("hey_robot.skills") for module in config.skills.modules

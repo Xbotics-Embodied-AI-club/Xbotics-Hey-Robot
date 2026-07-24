@@ -13,6 +13,7 @@ async def test_registry_model_router_adapts_existing_model_clients() -> None:
                     "enabled": True,
                     "robot_id": "mock0",
                     "provides": ["manipulate"],
+                    "timeout_sec": 123,
                     "settings": {
                         "summary": "policy result",
                         "result_metrics": {"action": "open"},
@@ -37,6 +38,7 @@ async def test_registry_model_router_adapts_existing_model_clients() -> None:
     assert result.summary == "policy result"
     assert result.data == {"action": "open"}
     assert client.executed[0].intent.name == "manipulate"  # type: ignore[attr-defined]
+    assert client.executed[0].timeout_sec == 123  # type: ignore[attr-defined]
     assert client.cancelled == ["run-1"]  # type: ignore[attr-defined]
 
 

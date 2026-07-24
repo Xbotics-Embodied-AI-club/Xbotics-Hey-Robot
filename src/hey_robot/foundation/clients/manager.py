@@ -33,7 +33,7 @@ class ModelServiceRegistry:
     def _build_client(
         self, service_id: str, spec: ModelServiceSpec
     ) -> ModelServiceClient:
-        if spec.type in {"mock", "mock_vla_policy"}:
+        if spec.type == "mock":
             return MockModelServiceClient(service_id, spec)
         from hey_robot.foundation.transport.grpc.client import GrpcModelServiceClient
 

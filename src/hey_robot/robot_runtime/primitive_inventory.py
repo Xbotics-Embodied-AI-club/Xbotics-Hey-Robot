@@ -37,4 +37,7 @@ def supported_driver_primitives(robot: RobotSpec) -> tuple[str, ...]:
     if robot.robot_family == "xlerobot" and robot.driver_kind in {"mock", "native"}:
         return SUPPORTED_CLASSIC_PRIMITIVES
 
+    if robot.robot_family == "robocasa" and robot.driver_kind == "grpc":
+        return ("inspect_scene", "embodiment_native_action")
+
     return ()

@@ -3,7 +3,7 @@
 本文对应当前已实现的最小端到端闭环：
 
 ```text
-数据采集 -> LeRobot policy 训练 -> 通用 policy endpoint 部署 -> Hey Robot RPC 接入 -> 仿真评测
+数据采集 -> LeRobot policy 训练 -> RobotPolicyService 部署 -> Hey Robot 完整链路评测
 ```
 
 这份文档的定位是工程运行手册，不是论文式方案。读完以后应该能判断：
@@ -22,7 +22,7 @@
 ```text
 D:/agent_robot/Xbotics-Hey-Robot
   Hey Robot 主系统
-  负责 XLeRobot sim/home scene、Skill OS、ModelService、VLA endpoint glue code
+  负责 XLeRobot sim/home scene、SkillRunner、ModelService 和 Robot Runtime
 
 D:/agent_robot/lerobot-mujoco-tutorial
   LeRobot 训练侧项目
@@ -55,7 +55,7 @@ $env:PYTHONPATH="src"
 
 ```powershell
 $env:PYTHONPATH="src"
-python scripts\vla\record_home_so101_lerobot.py `
+python scripts\lerobot\record_home_so101_lerobot.py `
   --config configs\xlerobot.sim.vla_vln.yaml `
   --repo-id xlerobot_home_so101_single_arm `
   --root data\lerobot\xlerobot_home_so101_single_arm `
@@ -103,7 +103,7 @@ VLA 学习对象:
 当前脚本使用 POC 级 waypoint expert：
 
 ```text
-scripts/vla/record_home_so101_lerobot.py
+scripts/lerobot/record_home_so101_lerobot.py
 ```
 
 它适合验证链路，不适合直接产出高质量真实训练集。原因是：
@@ -155,7 +155,7 @@ configs/examples/smolvla_home_so101.yaml
 
 ```powershell
 $env:PYTHONPATH="src"
-python scripts\vla\train_home_so101_policy.py `
+python scripts\lerobot\train_home_so101_policy.py `
   --config-path configs\examples\smolvla_home_so101.yaml `
   --python python
 ```
@@ -212,11 +212,13 @@ output action key: action
 action dimension: 6
 ```
 
-pi0/其他 VLA policy 也遵循同样边界。如果某个 policy 需要语言字段、额外相机、不同 action horizon 或不同归一化统计，应该扩展训练配置和 endpoint 参数，而不是在 Hey Robot 主系统里写 policy 专用分支。
+pi0/其他 VLA policy 也遵循同样边界。如果某个 policy 需要语言字段、额外相机、不同 action horizon
+或不同归一化统计，应该扩展 checkpoint processor 和部署配置，而不是在 Hey Robot 主系统里写
+policy 专用分支。
 
-注意：当前 `D:/agent_robot/lerobot-mujoco-tutorial/train_model.py` 使用的是它自身 LeRobot 环境里的训练 API。部署侧 `serve_lerobot_policy.py` 使用当前运行环境里的 LeRobot factory。为了保持系统简单，不在 Hey Robot 里做多版本 import 兼容；训练环境和部署环境必须选定同一个 LeRobot 版本/导入规范。
-
-如果你的 LeRobot fork 仍然只暴露 `lerobot.common.*` 路径，应优先升级或统一部署环境，而不是在 server 里同时维护新旧两套路由。
+训练与部署环境必须使用同一个 LeRobot 版本和 checkpoint 规范。Hey Robot 不维护新旧 LeRobot API
+兼容表，也不要求配置重复声明 policy type；部署时由 checkpoint 的 `config.json.type` 和 LeRobot
+factory 共同决定具体 policy class。
 
 ### 2.2 训练产物检查
 
@@ -230,98 +232,14 @@ policy.select_action(batch) 或 policy.predict_action_chunk(batch) 可运行
 输出 action 最后一维能解释为 gripper01
 ```
 
-最小 smoke test 是启动 server 后访问：
+最小 smoke test 是先检查 checkpoint 是否能被当前 LeRobot factory 识别：
 
 ```powershell
-curl http://127.0.0.1:18080/health
+python -m hey_robot.foundation.backends.lerobot.checkpoint `
+  --policy-path models\xlerobot-home-so101-smolvla\checkpoints\last\pretrained_model
 ```
 
-也可以直接跑 endpoint smoke CLI。它会检查 `/health`、`/predict`、`action_chunk` schema、关节字段和 gripper 范围：
-
-```powershell
-$env:PYTHONPATH="src"
-python scripts\vla\smoke_lerobot_policy_endpoint.py `
-  --endpoint http://127.0.0.1:18080/predict `
-  --task "pick up the object"
-```
-
-## 3. 启动 LeRobot Policy Endpoint
-
-```powershell
-$env:PYTHONPATH="src"
-python scripts\vla\serve_lerobot_policy.py `
-  --policy-type smolvla `
-  --checkpoint models\xlerobot-home-so101-smolvla\checkpoints\last\pretrained_model `
-  --dataset-repo-id xlerobot_home_so101_single_arm `
-  --dataset-root data\lerobot `
-  --host 127.0.0.1 `
-  --port 18080
-```
-
-`--policy-type` 可以换成当前 LeRobot 环境中已经通过 factory 注册的 policy，例如 `act`、`smolvla`、`pi0` 或自定义 policy。Server 不猜测类型，也不维护 policy 专用 import 兼容表。
-
-健康检查：
-
-```powershell
-curl http://127.0.0.1:18080/health
-```
-
-### 3.1 Endpoint 输入契约
-
-Hey Robot 发送给 policy endpoint 的核心 payload 是：
-
-```json
-{
-  "task": "pick up the object",
-  "observation": {
-    "images": [
-      {"camera": "front", "format": "jpeg", "data": "..."},
-      {"camera": "right_wrist", "format": "jpeg", "data": "..."}
-    ],
-    "state": [0.0, 0.8, 0.7, -0.6, 0.0, 1.0],
-    "state_schema": "so101_single_arm_rad_gripper01",
-    "active_arm": "right"
-  }
-}
-```
-
-Server 默认映射：
-
-```text
-front       -> observation.images.front
-right_wrist -> observation.images.handeye
-state       -> observation.state
-task        -> task: list[str]
-```
-
-如果训练集用了不同 camera key，用 `--camera-features` 显式指定：
-
-```powershell
-python scripts\vla\serve_lerobot_policy.py `
-  --policy-type act `
-  --checkpoint models\xlerobot-home-so101-act\checkpoints\last\pretrained_model `
-  --camera-features '{"front":"observation.images.front","right_wrist":"observation.images.handeye"}'
-```
-
-### 3.2 Endpoint 输出契约
-
-Server 输出统一 Hey Robot `action_chunk`：
-
-```text
-kind: action_chunk
-action_space: xlerobot_single_arm_joint
-actions[0].joints:
-  shoulder_pan
-  shoulder_lift
-  elbow_flex
-  wrist_flex
-  wrist_roll
-actions[0].gripper: 0.0 - 1.0
-```
-
-这也是 Skill OS manipulate 最终能执行的格式。
-
-## 4. 接入 Hey Robot RPC ModelService
+## 3. 启动 Robot Policy ModelService
 
 把下面配置片段合并到 `configs/xlerobot.sim.vla_vln.yaml` 的：
 
@@ -338,10 +256,13 @@ configs/examples/xlerobot.lerobot_manipulate_service.yaml
 关键配置：
 
 ```yaml
-backend: action_chunk_policy
-backend_mode: action_chunk_policy
-action_chunk_endpoint: http://127.0.0.1:18080/predict
-model_path: ""
+runtime: lerobot
+policy_path: models/xlerobot-home-so101-smolvla/checkpoints/last/pretrained_model
+policy_device: cuda
+action_space: xlerobot_single_arm_joint
+action_dimensions: 6
+state_dimensions: 6
+camera_names: [front, right_wrist]
 ```
 
 启动 Hey Robot gRPC VLA service：
@@ -353,114 +274,44 @@ python -m hey_robot.cli.model_service `
   --service-id manipulate
 ```
 
-此时系统链路是：
+此时唯一生产链路是：
 
 ```text
-Skill OS manipulate
+SkillRunner manipulate
   -> gRPC ExecuteSkill
-  -> LeRobotVLAPolicyExecutor
-  -> HTTP /predict
-  -> LeRobot policy endpoint
-  -> action_chunk
-  -> move_arm_joints / set_gripper
+  -> RobotPolicyService
+  -> LeRobotPolicyExecutor
+  -> LeRobot factory + checkpoint processors
+  -> embodiment_native_action
+  -> Robot Runtime safety/action gate
 ```
 
-### 4.1 为什么用 HTTP policy endpoint，而不是把 LeRobot 直接塞进 Hey Robot
+LeRobot 仍运行在独立 ModelService 进程中，因此 CUDA 和 checkpoint 依赖与 Core Harness 隔离；不再
+增加一层 HTTP policy server。VLA、WAM、ACT、Diffusion 等 LeRobot policy 使用同一服务和 executor。
 
-第一阶段推荐外部 endpoint：
+## 4. 自动评测
+
+不再维护直接请求 policy runtime、再直接写仿真 driver 的评测脚本。XLeRobot 评测必须经过与生产
+相同的完整链路：
 
 ```text
-Hey Robot 主进程:
-- 保持轻量
-- 不强绑定 CUDA/LeRobot 大模型依赖
-- 只负责 RPC、Skill OS、机器人运行时和动作执行
-
-LeRobot policy endpoint:
-- 单独选择 Python/CUDA/LeRobot 环境
-- 单独加载大 checkpoint
-- 单独替换 ACT/SmolVLA/pi0
+Agent -> SkillRunner -> gRPC RobotPolicyService -> Robot Runtime -> simulator
 ```
 
-这样部署更清晰，排障也更直接。
+评测器只负责初始化场景、提交任务、读取独立 success predicate 和汇总 artifact，不得成为第二个
+动作所有者。完整 XLeRobot simulation benchmark 仍是重构计划中的 P3 工作。
 
-## 5. 自动评测
-
-在 LeRobot policy endpoint 启动后，运行：
-
-```powershell
-$env:PYTHONPATH="src"
-python scripts\vla\evaluate_home_so101_policy.py `
-  --config configs\xlerobot.sim.vla_vln.yaml `
-  --policy-endpoint http://127.0.0.1:18080/predict `
-  --task "pick up the object" `
-  --episodes 50 `
-  --out runtime\eval\home_so101_smolvla
-```
-
-输出：
-
-```text
-runtime/eval/home_so101_smolvla/summary.json
-runtime/eval/home_so101_smolvla/episodes.jsonl
-runtime/eval/home_so101_smolvla/trace.jsonl
-```
-
-`summary.json` 包含：
-
-```text
-episodes
-success_count
-success_rate
-mean_steps
-failure_modes
-```
-
-### 5.1 当前评测能力
-
-当前评测脚本做的是 endpoint rollout：
-
-```text
-1. reset XLeRobot sim
-2. 渲染 front/right_wrist 图像
-3. 读取 SO101 单臂 state
-4. POST /predict
-5. 把 action_chunk 写回 sim driver
-6. 统计 episode 结果和 trace
-```
-
-当前 success predicate 支持：
-
-```text
---success-mode gripper_closed
---success-mode object_lifted --object-body <body_name> --min-lift-m 0.03
---success-mode object_near_target --object-body <body_name> --target-body <body_name> --max-distance-m 0.08
---success-mode none
-```
-
-`gripper_closed` 只能证明 policy 调用了夹爪闭合动作，不能证明真实 pick 成功。因此它适合 smoke test，不适合最终论文或产品级评测。
-
-`object_lifted` 和 `object_near_target` 会显式读取 MuJoCo body 在机器人 base frame 下的位置。它们比 `gripper_closed` 更接近任务指标，但要求场景里有稳定的 body name。不要让脚本自动猜对象；在命令中显式传：
-
-```powershell
-python scripts\vla\evaluate_home_so101_policy.py `
-  --config configs\xlerobot.sim.vla_vln.yaml `
-  --policy-endpoint http://127.0.0.1:18080/predict `
-  --success-mode object_lifted `
-  --object-body cube `
-  --min-lift-m 0.03
-```
-
-### 5.2 推荐的评测分层
+### 4.1 推荐的评测分层
 
 建议按四层推进：
 
 ```text
-L0 endpoint smoke:
-  /health 正常
-  /predict 返回合法 action_chunk
+L0 ModelService smoke:
+  gRPC health loaded=true
+  ExecuteSkill 返回合法 embodiment_native_action
 
-L1 sim control smoke:
-  1-3 个 episode 能完成非空 action rollout
+L1 Robot Runtime smoke:
+  1-3 个 episode 能完成通过 safety gate 的 action rollout
   action 数值不爆炸，gripper 范围正确
 
 L2 sim task eval:
@@ -475,9 +326,9 @@ L3 real/home constrained eval:
   记录成功、失败、人工接管原因
 ```
 
-当前代码覆盖 L0-L1，并提供 L2 的文件输出骨架。
+RoboCasa365 已覆盖该完整链路；XLeRobot L0-L3 仍需按相同边界实现和验证。
 
-## 6. 当前边界
+## 5. 当前边界
 
 当前已经具备闭环验证能力，但任务专家和 success predicate 还是 POC 级别：
 
@@ -485,9 +336,7 @@ L3 real/home constrained eval:
 已完成:
 - LeRobotDataset 采集脚本
 - LeRobot policy 训练启动脚本
-- 通用 LeRobot HTTP policy endpoint
-- Hey Robot gRPC ModelService endpoint 接入
-- 自动 rollout 评测脚本
+- 通用 LeRobot gRPC RobotPolicyService
 - 单臂 SO101 state/action schema
 
 还需要针对具体 home task 强化:
@@ -497,9 +346,9 @@ L3 real/home constrained eval:
 - UI 回放和 episode store 对齐
 ```
 
-## 7. 常见问题与排障
+## 6. 常见问题与排障
 
-### 7.1 `ModuleNotFoundError: No module named 'hey_robot'`
+### 6.1 `ModuleNotFoundError: No module named 'hey_robot'`
 
 在 Hey Robot 仓库根目录设置：
 
@@ -509,9 +358,9 @@ $env:PYTHONPATH="src"
 
 或者通过项目的 `uv run` 入口运行。
 
-### 7.2 `policy_type` 加载失败
+### 6.2 checkpoint policy type 加载失败
 
-通用 server 只调用：
+通用 executor 从 checkpoint 读取 `config.json.type`，再调用：
 
 ```python
 lerobot.policies.factory.get_policy_class(policy_type)
@@ -522,12 +371,12 @@ lerobot.policies.factory.get_policy_class(policy_type)
 ```text
 1. 当前 Python 环境安装了 LeRobot。
 2. 该 policy 已经在 LeRobot factory 注册。
-3. `--policy-type` 与训练配置里的 policy type 一致。
+3. checkpoint 的 `config.json.type` 与训练产物一致。
 ```
 
-Server 不会帮你猜 `act`、`smolvla`、`pi0` 的模块路径。
+Hey Robot 不会通过部署配置覆盖 checkpoint 的 policy type。
 
-### 7.3 image key 不匹配
+### 6.3 image key 不匹配
 
 现象通常是模型报缺少 image feature，或 batch key 不存在。
 
@@ -538,15 +387,16 @@ observation.images.front
 observation.images.handeye
 ```
 
-如果训练时用了其他 key，通过：
+如果训练时用了其他 key，通过 ModelService 配置：
 
-```text
---camera-features
+```yaml
+observation_features:
+  observation.images.training_front: observation.images.front
 ```
 
 显式映射。
 
-### 7.4 state/action 维度不匹配
+### 6.4 state/action 维度不匹配
 
 当前 SO101 单臂约定是 6 维：
 
@@ -554,25 +404,14 @@ observation.images.handeye
 [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper01]
 ```
 
-如果 policy 输出不是 6 维，需要先统一训练配置和 action schema。不要在 server 里靠截断或填充修补。
+如果 policy 输出不是 6 维，需要先统一训练配置和 action schema。不要在 executor 里靠截断或填充修补。
 
-### 7.5 角度单位错误
+### 6.5 角度单位错误
 
-默认 action 单位是 rad：
+`xlerobot_single_arm_joint` action space 使用 rad。训练数据、checkpoint 输出、ModelService
+`action_space` 和 Robot Runtime mapping 必须一致，不在 executor 内做隐式 degree/rad 转换。
 
-```text
---action-units rad
-```
-
-如果训练出的 action 是 degree，可显式使用：
-
-```text
---action-units deg
-```
-
-但推荐从数据集开始就统一 rad，减少部署时的隐式转换。
-
-### 7.6 policy 能启动但动作很差
+### 6.6 policy 能启动但动作很差
 
 优先排查：
 
@@ -585,7 +424,7 @@ observation.images.handeye
 6. 评测场景物体 pose 是否超出数据分布。
 ```
 
-## 8. 最小验收清单
+## 7. 最小验收清单
 
 代码级验收：
 
@@ -600,11 +439,11 @@ uv run --no-sync poe test
 ```text
 1. record 脚本能生成 LeRobotDataset。
 2. train 脚本能启动指定 policy 训练。
-3. serve_lerobot_policy.py --help 正常。
-4. /health 返回 loaded=true。
-5. smoke_lerobot_policy_endpoint.py 能验证 /predict 返回合法 action_chunk。
-6. model_service 能把 manipulate 请求转发到 endpoint。
-7. evaluate 脚本能输出 summary.json、episodes.jsonl、trace.jsonl。
+3. checkpoint inspector 确认 policy type 已由 LeRobot factory 注册。
+4. RobotPolicyService health 返回 loaded=true。
+5. gRPC ModelService 能为 manipulate 返回合法 `embodiment_native_action`。
+6. Robot Runtime 能校验并执行该 action。
+7. full-system benchmark 能输出 summary.json、episodes.jsonl、trace.jsonl。
 ```
 
 工程交付级验收：

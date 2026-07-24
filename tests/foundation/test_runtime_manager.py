@@ -23,7 +23,7 @@ def _config() -> DeploymentConfig:
         {
             "model_services": {
                 "arm_vla": {
-                    "type": "mock_vla_policy",
+                    "type": "mock",
                     "enabled": True,
                     "robot_id": "xlerobot",
                     "provides": ["set_gripper"],
@@ -120,7 +120,7 @@ def test_capability_runtime_allows_global_service_when_robot_id_not_specified() 
     assert spec.robot_id == ""
 
 
-def test_capability_runtime_routes_vla_policy_to_grpc_client(
+def test_capability_runtime_routes_robot_policy_to_grpc_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -135,7 +135,7 @@ def test_capability_runtime_routes_vla_policy_to_grpc_client(
         {
             "model_services": {
                 "arm_vla": {
-                    "type": "vla_policy",
+                    "type": "robot_policy",
                     "enabled": True,
                     "robot_id": "xlerobot",
                     "target": "127.0.0.1:9090",
@@ -269,7 +269,7 @@ def test_grpc_capability_client_maps_health_execute_and_cancel(
         {
             "model_services": {
                 "arm_vla": {
-                    "type": "vla_policy",
+                    "type": "robot_policy",
                     "robot_id": "xlerobot",
                     "target": "127.0.0.1:9090",
                     "provides": ["set_gripper"],
@@ -344,7 +344,7 @@ def test_grpc_capability_client_health_reports_connection_errors(
         {
             "model_services": {
                 "arm_vla": {
-                    "type": "vla_policy",
+                    "type": "robot_policy",
                     "robot_id": "xlerobot",
                     "target": "127.0.0.1:9090",
                     "provides": ["set_gripper"],
@@ -391,7 +391,7 @@ def test_grpc_capability_client_execute_reports_rpc_errors(
         {
             "model_services": {
                 "arm_vla": {
-                    "type": "vla_policy",
+                    "type": "robot_policy",
                     "robot_id": "xlerobot",
                     "target": "127.0.0.1:9090",
                     "provides": ["set_gripper"],
@@ -452,7 +452,7 @@ def test_grpc_capability_client_cancel_propagates_rpc_errors(
         {
             "model_services": {
                 "arm_vla": {
-                    "type": "vla_policy",
+                    "type": "robot_policy",
                     "robot_id": "xlerobot",
                     "target": "127.0.0.1:9090",
                     "provides": ["set_gripper"],

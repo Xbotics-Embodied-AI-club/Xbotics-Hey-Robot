@@ -33,7 +33,7 @@ def _config(tmp_path) -> DeploymentConfig:
                     "settings": {"codec": "skill"},
                 }
             },
-            "skills": {"enabled": ["inspect_scene", "human_follow"]},
+            "skills": {"tools": ["inspect_scene", "look_around"]},
         }
     )
 
@@ -43,14 +43,14 @@ def test_health_report_describes_skill_resource_readiness(tmp_path) -> None:
 
     assert payload["status"] == "ok"
     reports = payload["reports"]
-    human_follow = next(
-        report for report in reports if report["component"] == "skill.human_follow"
+    look_around = next(
+        report for report in reports if report["component"] == "skill.look_around"
     )
-    assert human_follow["status"] == "ready_check_required"
-    assert human_follow["impacted_skills"] == ["human_follow"]
-    assert "camera" in human_follow["metadata"]["resources"]
-    assert "base" in human_follow["metadata"]["resources"]
-    assert "verify camera scan" in human_follow["fix_hint"]
+    assert look_around["status"] == "ready_check_required"
+    assert look_around["impacted_skills"] == ["look_around"]
+    assert "camera" in look_around["metadata"]["resources"]
+    assert "base" in look_around["metadata"]["resources"]
+    assert "verify camera scan" in look_around["fix_hint"]
 
 
 def test_full_health_report_aggregates_platform_and_script_inventory(tmp_path) -> None:
@@ -91,7 +91,7 @@ def test_full_health_report_describes_structured_robot_components(tmp_path) -> N
                     "settings": {"codec": "skill"},
                 }
             },
-            "skills": {"enabled": ["inspect_scene", "move_base", "set_gripper"]},
+            "skills": {"tools": ["inspect_scene", "move_base", "set_gripper"]},
         }
     )
 
@@ -127,9 +127,9 @@ policies:
     robot_id: mock0
     freq_hz: 10.0
 skills:
-  enabled:
+  tools:
     - inspect_scene
-    - human_follow
+    - look_around
 """,
         encoding="utf-8",
     )
@@ -150,7 +150,7 @@ skills:
 
     output = capsys.readouterr().out
     assert '"status": "ok"' in output
-    assert '"component": "skill.human_follow"' in output
+    assert '"component": "skill.look_around"' in output
 
 
 def test_health_report_helper_branches_describe_actionable_failures() -> None:
@@ -191,7 +191,7 @@ def test_health_report_helper_branches_describe_actionable_failures() -> None:
     assert "inspect" in (_task_fix_hint(None) or "")
     assert _skills_for_resources(("camera", "base", "arm")) == (
         "inspect_scene",
-        "human_follow",
+        "look_around",
         "move_base",
         "turn_base",
         "base_velocity_step",

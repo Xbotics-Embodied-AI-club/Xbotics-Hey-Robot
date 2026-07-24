@@ -64,6 +64,36 @@ def test_validate_deployment_creates_resource_paths(tmp_path) -> None:
     assert episodes_root.exists()
 
 
+def test_validate_deployment_requires_explicit_lerobot_policy_contract(
+    tmp_path,
+) -> None:
+    config = DeploymentConfig.from_dict(
+        {
+            "resources": {"runtime_dir": str(tmp_path / "runtime")},
+            "model_services": {
+                "policy": {
+                    "type": "robot_policy",
+                    "robot_id": "robot",
+                    "settings": {
+                        "runtime": "other",
+                        "action_dimensions": 0,
+                    },
+                }
+            },
+        }
+    )
+
+    messages = {issue.message for issue in validate_deployment(config)}
+
+    assert (
+        "model service policy has unsupported robot policy runtime 'other'" in messages
+    )
+    assert "model service policy requires setting policy_path" in messages
+    assert "model service policy requires setting policy_device" in messages
+    assert "model service policy requires setting action_space" in messages
+    assert "model service policy requires positive action_dimensions" in messages
+
+
 def test_validate_deployment_rejects_removed_enabled_surface(
     tmp_path,
 ) -> None:

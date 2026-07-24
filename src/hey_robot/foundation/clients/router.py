@@ -32,7 +32,7 @@ class RegistryModelRouter:
                 failure_mode="model_service_unavailable",
                 error="no enabled model service provides the requested capability",
             )
-        service_id, _spec, client = service
+        service_id, spec, client = service
         result = await client.execute(
             request=ServiceInvocationRequest(
                 service_id=service_id,
@@ -50,7 +50,7 @@ class RegistryModelRouter:
                     description=f"Model capability {capability}",
                     required_model_service=capability,
                 ),
-                timeout_sec=timeout_sec or 60.0,
+                timeout_sec=timeout_sec or spec.timeout_sec,
                 arguments=dict(request),
             )
         )

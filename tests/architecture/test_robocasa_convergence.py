@@ -33,9 +33,8 @@ def test_foundation_policy_does_not_import_environment_owner() -> None:
         / "hey_robot"
         / "foundation"
         / "backends"
-        / "vla"
         / "lerobot"
-        / "robocasa_executor.py"
+        / "executor.py"
     ).read_text(encoding="utf-8")
     assert "from hey_robot.robot_runtime.robocasa_remote.episode_manager" not in source
     assert "import EpisodeManager" not in source
@@ -45,7 +44,7 @@ def test_agent_surface_has_only_generic_manipulate() -> None:
     config = DeploymentConfig.from_yaml(
         ROOT / "configs" / "evaluation" / "robocasa365.agent.yaml"
     )
-    assert config.skills.tools == ("inspect_scene",)
+    assert config.skills.tools == ("inspect_scene", "manipulate")
     assert all(
         "robocasa_option" not in spec.provides
         for spec in config.model_services.values()
@@ -56,6 +55,38 @@ def test_agent_surface_has_only_generic_manipulate() -> None:
     assert not [
         issue for issue in validate_deployment(config) if issue.level == "error"
     ]
+
+
+def test_lerobot_has_one_production_executor() -> None:
+    root = ROOT / "src" / "hey_robot" / "foundation" / "backends" / "lerobot"
+    source = "\n".join(path.read_text(encoding="utf-8") for path in root.glob("*.py"))
+    assert source.count("class LeRobotPolicyExecutor:") == 1
+    assert "LeRobotVLAExecutor" not in source
+    assert "LeRobotVLAPolicyExecutor" not in source
+    assert "RoboCasaLeRobotPolicyExecutor" not in source
+
+
+def test_lerobot_is_a_runtime_backend_not_a_vla_subtype() -> None:
+    backends = ROOT / "src" / "hey_robot" / "foundation" / "backends"
+    source = "\n".join(
+        path.read_text(encoding="utf-8") for path in (backends / "lerobot").glob("*.py")
+    )
+
+    assert not list((backends / "vla").rglob("*.py"))
+    assert "EXPECTED_INPUTS" not in source
+    assert "SUPPORTED_STATE_SHAPES" not in source
+    assert "fastwam" not in source
+
+
+def test_benchmark_selects_the_generic_lerobot_service() -> None:
+    source = (ROOT / "evaluation/robocasa365/full_system_benchmark.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'spec.type == "robot_policy"' in source
+    assert 'spec.settings.get("runtime")' in source
+    assert 'spec.settings.get("embodiment")' in source
+    assert "robocasa_lerobot_policy" not in source
 
 
 def test_production_never_imports_evaluation_worker() -> None:

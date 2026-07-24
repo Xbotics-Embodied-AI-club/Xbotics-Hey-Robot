@@ -89,7 +89,9 @@ class AutonomousAgentService:
         catalog = (
             skill_catalog
             if skill_catalog is not None
-            else SkillToolCatalog(registry_from_config(config).select(config.skills.tool_names))
+            else SkillToolCatalog(
+                registry_from_config(config).select(config.skills.tool_names)
+            )
         )
         agent_spec = config.agents.get(agent_id)
         configured_template_root = (

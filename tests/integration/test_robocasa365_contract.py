@@ -15,10 +15,8 @@ from evaluation.robocasa365.full_system_benchmark import (
     _parser as trial_parser,
     _write_evaluator_action_artifact,
 )
-from hey_robot.foundation.backends.vla.lerobot.robocasa_executor import (
-    RoboCasaLeRobotPolicyExecutor,
-    _PolicyBundle,
-)
+from hey_robot.config import ModelServiceSpec
+from hey_robot.foundation.backends.lerobot import LeRobotPolicyExecutor
 from hey_robot.foundation.clients.models import ModelInferenceResult
 from hey_robot.protocol import Envelope, ImageRef, RobotObservation
 from hey_robot.robot_runtime.clients import RobotActionResult
@@ -173,32 +171,34 @@ def _encoded_observation(frame_id: int = 0) -> dict[str, object]:
 
 
 def test_policy_executor_returns_one_action_without_owning_environment() -> None:
-    class Policy:
+    class Runtime:
+        policy_type = "fake"
+
         def __init__(self) -> None:
             self.reset_count = 0
             self.tasks = []
 
-        def reset(self) -> None:
+        def reset(self, seed=None) -> None:
+            del seed
             self.reset_count += 1
 
-        def select_action(self, sample):
-            self.tasks.extend(sample["task"])
-            action = np.zeros((1, 12), dtype=np.float32)
-            action[0, 3] = 1.25
+        def select_action(self, _observation, task):
+            self.tasks.append(task)
+            action = np.zeros((12,), dtype=np.float32)
+            action[3] = 1.25
             return action
 
-    policy = Policy()
-    runner = RoboCasaLeRobotPolicyExecutor(
-        environ={"ROBOCASA_POLICY": "fake", "ROBOCASA_POLICY_DEVICE": "cpu"},
-        policy_loader=lambda path, device: _PolicyBundle(
-            policy_path=path,
-            policy_type="fake",
-            device=device,
-            input_features={},
-            policy=policy,
-            preprocessor=lambda sample: sample,
-            postprocessor=lambda action: action,
-        ),
+        def cancel(self):
+            pass
+
+        def close(self):
+            pass
+
+    runtime = Runtime()
+    runner = LeRobotPolicyExecutor(
+        "robocasa365",
+        _robocasa_policy_spec(),
+        runtime_loader=lambda *_args: runtime,
     )
     request = {
         "skill_name": "manipulate",
@@ -215,45 +215,44 @@ def test_policy_executor_returns_one_action_without_owning_environment() -> None
     result = runner.execute(request)
 
     assert result["success"] is True
-    assert policy.reset_count == 1
-    assert result["metrics"]["policy_result"]["values"][3] == 1.0
-    assert result["metrics"]["policy_result"]["raw_values"][3] == 1.25
+    assert runtime.reset_count == 1
+    action = result["metrics"]["policy_result"]["actions"][0]["arguments"]
+    assert action["values"][3] == 1.0
+    assert action["raw_values"][3] == 1.25
     assert result["metrics"]["action_clipped"] is True
-    assert result["metrics"]["policy_result"]["expected_frame_id"] == 0
-    assert policy.tasks == ["Close the fridge door."]
+    assert result["metrics"]["policy_result"]["raw"]["expected_frame_id"] == 0
+    assert runtime.tasks == ["Close the fridge door."]
 
     second = runner.execute(request)
     assert second["success"] is True
-    assert policy.reset_count == 1
+    assert runtime.reset_count == 1
 
 
 def test_agent_subgoal_change_resets_policy_action_queue() -> None:
-    class Policy:
+    class Runtime:
+        policy_type = "fake"
+
         def __init__(self) -> None:
             self.reset_count = 0
 
-        def reset(self) -> None:
+        def reset(self, seed=None) -> None:
+            del seed
             self.reset_count += 1
 
-        def select_action(self, _sample):
-            return np.zeros((1, 12), dtype=np.float32)
+        def select_action(self, _observation, _task):
+            return np.zeros((12,), dtype=np.float32)
 
-    policy = Policy()
-    runner = RoboCasaLeRobotPolicyExecutor(
-        environ={
-            "ROBOCASA_POLICY": "fake",
-            "ROBOCASA_POLICY_DEVICE": "cpu",
-            "ROBOCASA_PROMPT_MODE": "agent_subgoal",
-        },
-        policy_loader=lambda path, device: _PolicyBundle(
-            policy_path=path,
-            policy_type="fake",
-            device=device,
-            input_features={},
-            policy=policy,
-            preprocessor=lambda sample: sample,
-            postprocessor=lambda action: action,
-        ),
+        def cancel(self):
+            pass
+
+        def close(self):
+            pass
+
+    runtime = Runtime()
+    runner = LeRobotPolicyExecutor(
+        "robocasa365",
+        _robocasa_policy_spec(prompt_mode="agent_subgoal"),
+        runtime_loader=lambda *_args: runtime,
     )
     request = {
         "skill_name": "manipulate",
@@ -269,7 +268,25 @@ def test_agent_subgoal_change_resets_policy_action_queue() -> None:
     request["arguments"]["task_prompt"] = "Place the kettle on the burner."
     assert runner.execute(request)["success"] is True
 
-    assert policy.reset_count == 2
+    assert runtime.reset_count == 2
+
+
+def _robocasa_policy_spec(**settings) -> ModelServiceSpec:
+    return ModelServiceSpec(
+        type="robot_policy",
+        robot_id="robocasa365",
+        provides=("manipulate",),
+        settings={
+            "runtime": "lerobot",
+            "policy_path": "fake",
+            "policy_device": "cpu",
+            "embodiment": "robocasa",
+            "action_space": "robocasa_12d",
+            "action_dimensions": 12,
+            "prompt_mode": "environment_root",
+            **settings,
+        },
+    )
 
 
 def test_generic_manipulate_executes_native_action_option() -> None:

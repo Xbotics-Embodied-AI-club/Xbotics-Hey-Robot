@@ -276,7 +276,7 @@ class HealthReportService:
                     (
                         "diagnostics.xlerobot.full",
                         "scripts/robots/xlerobot/diagnose.py",
-                        ("inspect_scene", "human_follow", "move_base", "set_arm_pose"),
+                        ("inspect_scene", "look_around", "move_base", "set_arm_pose"),
                     ),
                     (
                         "diagnostics.xlerobot.servos",
@@ -291,7 +291,7 @@ class HealthReportService:
                     (
                         "diagnostics.xlerobot.camera",
                         "scripts/robots/xlerobot/scan_cameras.py",
-                        ("inspect_scene", "human_follow"),
+                        ("inspect_scene", "look_around"),
                     ),
                 ]
             )
@@ -505,7 +505,7 @@ def _component_reports_for_robot(
                 status="configured" if ok else "missing",
                 severity="info" if ok else "warning",
                 evidence=f"device_id={device_id} backend={backend}",
-                impacted_skills=("inspect_scene", "human_follow"),
+                impacted_skills=("inspect_scene", "look_around"),
                 fix_hint=None
                 if ok
                 else "Run camera scan and set components.camera.device_id.",
@@ -525,7 +525,7 @@ def _component_reports_for_robot(
                     "move_base",
                     "turn_base",
                     "base_velocity_step",
-                    "human_follow",
+                    "look_around",
                 ),
                 fix_hint="Run xlerobot diagnose or servo scan before live motion.",
                 source="robot.component_config",
@@ -558,9 +558,9 @@ def _component_reports_for_robot(
 def _skills_for_resources(resources: tuple[str, ...]) -> tuple[str, ...]:
     skills: list[str] = []
     if "camera" in resources:
-        skills.extend(["inspect_scene", "human_follow"])
+        skills.extend(["inspect_scene", "look_around"])
     if "base" in resources:
-        skills.extend(["move_base", "turn_base", "base_velocity_step", "human_follow"])
+        skills.extend(["move_base", "turn_base", "base_velocity_step", "look_around"])
     if "arm" in resources:
         skills.extend(["set_arm_pose", "set_gripper"])
     return tuple(dict.fromkeys(skills))

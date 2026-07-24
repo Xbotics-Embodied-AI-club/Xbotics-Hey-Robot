@@ -19,7 +19,7 @@ def test_deployment_config_resources_and_validation(tmp_path: Path) -> None:
             "robots": {"mock0": {"type": "mock"}},
             "agents": {"main": {"type": "robot_agent", "robot_id": "mock0"}},
             "policies": {"mock_policy": {"type": "mock", "robot_id": "mock0"}},
-            "skills": {"enabled": ["inspect_scene"]},
+            "skills": {"tools": ["inspect_scene"]},
         }
     )
 

@@ -81,10 +81,15 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
     model_candidates = [
         (service_id, spec)
         for service_id, spec in config.model_services.items()
-        if spec.enabled and spec.type == "robocasa_lerobot_policy"
+        if spec.enabled
+        and spec.type == "robot_policy"
+        and str(spec.settings.get("runtime") or "") == "lerobot"
+        and str(spec.settings.get("embodiment") or "") == "robocasa"
     ]
     if len(model_candidates) != 1:
-        raise ValueError("config must contain exactly one robocasa_lerobot_policy")
+        raise ValueError(
+            "config must contain exactly one RoboCasa LeRobot robot_policy service"
+        )
     model_service_id, model_spec = model_candidates[0]
     credentials = json.loads(args.credentials_file.read_text(encoding="utf-8"))
     runtime = GrpcRoboCasaRuntimeClient(

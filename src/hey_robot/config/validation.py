@@ -40,6 +40,7 @@ def validate_deployment(config: DeploymentConfig) -> list[ValidationIssue]:
                     f"policy {policy_id} references missing robot {policy.robot_id}",
                 )
             )
+    issues.extend(_robot_policy_configuration_issues(config))
     issues.extend(_robocasa_configuration_issues(config))
     for path in (
         config.resources.runtime_dir,
@@ -144,12 +145,59 @@ def validate_deployment(config: DeploymentConfig) -> list[ValidationIssue]:
     return issues
 
 
+def _robot_policy_configuration_issues(
+    config: DeploymentConfig,
+) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    for service_id, service in config.model_services.items():
+        if service.type != "robot_policy":
+            continue
+        runtime = str(service.settings.get("runtime") or "")
+        if runtime != "lerobot":
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    f"model service {service_id} has unsupported robot policy "
+                    f"runtime {runtime!r}",
+                )
+            )
+        issues.extend(
+            ValidationIssue(
+                "error",
+                f"model service {service_id} requires setting {required}",
+            )
+            for required in (
+                "policy_path",
+                "policy_device",
+                "action_space",
+                "action_dimensions",
+            )
+            if required not in service.settings
+        )
+        try:
+            action_dimensions = int(service.settings.get("action_dimensions") or 0)
+        except (TypeError, ValueError):
+            action_dimensions = 0
+        if "action_dimensions" in service.settings and action_dimensions <= 0:
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    f"model service {service_id} requires positive action_dimensions",
+                )
+            )
+    return issues
+
+
 def _robocasa_configuration_issues(
     config: DeploymentConfig,
 ) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     for service_id, service in config.model_services.items():
-        if service.type != "robocasa_lerobot_policy":
+        if not (
+            service.type == "robot_policy"
+            and str(service.settings.get("runtime") or "") == "lerobot"
+            and str(service.settings.get("embodiment") or "") == "robocasa"
+        ):
             continue
         if tuple(service.provides) != ("manipulate",):
             issues.append(
@@ -174,14 +222,6 @@ def _robocasa_configuration_issues(
                     f"model service {service_id} has invalid prompt_mode {prompt_mode!r}",
                 )
             )
-        issues.extend(
-            ValidationIssue(
-                "error",
-                f"model service {service_id} requires setting {required}",
-            )
-            for required in ("policy_path", "policy_device", "option_horizon")
-            if required not in service.settings
-        )
     for robot_id, robot in config.robots.items():
         if robot.robot_family != "robocasa" or not bool(
             robot.settings.get("managed_backend", False)
@@ -192,14 +232,24 @@ def _robocasa_configuration_issues(
             for service in config.model_services.values()
             if service.enabled
             and service.robot_id == robot_id
-            and service.type == "robocasa_lerobot_policy"
+            and service.type == "robot_policy"
+            and str(service.settings.get("runtime") or "") == "lerobot"
+            and str(service.settings.get("embodiment") or "") == "robocasa"
         ]
         if len(matching) != 1:
             issues.append(
                 ValidationIssue(
                     "error",
                     f"managed RoboCasa robot {robot_id} requires exactly one "
-                    "robocasa_lerobot_policy",
+                    "LeRobot robot_policy service",
+                )
+            )
+        elif not str(matching[0].settings.get("media_root") or "").strip():
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    f"managed RoboCasa robot {robot_id} requires model setting "
+                    "media_root",
                 )
             )
     return issues

@@ -37,7 +37,9 @@ class ManagedRoboCasaBackend:
             for service_id, spec in config.model_services.items()
             if spec.enabled
             and spec.robot_id == self.robot_id
-            and spec.type == "robocasa_lerobot_policy"
+            and spec.type == "robot_policy"
+            and str(spec.settings.get("runtime") or "") == "lerobot"
+            and str(spec.settings.get("embodiment") or "") == "robocasa"
             and tuple(spec.provides) == ("manipulate",)
         ]
         if len(models) != 1:
@@ -45,7 +47,8 @@ class ManagedRoboCasaBackend:
                 "managed RoboCasa requires exactly one manipulate policy provider"
             )
         self.service_id, self.model_spec = models[0]
-        self.process: asyncio.subprocess.Process | None = None
+        self.runtime_process: asyncio.subprocess.Process | None = None
+        self.model_process: asyncio.subprocess.Process | None = None
         self._stopping = False
         self.evaluator_token = os.environ.setdefault(
             "ROBOCASA_EVALUATOR_TOKEN", secrets.token_hex(32)
@@ -58,12 +61,16 @@ class ManagedRoboCasaBackend:
         )
 
     async def start(self) -> None:
-        target = str(self.robot_spec.settings.get("target") or "grpc://127.0.0.1:9092")
-        parsed = urlparse(target)
-        host = parsed.hostname or "127.0.0.1"
-        port = parsed.port or 9092
-        if host not in {"127.0.0.1", "localhost", "::1"}:
-            raise RuntimeError("a managed RoboCasa backend must use a loopback target")
+        runtime_target = str(
+            self.robot_spec.settings.get("target") or "grpc://127.0.0.1:9092"
+        )
+        model_target = str(self.model_spec.target or "grpc://127.0.0.1:9091")
+        runtime_host, runtime_port = _loopback_endpoint(runtime_target, 9092)
+        model_host, model_port = _loopback_endpoint(model_target, 9091)
+        if (runtime_host, runtime_port) == (model_host, model_port):
+            raise RuntimeError(
+                "managed RoboCasa runtime and model service must use distinct targets"
+            )
         self.credentials_path.parent.mkdir(parents=True, exist_ok=True)
         self.credentials_path.write_text(
             json.dumps(
@@ -80,57 +87,94 @@ class ManagedRoboCasaBackend:
             or self.robot_spec.settings.get("backend_python")
             or sys.executable
         )
-        environment = dict(os.environ)
-        environment["PYTHONPATH"] = os.pathsep.join(
-            filter(None, (str(_SOURCE_ROOT), environment.get("PYTHONPATH", "")))
-        )
-        self.process = await asyncio.create_subprocess_exec(
+        runtime_environment = _service_environment()
+        model_environment = _service_environment()
+        model_environment["ROBOCASA_DATA_TOKEN"] = self.data_token
+        if bool(self.model_spec.settings.get("offline", False)):
+            model_environment.update(
+                {
+                    "ROBOCASA_OFFLINE": "1",
+                    "HF_HUB_OFFLINE": "1",
+                    "TRANSFORMERS_OFFLINE": "1",
+                }
+            )
+        self.runtime_process = await asyncio.create_subprocess_exec(
             python,
             "-m",
             "hey_robot.app.robocasa_backend",
             "--host",
-            host,
+            runtime_host,
             "--port",
-            str(port),
+            str(runtime_port),
             "--config",
             self.config_path,
             "--evaluator-token",
             self.evaluator_token,
             "--data-token",
             self.data_token,
-            env=environment,
+            env=runtime_environment,
         )
         try:
-            await self._wait_ready(target)
+            self.model_process = await asyncio.create_subprocess_exec(
+                python,
+                "-m",
+                "hey_robot.cli.main",
+                "model-service",
+                "--config",
+                self.config_path,
+                "--service-id",
+                self.service_id,
+                "--host",
+                model_host,
+                "--port",
+                str(model_port),
+                env=model_environment,
+            )
+            await self._wait_ready(runtime_target)
         except BaseException:
             await self.stop()
             raise
 
     async def wait(self) -> None:
-        if self.process is None:
+        processes = [self.runtime_process, self.model_process]
+        if any(process is None for process in processes):
             raise RuntimeError("RoboCasa backend was not started")
-        returncode = await self.process.wait()
+        tasks = [
+            asyncio.create_task(process.wait())
+            for process in processes
+            if process is not None
+        ]
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        returncode = next(iter(done)).result()
         if not self._stopping:
             raise RuntimeError(
-                f"managed RoboCasa backend exited unexpectedly with {returncode}"
+                f"managed RoboCasa service exited unexpectedly with {returncode}"
             )
 
     async def stop(self) -> None:
         self._stopping = True
-        process = self.process
-        if process is None or process.returncode is not None:
-            self.credentials_path.unlink(missing_ok=True)
-            return
-        process.terminate()
-        try:
-            await asyncio.wait_for(process.wait(), timeout=10.0)
-        except TimeoutError:
-            process.kill()
-            await process.wait()
+        processes = [self.model_process, self.runtime_process]
+        for process in processes:
+            if process is not None and process.returncode is None:
+                process.terminate()
+        for process in processes:
+            if process is None or process.returncode is not None:
+                continue
+            try:
+                await asyncio.wait_for(process.wait(), timeout=10.0)
+            except TimeoutError:
+                process.kill()
+                await process.wait()
         self.credentials_path.unlink(missing_ok=True)
 
-    async def _wait_ready(self, target: str) -> None:
-        runtime = GrpcRoboCasaRuntimeClient(target, timeout_sec=5.0, role="data")
+    async def _wait_ready(self, runtime_target: str) -> None:
+        runtime = GrpcRoboCasaRuntimeClient(
+            runtime_target, timeout_sec=5.0, role="data"
+        )
         model = GrpcModelServiceClient(self.service_id, self.model_spec)
         timeout = float(
             self.robot_spec.settings.get("backend_startup_timeout_sec", 60.0)
@@ -139,11 +183,15 @@ class ManagedRoboCasaBackend:
         try:
             async with asyncio.timeout(timeout):
                 while True:
-                    if self.process is not None and self.process.returncode is not None:
-                        raise RuntimeError(
-                            "managed RoboCasa backend exited during health gate "
-                            f"with {self.process.returncode}"
-                        )
+                    for name, process in (
+                        ("runtime", self.runtime_process),
+                        ("model", self.model_process),
+                    ):
+                        if process is not None and process.returncode is not None:
+                            raise RuntimeError(
+                                f"managed RoboCasa {name} service exited during "
+                                f"health gate with {process.returncode}"
+                            )
                     try:
                         runtime_health, model_health = await asyncio.gather(
                             runtime.health(), model.health()
@@ -170,6 +218,22 @@ class ManagedRoboCasaBackend:
         finally:
             await runtime.close()
             await model.close()
+
+
+def _loopback_endpoint(target: str, default_port: int) -> tuple[str, int]:
+    parsed = urlparse(target)
+    host = parsed.hostname or "127.0.0.1"
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        raise RuntimeError("a managed service must use a loopback target")
+    return host, parsed.port or default_port
+
+
+def _service_environment() -> dict[str, str]:
+    environment = dict(os.environ)
+    environment["PYTHONPATH"] = os.pathsep.join(
+        filter(None, (str(_SOURCE_ROOT), environment.get("PYTHONPATH", "")))
+    )
+    return environment
 
 
 def managed_robocasa_backend(

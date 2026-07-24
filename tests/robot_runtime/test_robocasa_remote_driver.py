@@ -175,6 +175,9 @@ def test_driver_routes_native_action_and_reset_through_runtime() -> None:
                 values=[0.0] * 12,
                 skill_id="skill-1",
                 metadata={
+                    "action_type": "embodiment_native",
+                    "action_space": "robocasa_12d",
+                    "embodiment": "robocasa",
                     "expected_frame_id": 8,
                     "raw_action": [1.25] + [0.0] * 11,
                     "action_clipped": True,
@@ -205,7 +208,12 @@ def test_driver_returns_structured_error_for_stale_or_invalid_action() -> None:
                 envelope=Envelope(robot_id="robocasa0"),
                 values=[0.0] * 12,
                 skill_id="bad",
-                metadata={"expected_frame_id": 7},
+                metadata={
+                    "action_type": "embodiment_native",
+                    "action_space": "robocasa_12d",
+                    "embodiment": "robocasa",
+                    "expected_frame_id": 7,
+                },
             )
         )
         assert result.success is False

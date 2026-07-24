@@ -5,7 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
-from hey_robot.protocol import Envelope, RobotObservation, RobotSkillAction, SkillIntent
+from hey_robot.protocol import (
+    Envelope,
+    RobotAction,
+    RobotObservation,
+    RobotSkillAction,
+    SkillIntent,
+)
 
 
 @dataclass(frozen=True)
@@ -87,17 +93,37 @@ class LocalRobotClient:
         expected_frame_id: int | None = None,
     ) -> RobotActionResult:
         runtime = self._runtime(robot_id)
-        robot_action = RobotSkillAction(action, dict(arguments)).to_robot_action(
-            SkillIntent(
-                envelope=Envelope(robot_id=robot_id),
+        intent = SkillIntent(
+            envelope=Envelope(robot_id=robot_id),
+            skill_id=run_id,
+            task_id=run_id,
+            intent_kind="observation" if action == "inspect_scene" else "skill",
+            name=action,
+            arguments=dict(arguments),
+            objective=f"execute {action}",
+        )
+        if action == "embodiment_native_action":
+            values = arguments.get("values")
+            if not isinstance(values, list):
+                raise ValueError("embodiment_native_action requires list values")
+            robot_action = RobotAction(
+                envelope=intent.envelope,
+                values=[float(value) for value in values],
                 skill_id=run_id,
                 task_id=run_id,
-                intent_kind="observation" if action == "inspect_scene" else "skill",
-                name=action,
-                arguments=dict(arguments),
-                objective=f"execute {action}",
+                metadata={
+                    "action_type": "embodiment_native",
+                    "action_space": arguments.get("action_space"),
+                    "embodiment": arguments.get("embodiment"),
+                    "raw_action": list(arguments.get("raw_values") or values),
+                    "action_clipped": list(arguments.get("raw_values") or values)
+                    != values,
+                },
             )
-        )
+        else:
+            robot_action = RobotSkillAction(action, dict(arguments)).to_robot_action(
+                intent
+            )
         if expected_frame_id is not None:
             robot_action = replace(
                 robot_action,

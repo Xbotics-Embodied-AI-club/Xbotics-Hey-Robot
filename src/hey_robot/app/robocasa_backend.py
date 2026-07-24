@@ -11,15 +11,7 @@ from pathlib import Path
 
 import grpc
 
-from hey_robot.config import DeploymentConfig, ModelServiceSpec, RobotSpec
-from hey_robot.foundation.backends.vla.lerobot.robocasa_executor import (
-    RoboCasaLeRobotPolicyExecutor,
-)
-from hey_robot.foundation.contract.v1 import model_service_pb2_grpc
-from hey_robot.foundation.transport.grpc.server import (
-    ModelServiceServicer,
-    ModelServiceState,
-)
+from hey_robot.config import DeploymentConfig, RobotSpec
 from hey_robot.robocasa_runtime.v1 import (
     robocasa_runtime_pb2_grpc as runtime_pb2_grpc,
 )
@@ -38,23 +30,11 @@ async def serve(
     data_token: str | None = None,
     config_path: str | Path,
 ) -> None:
-    """Serve the standard model plane and RoboCasa runtime on one endpoint."""
-    model_spec, robot_spec = _load_backend_specs(config_path)
-    executor_environment = _executor_environment(model_spec, robot_spec)
-    # PI0.5 runs in a spawned process and therefore inherits the process
-    # environment, not only the executor's configuration dictionary.
-    os.environ.update(executor_environment)
+    """Serve only the RoboCasa environment and evaluator control plane."""
+    robot_spec = _load_backend_spec(config_path)
+    os.environ.update(_runtime_environment(robot_spec))
     server = grpc.aio.server()
     manager = EpisodeManager(allowed_tasks=ALLOWED_TASKS)
-    executor = RoboCasaLeRobotPolicyExecutor(environ=executor_environment)
-    model_service_pb2_grpc.add_ModelServiceServicer_to_server(
-        ModelServiceServicer(
-            ModelServiceState("robocasa365", model_spec),
-            executor,
-            bearer_token=data_token,
-        ),
-        server,
-    )
     runtime_pb2_grpc.add_RoboCasaRuntimeServicer_to_server(
         RoboCasaRuntimeService(
             resource_lock=asyncio.Lock(),
@@ -80,14 +60,13 @@ async def serve(
     finally:
         server_task.cancel()
         shutdown_task.cancel()
-        executor.close()
         with suppress(asyncio.CancelledError):
             await asyncio.shield(server.stop(grace=1.0))
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Hey Robot RoboCasa365 model and simulator backend"
+        description="Hey Robot RoboCasa365 environment backend"
     )
     parser.add_argument("--host", default="0.0.0.0")  # noqa: S104
     parser.add_argument("--port", type=int, default=9092)
@@ -118,57 +97,18 @@ def main() -> None:
         )
 
 
-def _load_backend_specs(
-    config_path: str | Path,
-) -> tuple[ModelServiceSpec, RobotSpec]:
+def _load_backend_spec(config_path: str | Path) -> RobotSpec:
     config = DeploymentConfig.from_yaml(config_path)
     candidates = [
         spec
-        for spec in config.model_services.values()
-        if spec.enabled and spec.type == "robocasa_lerobot_policy"
+        for spec in config.robots.values()
+        if spec.type == "robocasa" and bool(spec.settings.get("managed_backend", False))
     ]
     if len(candidates) != 1:
         raise ValueError(
-            "backend config must contain exactly one robocasa_lerobot_policy"
+            "backend config must contain exactly one managed RoboCasa robot"
         )
-    model_spec = candidates[0]
-    if tuple(model_spec.provides) != ("manipulate",):
-        raise ValueError("RoboCasa policy must provide only manipulate")
-    try:
-        robot_spec = config.robots[model_spec.robot_id]
-    except KeyError as exc:
-        raise ValueError(
-            f"model robot {model_spec.robot_id!r} is missing from config"
-        ) from exc
-    return model_spec, robot_spec
-
-
-def _executor_environment(
-    model_spec: ModelServiceSpec, robot_spec: RobotSpec
-) -> dict[str, str]:
-    environment = dict(os.environ)
-    settings = model_spec.settings
-    mapping = {
-        "policy_path": "ROBOCASA_POLICY",
-        "policy_device": "ROBOCASA_POLICY_DEVICE",
-        "prompt_mode": "ROBOCASA_PROMPT_MODE",
-        "option_horizon": "ROBOCASA_OPTION_HORIZON",
-        "load_timeout_sec": "ROBOCASA_POLICY_LOAD_TIMEOUT",
-        "request_timeout_sec": "ROBOCASA_POLICY_REQUEST_TIMEOUT",
-    }
-    for setting, variable in mapping.items():
-        if setting in settings:
-            environment[variable] = str(settings[setting])
-    if bool(settings.get("offline", False)):
-        environment.update(
-            {
-                "ROBOCASA_OFFLINE": "1",
-                "HF_HUB_OFFLINE": "1",
-                "TRANSFORMERS_OFFLINE": "1",
-            }
-        )
-    environment.update(_runtime_environment(robot_spec))
-    return environment
+    return candidates[0]
 
 
 def _runtime_environment(robot_spec: RobotSpec) -> dict[str, str]:

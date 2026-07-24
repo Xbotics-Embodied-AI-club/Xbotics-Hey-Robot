@@ -204,7 +204,7 @@ model_services:
       max_new_tokens: 128
       hfov: 90
   manipulate:
-    type: vla_policy
+    type: robot_policy
     robot_id: sim_robot
     enabled: true
     target: grpc://127.0.0.1:9090
@@ -214,18 +214,18 @@ model_services:
     settings:
       host: 127.0.0.1
       port: 9090
-      backend: action_chunk_policy
-      backend_mode: action_chunk_policy
-      model_path: models/smolvla-so101-pick-orange
-      policy_type: smolvla
-      arm_port: ''
-      task: ''
-      camera_config: {}
+      policy_path: models/smolvla-so101-pick-orange
+      runtime: lerobot
       policy_device: cuda
+      embodiment: xlerobot
+      robot_type: so101
+      action_space: xlerobot_single_arm_joint
+      action_dimensions: 6
+      state_dimensions: 6
+      camera_names:
+      - front
+      - right_wrist
       fps: 30
-      actions_per_chunk: 50
-      chunk_size_threshold: 0.5
-      load_on_startup: false
 policies:
   embodied_skills:
     enabled: true

@@ -61,7 +61,7 @@ def test_deployment_style_model_service_grpc_flow(tmp_path) -> None:
                 },
                 "model_services": {
                     "arm_vla": {
-                        "type": "vla_policy",
+                        "type": "robot_policy",
                         "enabled": True,
                         "robot_id": "xlerobot",
                         "provides": ["set_gripper"],
@@ -128,7 +128,7 @@ def test_foundation_model_service_flow_keeps_skill_surface() -> None:
             {
                 "model_services": {
                     "arm_vla": {
-                        "type": "vla_policy",
+                        "type": "robot_policy",
                         "enabled": True,
                         "robot_id": "xlerobot",
                         "provides": ["set_gripper"],

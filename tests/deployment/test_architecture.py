@@ -165,10 +165,9 @@ def test_production_code_does_not_import_skill_os() -> None:
     offenders: list[str] = []
     for path in Path("src/hey_robot").rglob("*.py"):
         text = path.read_text(encoding="utf-8")
-        imports_skill_os = (
-            re.search(r"\bfrom\s+hey_robot\.skill_os(?:\s+|\.|$)", text)
-            or re.search(r"\bimport\s+hey_robot\.skill_os(?:\s+|\.|$)", text)
-        )
+        imports_skill_os = re.search(
+            r"\bfrom\s+hey_robot\.skill_os(?:\s+|\.|$)", text
+        ) or re.search(r"\bimport\s+hey_robot\.skill_os(?:\s+|\.|$)", text)
         if imports_skill_os:
             offenders.append(str(path))
 
@@ -230,12 +229,12 @@ def test_runtime_configs_use_native_local_surface() -> None:
         ], path
 
 
-def test_robocasa365_uses_native_inspection_only_until_vla_contract_closes() -> None:
+def test_robocasa365_exposes_validated_native_vla_surface() -> None:
     config = DeploymentConfig.from_yaml("configs/evaluation/robocasa365.agent.yaml")
 
     assert config.skills.modules == ("hey_robot.skills.builtins",)
     assert config.skills.execution_mode == "local"
-    assert config.skills.tools == ("inspect_scene",)
+    assert config.skills.tools == ("inspect_scene", "manipulate")
 
 
 def test_deployment_validation_requires_explicit_skill_surface() -> None:

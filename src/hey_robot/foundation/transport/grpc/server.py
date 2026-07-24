@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -150,7 +151,9 @@ class ModelServiceServicer(model_service_pb2_grpc.ModelServiceServicer):
         )
 
 
-class VLAPolicyService:
+class RobotPolicyService:
+    """Serve a learned robot policy using its configured runtime backend."""
+
     def __init__(
         self,
         config: DeploymentConfig,
@@ -159,47 +162,50 @@ class VLAPolicyService:
         host: str | None = None,
         port: int | None = None,
     ) -> None:
-        from hey_robot.foundation.backends.vla.lerobot import (
-            LeRobotVLAExecutor,
-            LeRobotVLAPolicyExecutor,
+        from hey_robot.foundation.backends.lerobot import (
+            LeRobotPolicyExecutor,
         )
 
         self.config = config
         self.service_id = service_id
         self.spec = config.model_services[service_id]
+        runtime = str(self.spec.settings.get("runtime") or "")
+        if runtime != "lerobot":
+            raise ValueError(
+                f"robot policy service {service_id} has unsupported runtime {runtime!r}"
+            )
         self.host = host or str(self.spec.settings.get("host", "127.0.0.1"))
         self.port = port or int(self.spec.settings.get("port", 9090))
         self.state = ModelServiceState(service_id, self.spec)
-        backend_mode = str(
-            self.spec.settings.get("backend_mode")
-            or self.spec.settings.get("mode")
-            or self.spec.settings.get("backend")
-            or "action_chunk_policy"
+        self.executor: ModelServiceExecutor = LeRobotPolicyExecutor(
+            service_id, self.spec
         )
-        executor: ModelServiceExecutor
-        if backend_mode in {"lerobot_control_loop", "legacy_lerobot_control_loop"}:
-            executor = LeRobotVLAExecutor(service_id, self.spec)
-        else:
-            executor = LeRobotVLAPolicyExecutor(service_id, self.spec)
-        self.executor = executor
         self._server: grpc.aio.Server | None = None
 
     async def start(self) -> None:
+        load = getattr(self.executor, "load", None)
+        if callable(load):
+            await asyncio.to_thread(load)
         self._server = grpc.aio.server()
+        token_env = str(self.spec.settings.get("auth_token_env") or "")
+        bearer_token = os.environ.get(token_env) if token_env else None
         model_service_pb2_grpc.add_ModelServiceServicer_to_server(
-            ModelServiceServicer(self.state, self.executor),
+            ModelServiceServicer(self.state, self.executor, bearer_token=bearer_token),
             self._server,
         )
         bind_target = f"{self.host}:{self.port}"
         self._server.add_insecure_port(bind_target)
         logger.info(
-            f"VLA policy service [{self.service_id}] listening on grpc://{bind_target}"
+            f"Robot policy service [{self.service_id}] listening on grpc://{bind_target}"
         )
         await self._server.start()
         await self._server.wait_for_termination()
 
     async def stop(self) -> None:
         self.executor.cancel()
+        close = getattr(self.executor, "close", None)
+        if callable(close):
+            close()
         if self._server is not None:
             await self._server.stop(grace=0.5)
 
@@ -252,10 +258,10 @@ def build_model_service(
     service_id: str,
     host: str | None = None,
     port: int | None = None,
-) -> VLAPolicyService | VLNPlannerService:
+) -> RobotPolicyService | VLNPlannerService:
     spec = config.model_services[service_id]
-    if spec.type == "vla_policy":
-        return VLAPolicyService(config, service_id=service_id, host=host, port=port)
+    if spec.type == "robot_policy":
+        return RobotPolicyService(config, service_id=service_id, host=host, port=port)
     if spec.type == "vln_planner":
         return VLNPlannerService(config, service_id=service_id, host=host, port=port)
     raise ValueError(f"unsupported model service type: {spec.type}")

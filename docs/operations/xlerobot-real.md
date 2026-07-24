@@ -217,7 +217,7 @@ VLA 的架构位置已经确定，但当前真机 deployment 尚未交付：
 Agent request_skill
   -> SkillControllerService
   -> ModelServiceRegistry
-  -> gRPC VLAPolicyService
+  -> gRPC RobotPolicyService
   -> one-step policy result
   -> Skill OS converts result to guarded primitives
   -> RobotRuntime / XLeRobotDriver

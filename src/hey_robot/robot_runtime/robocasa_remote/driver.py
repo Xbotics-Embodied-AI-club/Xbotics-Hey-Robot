@@ -248,12 +248,26 @@ class RoboCasaRemoteDriver:
         self.state = "closed"
 
     def _validate_action(self, action: RobotAction) -> None:
+        if action.metadata.get("action_type") != "embodiment_native":
+            raise ValueError("RoboCasa only accepts embodiment_native actions")
+        action_space = str(action.metadata.get("action_space") or "")
+        if action_space != "robocasa_12d":
+            raise ValueError(
+                f"RoboCasa action_space must be 'robocasa_12d', got {action_space!r}"
+            )
+        embodiment = str(action.metadata.get("embodiment") or "")
+        if embodiment != "robocasa":
+            raise ValueError(
+                f"RoboCasa embodiment must be 'robocasa', got {embodiment!r}"
+            )
         if len(action.values) != self.ACTION_DIMENSIONS:
             raise ValueError(
                 f"action dimension mismatch: expected {self.ACTION_DIMENSIONS}, got {len(action.values)}"
             )
         if not all(math.isfinite(float(value)) for value in action.values):
             raise ValueError("action contains a non-finite value")
+        if any(abs(float(value)) > 1.0 for value in action.values):
+            raise ValueError("RoboCasa action must be normalized to [-1, 1]")
         expected = action.metadata.get("expected_frame_id")
         if expected is not None and int(expected) != self.frame_id:
             raise ValueError(

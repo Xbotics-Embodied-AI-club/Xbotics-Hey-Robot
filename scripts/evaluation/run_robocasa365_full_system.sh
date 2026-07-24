@@ -53,7 +53,8 @@ trap cleanup EXIT INT TERM
 agent_pid=$!
 printf '%s\n' 'robocasa365: Hey Robot deployment started'
 
-for _ in $(seq 1 60); do
+startup_timeout_sec="${ROBOCASA_STARTUP_TIMEOUT_SEC:-660}"
+for _ in $(seq 1 "$startup_timeout_sec"); do
   if curl --fail --silent http://127.0.0.1:18080/api/tasks >/dev/null; then
     break
   fi

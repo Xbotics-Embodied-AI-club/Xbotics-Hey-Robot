@@ -41,6 +41,7 @@ skills:
   - hey_robot.skills.builtins
   tools:
   - inspect_scene
+  - manipulate
   execution_mode: local
 robots:
   robocasa365:
@@ -53,11 +54,12 @@ robots:
       target: grpc://127.0.0.1:9092
       managed_backend: true
       backend_python: .robocasa365-venv/bin/python
-      backend_startup_timeout_sec: 60
+      backend_startup_timeout_sec: 600
       timeout_sec: 60
       control_hz: 20
       supported_driver_primitives:
       - inspect_scene
+      - embodiment_native_action
       default_task: CloseFridge
       default_seed: 1000
       task_split: target
@@ -67,20 +69,38 @@ robots:
       mujoco_device: auto_separate
 model_services:
   robocasa365:
-    type: robocasa_lerobot_policy
+    type: robot_policy
     robot_id: robocasa365
     enabled: true
-    target: grpc://127.0.0.1:9092
+    target: grpc://127.0.0.1:9091
     provides:
     - manipulate
     timeout_sec: 1800
     settings:
+      runtime: lerobot
       health_timeout_sec: 10
       auth_token_env: ROBOCASA_DATA_TOKEN
       policy_path: lerobot/pi052_robocasa
       policy_device: cuda
+      embodiment: robocasa
+      robot_type: robocasa
+      action_space: robocasa_12d
+      action_dimensions: 12
+      action_low: -1.0
+      action_high: 1.0
+      state_dimensions: 16
+      camera_names:
+      - camera1
+      - camera2
+      - camera3
+      observation_features:
+        observation.images.robot0_agentview_left: observation.images.camera1
+        observation.images.robot0_agentview_right: observation.images.camera2
+        observation.images.robot0_eye_in_hand: observation.images.camera3
+      media_root: runtime/robocasa365.agent/media
       prompt_mode: environment_root
       option_horizon: 50
+      control_hz: 20
       load_timeout_sec: 600
       request_timeout_sec: 300
       offline: true

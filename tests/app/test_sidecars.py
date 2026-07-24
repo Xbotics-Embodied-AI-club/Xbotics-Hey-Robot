@@ -26,12 +26,17 @@ def _config(tmp_path) -> DeploymentConfig:
             },
             "model_services": {
                 "m": {
-                    "type": "robocasa_lerobot_policy",
+                    "type": "robot_policy",
                     "robot_id": "r",
+                    "target": "grpc://127.0.0.1:9091",
                     "provides": ["manipulate"],
                     "settings": {
                         "policy_path": "p",
                         "policy_device": "cpu",
+                        "runtime": "lerobot",
+                        "embodiment": "robocasa",
+                        "action_space": "robocasa_12d",
+                        "action_dimensions": 12,
                         "prompt_mode": "environment_root",
                         "option_horizon": 50,
                     },
@@ -63,13 +68,12 @@ async def test_managed_backend_owns_credentials_process_and_cleanup(
     tmp_path, monkeypatch
 ) -> None:
     sidecar = ManagedRoboCasaBackend(_config(tmp_path), config_path="deployment.yaml")
-    process = _Process()
-    spawn: dict[str, object] = {}
+    processes = [_Process(), _Process()]
+    spawns: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
     async def create(*args: object, **kwargs: object):
-        spawn["args"] = args
-        spawn["env"] = kwargs["env"]
-        return process
+        spawns.append((args, kwargs))
+        return processes[len(spawns) - 1]
 
     async def ready(target):
         assert target == "grpc://127.0.0.1:9092"
@@ -81,25 +85,58 @@ async def test_managed_backend_owns_credentials_process_and_cleanup(
     credentials = json.loads(sidecar.credentials_path.read_text())
     assert credentials["evaluator_token"] != credentials["data_token"]
     assert sidecar.credentials_path.stat().st_mode & 0o777 == 0o600
-    assert spawn["args"][:3] == (
+    assert spawns[0][0][:3] == (
         "backend-python",
         "-m",
         "hey_robot.app.robocasa_backend",
     )
+    assert spawns[1][0][:4] == (
+        "backend-python",
+        "-m",
+        "hey_robot.cli.main",
+        "model-service",
+    )
 
     await sidecar.stop()
-    assert process.terminated is True
+    assert all(process.terminated for process in processes)
     assert not sidecar.credentials_path.exists()
 
 
 @pytest.mark.asyncio
 async def test_unexpected_backend_exit_is_propagated(tmp_path) -> None:
     sidecar = ManagedRoboCasaBackend(_config(tmp_path), config_path="deployment.yaml")
-    process = _Process()
-    process.returncode = 17
-    sidecar.process = process
+    runtime_process = _Process()
+    model_process = _Process()
+    runtime_process.returncode = 17
+    model_process.returncode = 17
+    sidecar.runtime_process = runtime_process
+    sidecar.model_process = model_process
     with pytest.raises(RuntimeError, match="unexpectedly with 17"):
         await sidecar.wait()
+
+
+@pytest.mark.asyncio
+async def test_model_spawn_failure_cleans_up_runtime_process(
+    tmp_path, monkeypatch
+) -> None:
+    sidecar = ManagedRoboCasaBackend(_config(tmp_path), config_path="deployment.yaml")
+    runtime_process = _Process()
+    calls = 0
+
+    async def create(*_args: object, **_kwargs: object):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return runtime_process
+        raise OSError("model spawn failed")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", create)
+
+    with pytest.raises(OSError, match="model spawn failed"):
+        await sidecar.start()
+
+    assert runtime_process.terminated is True
+    assert not sidecar.credentials_path.exists()
 
 
 @pytest.mark.asyncio
@@ -107,8 +144,10 @@ async def test_backend_health_gate_checks_both_standard_planes(
     tmp_path, monkeypatch
 ) -> None:
     sidecar = ManagedRoboCasaBackend(_config(tmp_path), config_path="deployment.yaml")
-    process = _Process()
-    sidecar.process = process
+    runtime_process = _Process()
+    model_process = _Process()
+    sidecar.runtime_process = runtime_process
+    sidecar.model_process = model_process
 
     class RuntimeClient:
         def __init__(self, *args: object, **kwargs: object) -> None:
@@ -136,7 +175,8 @@ async def test_backend_health_gate_checks_both_standard_planes(
     monkeypatch.setattr("hey_robot.app.sidecars.GrpcModelServiceClient", ModelClient)
 
     await sidecar._wait_ready("grpc://127.0.0.1:9092")
-    assert process.returncode is None
+    assert runtime_process.returncode is None
+    assert model_process.returncode is None
 
 
 def test_managed_backend_factory_has_one_deployment_entry(tmp_path) -> None:
