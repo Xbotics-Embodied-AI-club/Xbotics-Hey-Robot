@@ -25,6 +25,7 @@ class SkillContract:
     required_model_service: str | None = None
     driver_primitives: tuple[str, ...] = ()
     required_resources: tuple[str, ...] = ()
+    dependencies: tuple[str, ...] = ()
     preconditions: tuple[str, ...] = ()
     success_criteria: tuple[str, ...] = ()
     failure_modes: tuple[str, ...] = ()

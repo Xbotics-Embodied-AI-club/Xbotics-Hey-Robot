@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 import types
 
+import pytest
+
 from hey_robot.config import DeploymentConfig
 from hey_robot.config.validation import validate_deployment
 from hey_robot.skills import Skill, SkillResult
@@ -94,33 +96,18 @@ def test_validate_deployment_requires_explicit_lerobot_policy_contract(
     assert "model service policy requires positive action_dimensions" in messages
 
 
-def test_validate_deployment_rejects_removed_enabled_surface(
+def test_deployment_config_rejects_unknown_skill_surface_field(
     tmp_path,
 ) -> None:
-    config = DeploymentConfig.from_dict(
-        {
-            "resources": {
-                "runtime_dir": str(tmp_path / "runtime"),
-                "media": {"root": str(tmp_path / "media")},
-                "episodes": {"root": str(tmp_path / "episodes")},
-            },
-            "robots": {"mock0": {"type": "mock"}},
-            "skills": {
-                "mode": "production",
-                "enabled": ["move_base"],
-            },
-        }
-    )
-
-    issues = validate_deployment(config)
-
-    assert any("skills.enabled 已移除" in issue.message for issue in issues)
+    del tmp_path
+    with pytest.raises(ValueError, match="skills uses unknown fields"):
+        DeploymentConfig.from_dict({"skills": {"legacy": ["move_base"]}})
 
 
 def test_validate_deployment_rejects_unsupported_robot_family(
     tmp_path, monkeypatch
 ) -> None:
-    module_name = "tests.fake_robot_specific_skill"
+    module_name = "hey_robot.skills.fake_robot_specific_skill"
     module = types.ModuleType(module_name)
 
     def register(registry) -> None:
@@ -159,7 +146,7 @@ def test_validate_deployment_rejects_unsupported_robot_family(
 def test_validate_deployment_rejects_unavailable_required_model_service(
     tmp_path, monkeypatch
 ) -> None:
-    module_name = "tests.fake_required_model_service_skill"
+    module_name = "hey_robot.skills.fake_required_model_service_skill"
     module = types.ModuleType(module_name)
 
     def register(registry) -> None:
@@ -203,7 +190,7 @@ def test_validate_deployment_rejects_unavailable_required_model_service(
 def test_validate_deployment_rejects_missing_driver_primitive(
     tmp_path, monkeypatch
 ) -> None:
-    module_name = "tests.fake_driver_primitive_skill"
+    module_name = "hey_robot.skills.fake_driver_primitive_skill"
     module = types.ModuleType(module_name)
 
     def register(registry) -> None:
@@ -246,7 +233,7 @@ def test_validate_deployment_rejects_missing_driver_primitive(
 def test_validate_deployment_allows_configured_driver_primitive(
     tmp_path, monkeypatch
 ) -> None:
-    module_name = "tests.fake_configured_driver_primitive_skill"
+    module_name = "hey_robot.skills.fake_configured_driver_primitive_skill"
     module = types.ModuleType(module_name)
 
     def register(registry) -> None:
@@ -284,3 +271,53 @@ def test_validate_deployment_allows_configured_driver_primitive(
     )
 
     assert validate_deployment(config) == []
+
+
+def test_validate_deployment_rejects_invalid_nested_skill_dependency(
+    tmp_path, monkeypatch
+) -> None:
+    module_name = "hey_robot.skills.fake_nested_dependency"
+    module = types.ModuleType(module_name)
+
+    def register(registry) -> None:
+        registry.register(
+            Skill(
+                "root",
+                "Root.",
+                {},
+                _noop_skill,
+                dependencies=("missing",),
+            )
+        )
+
+    setattr(module, "register", register)
+    monkeypatch.setitem(sys.modules, module_name, module)
+    config = DeploymentConfig.from_dict(
+        {
+            "resources": {"runtime_dir": str(tmp_path / "runtime")},
+            "robots": {"mock0": {"type": "mock"}},
+            "skills": {"modules": [module_name], "tools": ["root"]},
+        }
+    )
+
+    messages = [issue.message for issue in validate_deployment(config)]
+
+    assert "skill 'root' depends on unknown skill 'missing'" in messages
+
+
+def test_validate_deployment_rejects_multiple_enabled_agents(tmp_path) -> None:
+    config = DeploymentConfig.from_dict(
+        {
+            "resources": {"runtime_dir": str(tmp_path / "runtime")},
+            "robots": {"mock0": {"type": "mock"}},
+            "agents": {
+                "first": {"robot_id": "mock0"},
+                "second": {"robot_id": "mock0"},
+            },
+            "skills": {"tools": ["inspect_scene"]},
+        }
+    )
+
+    messages = [issue.message for issue in validate_deployment(config)]
+
+    assert any("exactly one enabled autonomous agent" in item for item in messages)

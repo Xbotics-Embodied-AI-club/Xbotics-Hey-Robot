@@ -313,7 +313,8 @@ def test_generic_manipulate_executes_native_action_option() -> None:
             self.observations = observations
             self.calls = []
 
-        async def observe(self, robot_id):
+        async def observe(self, robot_id, *, after_frame_id=None, timeout_sec=None):
+            del after_frame_id, timeout_sec
             del robot_id
             return self.observations[0]
 

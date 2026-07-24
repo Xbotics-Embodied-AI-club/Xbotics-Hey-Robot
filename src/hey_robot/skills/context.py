@@ -29,10 +29,19 @@ class SkillContext:
     _progress: Callable[[float, str | None], Awaitable[None]] | None = None
     _cancelled: Callable[[], bool] | None = None
 
-    async def observe(self) -> RobotObservation:
+    async def observe(
+        self,
+        *,
+        after_frame_id: int | None = None,
+        timeout_sec: float | None = None,
+    ) -> RobotObservation:
         if self.robot is None:
             raise RuntimeError("robot client is unavailable")
-        return await self.robot.observe(self.robot_id)
+        return await self.robot.observe(
+            self.robot_id,
+            after_frame_id=after_frame_id,
+            timeout_sec=timeout_sec,
+        )
 
     async def run(
         self, name: str, arguments: dict[str, Any] | None = None

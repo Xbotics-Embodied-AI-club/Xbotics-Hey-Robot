@@ -582,6 +582,13 @@ class AgentTaskStore:
         self._finish(task_id, "completed", final_recap=recap)
         return check
 
+    def complete_from_environment(self, task_id: str, *, recap: str) -> None:
+        """Accept an authoritative environment terminal without LLM re-verification."""
+        task = self.task(task_id)
+        if task is None or task.status != "active":
+            return
+        self._finish(task_id, "completed", final_recap=recap)
+
     def control_task(self, task_id: str, status: TaskStatus, reason: str) -> None:
         if status not in TERMINAL_STATUSES:
             raise ValueError("control_task status must be terminal")

@@ -52,6 +52,7 @@ class Skill:
     supported_robots: tuple[str, ...] = ()
     required_actions: tuple[str, ...] = ()
     required_models: tuple[str, ...] = ()
+    dependencies: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

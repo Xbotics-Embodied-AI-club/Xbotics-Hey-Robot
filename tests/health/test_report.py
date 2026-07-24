@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 
 from hey_robot.cli.doctor import main as doctor_main
@@ -51,6 +52,27 @@ def test_health_report_describes_skill_resource_readiness(tmp_path) -> None:
     assert "camera" in look_around["metadata"]["resources"]
     assert "base" in look_around["metadata"]["resources"]
     assert "verify camera scan" in look_around["fix_hint"]
+
+
+def test_health_report_exposes_projection_failures_and_drops(tmp_path) -> None:
+    config = _config(tmp_path)
+    path = tmp_path / "runtime" / config.deployment.id / "skill_projection_health.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps({"published": 8, "failed": 1, "dropped": 2, "queued": 0}),
+        encoding="utf-8",
+    )
+
+    payload = HealthReportService(config).payload(robot_id="mock0")
+
+    report = next(
+        item
+        for item in payload["reports"]
+        if item["component"] == "skill.event_projection"
+    )
+    assert report["status"] == "degraded"
+    assert report["metadata"]["failed"] == 1
+    assert report["metadata"]["dropped"] == 2
 
 
 def test_full_health_report_aggregates_platform_and_script_inventory(tmp_path) -> None:

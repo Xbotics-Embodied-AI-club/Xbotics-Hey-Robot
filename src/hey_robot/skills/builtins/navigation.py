@@ -56,7 +56,8 @@ async def _run_vln(
         )
 
     max_steps = max(1, int(arguments.get("max_steps", 30)))
-    observation = await ctx.observe()
+    fresh_timeout = float(arguments.get("fresh_observation_timeout_sec", 2.0))
+    observation = await ctx.observe(timeout_sec=fresh_timeout)
     steps: list[dict[str, Any]] = []
     planner_history: list[dict[str, Any]] = []
     look_down_requested = False
@@ -77,6 +78,7 @@ async def _run_vln(
             robot_id=ctx.robot_id,
             timeout_sec=arguments.get("model_timeout_sec"),
         )
+        ctx.raise_if_cancelled()
         planner = _planner_data(result.data)
         planner_history.append(planner)
         if not result.success:
@@ -85,9 +87,17 @@ async def _run_vln(
                 result.summary,
                 planner_history,
                 steps,
-                "planner_failed",
-                failure_mode=result.failure_mode or "vln_planner_failed",
+                "model_failed",
+                failure_mode=result.failure_mode or "model_failed",
                 error=result.error,
+            )
+        if _environment_done(planner):
+            return _vln_result(
+                True,
+                result.summary,
+                planner_history,
+                steps,
+                "environment_done",
             )
 
         if _requires_secondary_observation(planner):
@@ -105,7 +115,20 @@ async def _run_vln(
                 (step_index + 1) / max_steps,
                 "VLN 请求 secondary observation，准备重新观察。",
             )
-            observation = await ctx.observe()
+            try:
+                observation = await ctx.observe(
+                    after_frame_id=observation.frame_id,
+                    timeout_sec=fresh_timeout,
+                )
+            except TimeoutError:
+                return _vln_result(
+                    False,
+                    "VLN secondary observation 超时。",
+                    planner_history,
+                    steps,
+                    "observation_stale",
+                    failure_mode="observation_stale",
+                )
             continue
 
         try:
@@ -131,7 +154,9 @@ async def _run_vln(
                 command=command,
             )
 
-        action_result = await ctx.robot.execute(
+        robot = ctx.robot
+        assert robot is not None
+        action_result = await robot.execute(
             ctx.robot_id,
             command["name"],
             command["arguments"],
@@ -156,9 +181,17 @@ async def _run_vln(
                 action_result.summary,
                 planner_history,
                 steps,
-                "primitive_execution_failed",
-                failure_mode=action_result.failure_mode or "primitive_execution_failed",
+                "action_failed",
+                failure_mode=action_result.failure_mode or "action_failed",
                 error=action_result.error,
+            )
+        if _environment_done(action_result.data):
+            return _vln_result(
+                True,
+                action_result.summary,
+                planner_history,
+                steps,
+                "environment_done",
             )
         await ctx.progress(
             (step_index + 1) / max_steps,
@@ -170,18 +203,30 @@ async def _run_vln(
                 "VLN planner 已确认到达目标。",
                 planner_history,
                 steps,
-                "model_stop",
+                "model_done",
             )
         if step_index + 1 < max_steps:
-            observation = await ctx.observe()
+            try:
+                observation = await ctx.observe(
+                    after_frame_id=observation.frame_id,
+                    timeout_sec=fresh_timeout,
+                )
+            except TimeoutError:
+                return _vln_result(
+                    False,
+                    "VLN action 后未获得 fresh observation。",
+                    planner_history,
+                    steps,
+                    "observation_stale",
+                    failure_mode="observation_stale",
+                )
 
     return _vln_result(
-        False,
+        True,
         f"VLN 已达到 max_steps={max_steps}，尚未确认到达目标。",
         planner_history,
         steps,
         "max_steps",
-        failure_mode="max_steps",
     )
 
 
@@ -232,6 +277,13 @@ def _requires_secondary_observation(planner: dict[str, Any]) -> bool:
     return bool(planner.get("requires_secondary_observation")) or (
         planner.get("mode") == "look_down_required"
     )
+
+
+def _environment_done(data: dict[str, Any]) -> bool:
+    if bool(data.get("environment_done")):
+        return True
+    environment = data.get("environment")
+    return isinstance(environment, dict) and bool(environment.get("done"))
 
 
 def _planner_to_action(planner: dict[str, Any]) -> dict[str, Any]:

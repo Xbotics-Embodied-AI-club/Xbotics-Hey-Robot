@@ -9,17 +9,16 @@
 
 如果新能力只组合系统已经具备的能力，开发者只需：
 
-1. 实现一个 `BaseSkill` 子类；
-2. 在 `SkillSpec` 中声明输入、资源、依赖和安全约束；
-3. 通过 `register_skills(registry)` 注册；
-4. 在部署配置的 `skills.modules` 和 `skills.enabled` 中启用；
+1. 实现一个异步 handler，并创建一个 `Skill`；
+2. 在 `Skill` 中声明输入、资源、依赖和运行时要求；
+3. 通过 `register(registry)` 注册；
+4. 在部署配置的 `skills.modules` 和 `skills.tools` 中启用；
 5. 添加 Skill 单元测试和部署校验测试。
 
 不需要修改：
 
 - Agent prompt、Agent 主循环或 Agent tool；
-- `SkillControllerService`；
-- `SkillRuntime`、`SkillScheduler`；
+- `LocalSkillClient`、`SkillWorker` 或 `SkillRunner`；
 - Bus topic 和协议消息；
 - Robot Driver。
 
@@ -34,83 +33,85 @@
 
 ```text
 deployment skills.modules
-  -> register_skills(SkillRegistry)
-  -> deployment skills.enabled
+  -> register(SkillRegistry)
+  -> deployment skills.tools
   -> Agent 读取可见 Skill 契约
-  -> SkillControllerService 接收 SkillIntent
-  -> SkillScheduler 检查资源冲突、超时和中断
-  -> SkillRuntime.validate / execute
-  -> BaseSkill.execute
+  -> LocalSkillClient.submit(SkillCommand)
+  -> SkillWorker 管理异步运行、取消和持久化
+  -> SkillRunner 检查参数、依赖、资源和超时
+  -> Skill handler
   -> SkillContext ports
-  -> Robot Runtime / Perception / gRPC ModelService
+  -> Robot Runtime / ModelService
 ```
 
-系统没有静态默认 Skill catalog、兼容 Registry 或第二执行器。`BaseSkill.spec` 是契约的唯一事实源，`SkillRuntime.execute()` 是顶层和嵌套 Skill 的唯一执行入口。
+系统没有兼容 Registry 或第二执行器。`Skill` 是契约的唯一事实源，
+`SkillRunner.run()` 是顶层和嵌套 Skill 的唯一执行入口。
 
 ## 3. 最小 Skill
 
 ```python
-from hey_robot.skills import BaseSkill, SkillSpec
-from hey_robot.skills.legacy_models import SkillResult
+from typing import Any
+
+from hey_robot.skills import Skill, SkillContext, SkillResult
 
 
-class InspectTargetSkill(BaseSkill):
-    spec = SkillSpec(
+async def inspect_target(
+    ctx: SkillContext, arguments: dict[str, Any]
+) -> SkillResult:
+    observation = await ctx.observe(timeout_sec=2.0)
+    return SkillResult(
+        success=True,
+        summary=f"inspected {arguments['target']}",
+        status="completed",
+        data={"frame_id": observation.frame_id},
+        observations=tuple(observation.images),
+        artifacts=tuple(observation.artifacts),
+    )
+
+
+INSPECT_TARGET = Skill(
         name="inspect_target",
         description="Inspect whether a named target is visible.",
-        category="perception",
-        input_schema={
+        parameters={
             "type": "object",
             "properties": {"target": {"type": "string"}},
             "required": ["target"],
+            "additionalProperties": False,
         },
-        required_resources=("camera",),
+        handler=inspect_target,
+        resources=("camera",),
         supported_robots=("xlerobot",),
-        safety_level="observe",
         timeout_sec=6.0,
-        agent_visible=True,
-        feedback_mode="vision",
+        required_actions=("inspect_scene",),
     )
-
-    async def execute(self, ctx, arguments):
-        result = await ctx.perception.inspect_scene(
-            question=f"find {arguments['target']}"
-        )
-        return SkillResult(
-            success=bool(result.get("success", True)),
-            summary=str(result.get("summary") or "inspection completed"),
-            failure_mode=result.get("failure_mode"),
-            error=result.get("error"),
-            data=dict(result),
-        )
 ```
 
-Skill 只实现 `execute()`。系统不再提供 `plan()`；实际执行轨迹由执行控制器根据真实发生的动作记录，避免计划和执行形成两个事实源。
+Skill handler 只描述一次有界执行。实际执行轨迹由 Worker 根据真实事件记录，避免计划和执行形成两个事实源。
 
 ## 4. 组合已有 Skill
 
-组合 Skill 使用 `ctx.invoke()`：
+组合 Skill 使用 `ctx.run()`，并在父 Skill 中声明依赖：
 
 ```python
-class InspectThenStopSkill(BaseSkill):
-    spec = SkillSpec(
+async def inspect_then_stop(ctx, arguments):
+    inspection = await ctx.run("inspect_scene", dict(arguments))
+    if not inspection.success:
+        return inspection
+    stopped = await ctx.run("stop_motion", {})
+    if not stopped.success:
+        return stopped
+    return SkillResult(True, "Inspection completed and motion stopped.", "completed")
+
+
+INSPECT_THEN_STOP = Skill(
         name="inspect_then_stop",
         description="Inspect the scene and then stop robot motion.",
-        category="safety",
+        parameters={"type": "object"},
+        handler=inspect_then_stop,
         dependencies=("inspect_scene", "stop_motion"),
-        required_resources=("camera", "base"),
+        resources=("camera", "base"),
         supported_robots=("xlerobot",),
-        safety_level="motion",
     )
-
-    async def execute(self, ctx, arguments):
-        inspection = await ctx.invoke("inspect_scene", dict(arguments))
-        if not inspection.success:
-            return inspection
-        stopped = await ctx.invoke("stop_motion", {})
-        if not stopped.success:
-            return stopped
-        return SkillResult(success=True, summary="Inspection completed and motion stopped.")
 ```
 
 必须同时在 `dependencies` 中声明所有子 Skill。部署校验会递归检查依赖是否存在，以及依赖的外部 ModelService 是否可用。
@@ -121,9 +122,10 @@ Skill 只能通过以下端口访问系统能力：
 
 ```text
 ctx.robot          已有机器人动作
-ctx.perception     已有感知能力
-ctx.model_services   已配置的外部能力服务
-ctx.invoke         其他已注册 Skill
+ctx.models         已配置的 ModelService 路由
+ctx.run            已声明依赖的其他 Skill
+ctx.progress       当前 run 的进度事件
+ctx.raise_if_cancelled  协作式取消检查
 ```
 
 禁止在 Skill 中：
@@ -134,24 +136,21 @@ ctx.invoke         其他已注册 Skill
 - 访问串口、舵机、MuJoCo actuator 等硬件细节；
 - 自己实现调度、资源锁、超时或生命周期事件。
 
-## 6. SkillSpec 必填思维
+## 6. Skill 契约字段
 
-`SkillSpec` 是 Skill 契约的唯一来源，重点字段如下：
+`Skill` 是 Skill 契约的唯一来源，重点字段如下：
 
 - `name`：全局唯一，重复注册会启动失败；
 - `description`：准确描述真实能力，不允许语义夸大；
-- `input_schema`：参数结构和必填参数；
-- `required_resources`：如 `camera`、`base`、`arm`、`gripper`；
+- `parameters`：JSON Schema 参数结构和必填参数；
+- `resources`：如 `camera`、`base`、`arm`、`gripper`；
 - `dependencies`：执行时调用的子 Skill；
-- `driver_primitives`：该 Skill 直接需要当前 robot driver 支持的运行时原语；
-- `required_model_service`：该 Skill 直接依赖的外部服务能力；
+- `required_actions`：该 Skill 直接需要 Robot Runtime 支持的动作；
+- `required_models`：该 Skill 直接依赖的 ModelService 能力；
 - `supported_robots`：支持的机器人族；
-- `safety_level`：`observe`、`normal`、`motion`、`stop` 等；
 - `timeout_sec`：运行上限；
-- `agent_visible`：是否作为语义能力暴露给 Agent；
-- `failure_modes` 和 `recovery_hints`：预期失败及恢复建议。
 
-生产配置只能启用 `agent_visible=True` 的语义 Skill。底层原语仍可注册，但只能由语义 Skill 通过 `ctx.invoke()` 使用。
+只有列入 `skills.tools` 的 Skill 才投影为 Agent tool。注册但未列入的底层 Skill 只能通过已声明的 `ctx.run()` 依赖调用。
 
 ## 7. 注册与配置
 
@@ -161,8 +160,8 @@ ctx.invoke         其他已注册 Skill
 from typing import Any
 
 
-def register_skills(registry: Any) -> None:
-    registry.register(InspectTargetSkill())
+def register(registry: Any) -> None:
+    registry.register(INSPECT_TARGET)
 ```
 
 部署配置：
@@ -171,9 +170,9 @@ def register_skills(registry: Any) -> None:
 skills:
   mode: production
   modules:
-    - hey_robot.skills.legacy_builtins
+    - hey_robot.skills.builtins
     - my_robot_skills
-  enabled:
+  tools:
     - inspect_scene
     - inspect_target
 ```
@@ -181,10 +180,10 @@ skills:
 含义：
 
 - `modules` 决定加载哪些注册模块；
-- `enabled` 是当前部署对 Agent 开放的显式能力面；
+- `tools` 是当前部署对 Agent 开放的显式能力面；
 - 未注册、重名、不支持当前机器人或缺少外部 ModelService，部署校验会失败；
-- `driver_primitives` 声明的原语不被当前 robot driver 支持时，部署校验会失败；
-- 未列入 `enabled` 的内部依赖仍可由已启用 Skill 调用，但不会直接暴露给 Agent。
+- `required_actions` 声明的动作不被当前 robot runtime 支持时，部署校验会失败；
+- 未列入 `tools` 的内部依赖仍可由已启用 Skill 调用，但不会直接暴露给 Agent。
 
 ## 8. 三类扩展
 
@@ -202,10 +201,10 @@ skills:
 
 1. 实现 ModelService；
 2. 在配置中声明该服务提供的能力名；
-3. 创建模型驱动 Skill，设置 `required_model_service`；
-4. 由语义 Skill 通过 `ctx.invoke()` 调用。
+3. 创建模型驱动 Skill，设置 `required_models`；
+4. 由语义 Skill 通过 `ctx.run()` 调用。
 
-`required_model_service`、Skill 实现传给 `ctx.model_services.call(name, ...)` 的
+`required_models`、Skill 实现传给 `ctx.models.call(name, ...)` 的
 `name`，以及 deployment 中 `model_services.<id>.provides` 必须一致。仅通过静态部署
 校验还不足以发现实现调用名不一致，必须添加一次真实 `ModelServiceRegistry` 路由测试。
 
@@ -217,7 +216,7 @@ skills:
 
 1. 在 Driver 或感知层实现真实能力；
 2. 在对应 port/adapter 暴露稳定接口；
-3. 创建隐藏原语 Skill，并在 `driver_primitives` 中声明它需要的运行时原语；
+3. 创建内部 Skill，并在 `required_actions` 中声明它需要的运行时动作；
 4. 再创建面向 Agent 的语义 Skill。
 
 这不是架构泄漏，而是能力所有权边界：Skill 定义“做什么”，Driver 定义“硬件怎样做”。
@@ -226,9 +225,9 @@ skills:
 
 至少覆盖：
 
-- 输入缺失时被 `SkillRuntime.validate()` 拒绝；
+- 输入缺失时被 `SkillRunner` 拒绝；
 - `execute()` 成功和失败结果；
-- 嵌套 `ctx.invoke()` 的调用参数和失败传播；
+- 嵌套 `ctx.run()` 的调用参数、依赖限制和失败传播；
 - Registry 能加载模块且拒绝重名；
 - 部署配置能启用 Skill；
 - 机器人族不匹配或 ModelService 缺失时启动失败；
@@ -237,4 +236,4 @@ skills:
 
 ## 10. 完成标准
 
-一个普通语义 Skill 的提交不应修改 Agent、Controller、Robot Runtime、协议和 Driver。若必须修改这些模块，应先判断新增的是系统级机制、Foundation Model 服务，还是全新的硬件原语，而不是把它伪装成普通 Skill 扩展。
+一个普通语义 Skill 的提交不应修改 Agent、Worker、Runner、Robot Runtime、协议和 Driver。若必须修改这些模块，应先判断新增的是系统级机制、Foundation Model 服务，还是全新的硬件原语，而不是把它伪装成普通 Skill 扩展。

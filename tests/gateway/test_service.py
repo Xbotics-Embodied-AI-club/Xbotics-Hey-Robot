@@ -19,6 +19,11 @@ from hey_robot.protocol import (
     UserTurn,
 )
 from hey_robot.protocol.messages import to_payload
+from hey_robot.skills.models import (
+    SkillCommand as HarnessSkillCommand,
+    SkillEvent as HarnessSkillEvent,
+    SkillResult as HarnessSkillResult,
+)
 
 
 class FakeBus:
@@ -275,6 +280,34 @@ def test_gateway_web_cockpit_exposes_sustained_task_view(tmp_path) -> None:
         envelope=Envelope(robot_id="mock0"),
         objective="follow me",
     )
+    step = gateway.task_store.start_skill_step(
+        task.task_id,
+        run_id="run-1",
+        tool_call_id="call-1",
+        tool_name="inspect_scene",
+        arguments={},
+    )
+    gateway.run_store.record_submission(
+        HarnessSkillCommand(
+            Envelope(robot_id="mock0"),
+            "run-1",
+            task.task_id,
+            "mock0",
+            "inspect_scene",
+            {},
+        )
+    )
+    gateway.run_store.append_event(
+        HarnessSkillEvent(
+            Envelope(robot_id="mock0"),
+            "run-1",
+            1,
+            "inspect_scene",
+            "completed",
+            1.0,
+            result=HarnessSkillResult(True, "observed", "completed"),
+        )
+    )
 
     payload = asyncio.run(gateway._web_cockpit("ep1"))
 
@@ -282,6 +315,9 @@ def test_gateway_web_cockpit_exposes_sustained_task_view(tmp_path) -> None:
     assert payload["health"]["robot_id"] == "mock0"
     assert payload["task"]["task_id"] == task.task_id
     assert payload["task"]["objective"] == "follow me"
+    assert payload["steps"][0]["run_id"] == step.run_id
+    assert payload["runs"][0]["run_id"] == "run-1"
+    assert payload["runs"][0]["phase"] == "completed"
 
 
 def test_gateway_identity_binding_links_web_and_feishu_without_forwarding_task(
@@ -488,7 +524,7 @@ def test_gateway_publishes_runtime_and_skill_events_to_channels(tmp_path) -> Non
     assert web is not None
     assert any(item["kind"] == "robot.status" for item in web._events)  # type: ignore[attr-defined]
     assert any(item["kind"] == "skill.lifecycle" for item in web._events)  # type: ignore[attr-defined]
-    assert gateway.skill_store.get("cmd1") is not None
+    assert gateway.run_store.latest_event("cmd1") is None
 
 
 def test_gateway_compacts_robot_status_motion_trace_for_event_stream(tmp_path) -> None:

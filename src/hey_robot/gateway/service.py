@@ -32,6 +32,7 @@ from hey_robot.gateway.identity import ClaimedBinding, IdentityResolver, Pending
 from hey_robot.gateway.receipts import InteractionReceiptStore
 from hey_robot.health import HealthReportService
 from hey_robot.logging import HeyRobotLogger
+from hey_robot.persistence import FileRunStore
 from hey_robot.protocol import (
     AgentReply,
     ConversationResult,
@@ -48,7 +49,6 @@ from hey_robot.protocol.messages import (
     from_payload,
     to_payload,
 )
-from hey_robot.skills.lifecycle import SkillStore
 
 logger = HeyRobotLogger(name="gateway")
 _BINDING_COMMAND = re.compile(
@@ -74,9 +74,8 @@ class GatewayService:
             Path(config.resources.runtime_dir) / "events",
             max_items=config.resources.events_max_items,
         )
-        self.skill_store = SkillStore(
-            Path(config.resources.runtime_dir) / "skills",
-            max_items=config.resources.events_max_items,
+        self.run_store = FileRunStore(
+            Path(config.resources.runtime_dir) / config.deployment.id / "runs"
         )
         task_path = (
             Path(config.resources.runtime_dir)
@@ -374,7 +373,6 @@ class GatewayService:
 
     async def _on_skill_event(self, _topic: str, payload: dict) -> None:
         event = from_payload(SkillEvent, payload)
-        self.skill_store.append(event)
         ux_metadata = event.metadata.get("ux")
         ux_payload = dict(ux_metadata) if isinstance(ux_metadata, dict) else None
         await self.channels.publish_event(
@@ -438,11 +436,15 @@ class GatewayService:
         if not tasks:
             return None
         task = tasks[0]
+        steps = self.task_store.recent_steps(task.task_id)
         return {
             "task": _task_payload(task),
-            "steps": [
-                _step_payload(step)
-                for step in self.task_store.recent_steps(task.task_id)
+            "steps": [_step_payload(step) for step in steps],
+            "runs": [
+                _run_payload(event)
+                for step in steps
+                if step.run_id is not None
+                if (event := self.run_store.latest_event(step.run_id)) is not None
             ],
             "health": HealthReportService(self.config).payload(robot_id=task.robot_id),
         }
@@ -456,7 +458,7 @@ class GatewayService:
 
     async def _web_runtime_summary(self, limit: int) -> dict[str, Any]:
         tasks = self.task_store.recent_tasks(limit)
-        skills = self.skill_store.recent(limit=limit)
+        runs = self.run_store.recent(limit=limit)
         events = self.event_store.recent(limit=limit)
         return {
             "tasks": [_task_payload(task) for task in tasks],
@@ -474,7 +476,7 @@ class GatewayService:
                 }
                 for status in self.latest_robot_status.values()
             ],
-            "skills": list(skills),
+            "skills": [_run_payload(event) for event in runs],
             "events": [
                 {
                     "kind": e.get("kind", ""),
@@ -494,7 +496,7 @@ class GatewayService:
             "stats": {
                 "task_count": len(tasks),
                 "robot_count": len(self.latest_robot_status),
-                "skill_count": len(skills),
+                "skill_count": len(runs),
                 "event_count": len(events or []),
             },
         }
@@ -505,11 +507,15 @@ class GatewayService:
         if not tasks:
             return None
         task = tasks[0]
+        steps = self.task_store.recent_steps(task.task_id)
         return {
             "task": _task_payload(task),
-            "steps": [
-                _step_payload(step)
-                for step in self.task_store.recent_steps(task.task_id)
+            "steps": [_step_payload(step) for step in steps],
+            "runs": [
+                _run_payload(event)
+                for step in steps
+                if step.run_id is not None
+                if (event := self.run_store.latest_event(step.run_id)) is not None
             ],
         }
 
@@ -729,6 +735,33 @@ def _step_payload(step: Any) -> dict[str, Any]:
         "evidence_ids": list(step.evidence_ids),
         "started_at": step.started_at,
         "completed_at": step.completed_at,
+        "run_id": step.run_id,
+    }
+
+
+def _run_payload(event: Any) -> dict[str, Any]:
+    result = event.result
+    return {
+        "run_id": event.run_id,
+        "sequence": event.sequence,
+        "skill": event.name,
+        "phase": event.phase,
+        "timestamp": event.timestamp,
+        "progress": event.progress,
+        "frame_id": event.frame_id,
+        "summary": result.summary if result is not None else event.summary,
+        "success": result.success if result is not None else None,
+        "failure_mode": result.failure_mode if result is not None else None,
+        "error": result.error if result is not None else None,
+        "data": dict(result.data) if result is not None else {},
+        "artifacts": [
+            {
+                "uri": artifact.uri,
+                "artifact_type": artifact.artifact_type,
+                "role": artifact.role,
+            }
+            for artifact in (result.artifacts if result is not None else ())
+        ],
     }
 
 

@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 
-from hey_robot.protocol import Envelope, RobotObservation, RobotStatus
+import pytest
+
+from hey_robot.protocol import (
+    Envelope,
+    RobotObservation,
+    RobotSkillAction,
+    RobotStatus,
+    SkillIntent,
+)
 from hey_robot.robot_runtime import LocalRobotClient
 from hey_robot.robot_runtime.base import RobotCapabilities
 
@@ -37,6 +46,22 @@ class Runtime:
             },
         )
 
+    async def emergency_stop(self, *, reason: str):
+        intent = SkillIntent(
+            Envelope(robot_id="mock0"),
+            "emergency_stop",
+            "emergency_stop",
+            "skill",
+            "stop_motion",
+            {"emergency": True, "reason": reason},
+            reason,
+        )
+        self.actions.append(
+            RobotSkillAction(
+                "stop_motion", {"emergency": True, "reason": reason}
+            ).to_robot_action(intent)
+        )
+
 
 async def test_local_robot_client_adapts_runtime_actions() -> None:
     runtime = Runtime()
@@ -59,3 +84,34 @@ async def test_local_robot_client_adapts_runtime_actions() -> None:
     assert result.data["distance_cm"] == 20
     assert runtime.actions[0].skill_id == "run-1"
     assert runtime.actions[0].metadata["expected_frame_id"] == 4
+
+
+async def test_local_robot_client_waits_for_fresh_frame_and_times_out() -> None:
+    runtime = Runtime()
+    frames = iter((5, 5, 6))
+
+    async def observe():
+        return RobotObservation(Envelope(robot_id="mock0"), frame_id=next(frames))
+
+    runtime.observe = observe
+    client = LocalRobotClient({"mock0": runtime})
+
+    fresh = await client.observe("mock0", after_frame_id=5, timeout_sec=0.2)
+
+    assert fresh.frame_id == 6
+    runtime.observe = lambda: asyncio.sleep(
+        0, result=RobotObservation(Envelope(robot_id="mock0"), frame_id=6)
+    )
+    with pytest.raises(TimeoutError, match="fresh observation timed out"):
+        await client.observe("mock0", after_frame_id=6, timeout_sec=0.02)
+
+
+async def test_local_robot_client_emergency_stop_uses_direct_runtime_action() -> None:
+    runtime = Runtime()
+    client = LocalRobotClient({"mock0": runtime})
+
+    await client.emergency_stop("mock0", reason="operator")
+
+    stop = RobotSkillAction.from_robot_action(runtime.actions[0])
+    assert stop.name == "stop_motion"
+    assert stop.arguments == {"emergency": True, "reason": "operator"}

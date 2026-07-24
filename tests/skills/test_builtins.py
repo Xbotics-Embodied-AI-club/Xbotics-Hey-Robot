@@ -28,7 +28,14 @@ class Robot:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, dict[str, Any], str]] = []
 
-    async def observe(self, robot_id: str) -> RobotObservation:
+    async def observe(
+        self,
+        robot_id: str,
+        *,
+        after_frame_id: int | None = None,
+        timeout_sec: float | None = None,
+    ) -> RobotObservation:
+        del after_frame_id, timeout_sec
         return RobotObservation(Envelope(robot_id=robot_id), frame_id=12, task="desk")
 
     async def execute(
@@ -108,7 +115,14 @@ class FreshRobot(Robot):
         super().__init__()
         self.frame_id = 12
 
-    async def observe(self, robot_id: str) -> RobotObservation:
+    async def observe(
+        self,
+        robot_id: str,
+        *,
+        after_frame_id: int | None = None,
+        timeout_sec: float | None = None,
+    ) -> RobotObservation:
+        del after_frame_id, timeout_sec
         return RobotObservation(
             Envelope(robot_id=robot_id), frame_id=self.frame_id, task="desk"
         )
@@ -308,7 +322,7 @@ async def test_native_vla_manipulate_reobserves_between_bounded_steps() -> None:
     )
 
     assert result.success is True
-    assert result.data["termination_reason"] == "vla_done"
+    assert result.data["termination_reason"] == "model_done"
     assert len(result.data["steps"]) == 2
     assert [
         request["request"]["observation"]["frame_id"] for request in models.requests
@@ -323,6 +337,24 @@ async def test_native_vla_manipulate_reobserves_between_bounded_steps() -> None:
         "progress",
         "completed",
     ]
+
+
+async def test_native_vla_environment_done_stops_before_action() -> None:
+    robot = FreshRobot()
+    models = Models(
+        {
+            "environment_done": True,
+            "action": {"name": "set_gripper", "arguments": {"action": "close"}},
+        }
+    )
+
+    result = await _runner(robot, Sink(), models=models).execute(
+        _command("manipulate", {"task_prompt": "finish episode", "max_steps": 2})
+    )
+
+    assert result.success is True
+    assert result.data["termination_reason"] == "environment_done"
+    assert robot.calls == []
 
 
 async def test_native_vln_navigation_runs_bounded_observe_plan_act_loop() -> None:
@@ -340,7 +372,7 @@ async def test_native_vln_navigation_runs_bounded_observe_plan_act_loop() -> Non
     )
 
     assert result.success is True
-    assert result.data["termination_reason"] == "model_stop"
+    assert result.data["termination_reason"] == "model_done"
     assert [call[1] for call in robot.calls] == ["move_base", "stop_motion"]
     assert [request["request"]["reset_policy"] for request in models.requests] == [
         True,

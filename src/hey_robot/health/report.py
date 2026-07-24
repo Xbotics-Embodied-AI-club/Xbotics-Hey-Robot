@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import time
 from dataclasses import asdict, dataclass, field
@@ -58,6 +59,7 @@ class HealthReportService:
         findings: list[HealthReport] = []
         findings.extend(self._configuration_reports(robot_id=robot_id))
         findings.extend(self._skill_readiness_reports(robot_id=robot_id))
+        findings.extend(self._projection_reports())
         if full:
             findings.extend(self._platform_reports(robot_id=robot_id))
             findings.extend(self._robot_component_reports(robot_id=robot_id))
@@ -106,6 +108,49 @@ class HealthReportService:
                 )
             )
         return reports
+
+    def _projection_reports(self) -> list[HealthReport]:
+        path = (
+            Path(self.config.resources.runtime_dir)
+            / self.config.deployment.id
+            / "skill_projection_health.json"
+        )
+        if not path.exists():
+            return []
+        try:
+            stats = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return [
+                HealthReport(
+                    component="skill.event_projection",
+                    status="degraded",
+                    severity="warning",
+                    evidence="Skill event projection health state is unreadable.",
+                    fix_hint="Check runtime storage permissions and the projection worker.",
+                    source="skill.projection",
+                )
+            ]
+        failed = int(stats.get("failed", 0))
+        dropped = int(stats.get("dropped", 0))
+        degraded = failed > 0 or dropped > 0
+        return [
+            HealthReport(
+                component="skill.event_projection",
+                status="degraded" if degraded else "ok",
+                severity="warning" if degraded else "info",
+                evidence=(
+                    f"Skill event projection published={int(stats.get('published', 0))}, "
+                    f"failed={failed}, dropped={dropped}."
+                ),
+                fix_hint=(
+                    "Inspect the message bus and Gateway consumer lag; execution facts remain in RunStore."
+                    if degraded
+                    else None
+                ),
+                source="skill.projection",
+                metadata=dict(stats),
+            )
+        ]
 
     def _skill_readiness_reports(self, *, robot_id: str | None) -> list[HealthReport]:
         reports: list[HealthReport] = []
@@ -417,8 +462,6 @@ def _fix_hint(message: str) -> str | None:
         return (
             "Fix the runtime/media/episode path permissions or choose writable paths."
         )
-    if "skills.enabled" in lower:
-        return "Update skills.enabled so the production surface only contains semantic user-facing skills."
     return None
 
 

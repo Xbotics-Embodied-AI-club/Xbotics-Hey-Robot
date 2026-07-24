@@ -52,6 +52,9 @@ FORBIDDEN_PATH_PARTS = (
     Path("src/hey_robot/motion/grasp_point.py"),
     Path("src/hey_robot/motion/table_plane.py"),
     Path("tests/test_grasp_algorithm_sim.py"),
+    Path("src/hey_robot/skills/clients.py"),
+    Path("src/hey_robot/cognition/runtime/harness_store.py"),
+    Path("src/hey_robot/skills/lifecycle.py"),
 )
 
 

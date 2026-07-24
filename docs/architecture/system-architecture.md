@@ -193,7 +193,7 @@ LLM 可见的生产工具包括状态查询、任务上下文、感知、记忆�
 
 ### Production 与 bringup
 
-- `production`：`skills.enabled` 只能列出 `agent_visible=True` 的 semantic skill。
+- `production`：`skills.tools` 只能列出 `agent_visible=True` 的 semantic skill。
 - `bringup`：允许把 primitive/implementation skill 直接暴露给 Agent，用于联调。
 
 当前系统仍处于开发和联调阶段，仓库提供的 real/sim 主配置使用 `bringup`。
@@ -318,7 +318,7 @@ Foundation consumer 使用 raw frame stream。
 - `RobotEpisodeStateStore`：最近 robot state；
 - `SceneMemoryStore`：场景证据；
 - Long-term memory：偏好、地点、经验和事件；
-- `RuntimeEventStore` / `SkillStore`：审计和 lifecycle。
+- `RuntimeEventStore`：运行审计；`FileRunStore`：Skill command、事件和终态事实。
 
 这些存储目前是本地文件，适合单机部署和可解释审计，不等价于多节点事务数据库。
 

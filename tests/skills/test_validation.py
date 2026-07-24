@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
 from hey_robot.robot_runtime.clients import RobotActionSpec, RobotClientCapabilities
-from hey_robot.skills import Skill, SkillResult, validate_skill_surface
+from hey_robot.skills import Skill, SkillRegistry, SkillResult, validate_skill_surface
 
 
 async def _handler(_ctx, _arguments):
@@ -61,3 +63,29 @@ def test_validate_skill_surface_accepts_available_requirements() -> None:
         )
         == ()
     )
+
+
+def test_registry_resolves_transitive_dependencies_in_execution_order() -> None:
+    registry = SkillRegistry()
+    registry.register(Skill("leaf", "Leaf.", {}, _handler))
+    registry.register(Skill("middle", "Middle.", {}, _handler, dependencies=("leaf",)))
+    registry.register(Skill("root", "Root.", {}, _handler, dependencies=("middle",)))
+
+    assert [skill.name for skill in registry.resolve_dependencies(("root",))] == [
+        "leaf",
+        "middle",
+        "root",
+    ]
+
+
+def test_registry_rejects_missing_and_cyclic_dependencies() -> None:
+    missing = SkillRegistry()
+    missing.register(Skill("root", "Root.", {}, _handler, dependencies=("missing",)))
+    with pytest.raises(ValueError, match="depends on unknown skill"):
+        missing.resolve_dependencies(("root",))
+
+    cyclic = SkillRegistry()
+    cyclic.register(Skill("a", "A.", {}, _handler, dependencies=("b",)))
+    cyclic.register(Skill("b", "B.", {}, _handler, dependencies=("a",)))
+    with pytest.raises(ValueError, match="dependency cycle: a -> b -> a"):
+        cyclic.resolve_dependencies(("a",))

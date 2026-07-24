@@ -5,6 +5,7 @@ from typing import Any, Protocol
 
 from hey_robot.logging import HeyRobotLogger
 from hey_robot.protocol import (
+    Envelope,
     RobotAction,
     RobotObservation,
     RobotSkillAction,
@@ -140,6 +141,29 @@ class RobotRuntime:
             stop_fn=lambda current: self.control_plane.stop_motion(
                 current, apply_fn=self.driver.apply_action
             ),
+        )
+
+    async def emergency_stop(self, *, reason: str) -> RobotStatus:
+        """Execute the stop primitive outside the normal buffered action path."""
+        intent = SkillIntent(
+            envelope=Envelope(robot_id=self.robot_id),
+            skill_id="emergency_stop",
+            task_id="emergency_stop",
+            intent_kind="skill",
+            name="stop_motion",
+            arguments={"emergency": True, "reason": reason},
+            objective=reason,
+        )
+        action = RobotSkillAction(
+            "stop_motion", {"emergency": True, "reason": reason}
+        ).to_robot_action(intent)
+        action = replace(
+            action,
+            metadata={**dict(action.metadata), "emergency": True, "reason": reason},
+        )
+        return await self.control_plane.stop_motion(
+            action,
+            apply_fn=self.driver.apply_action,
         )
 
     async def reset(self) -> RobotStatus:

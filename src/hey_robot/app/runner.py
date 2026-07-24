@@ -165,6 +165,13 @@ class DeploymentRunner:
                 self.config,
                 robot_service=robot,
             )
+            services.append(
+                ManagedService(
+                    "skills",
+                    runtime_components.skill_client.start,
+                    runtime_components.skill_client.close,
+                )
+            )
         for agent_id, spec in self.config.agents.items():
             if not spec.enabled:
                 continue
@@ -181,7 +188,6 @@ class DeploymentRunner:
                     if runtime_components is not None
                     else None
                 ),
-                owns_skill_client=runtime_components is not None,
             )
             services.append(
                 ManagedService(f"agent:{agent_id}", agent.start, agent.stop)
@@ -190,9 +196,3 @@ class DeploymentRunner:
             gateway = GatewayService(self.config, episode_dir=self.episode_dir)
             services.append(ManagedService("gateway", gateway.start, gateway.stop))
         return services
-
-
-def _uses_native_skill_modules(config: DeploymentConfig) -> bool:
-    return any(
-        str(module).startswith("hey_robot.skills") for module in config.skills.modules
-    )

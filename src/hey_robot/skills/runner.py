@@ -52,17 +52,32 @@ class SkillRunner:
                 failure_mode="invalid_request",
                 error=str(exc),
             )
-            await self._emit(command, command.name, "accepted")
-            await self._emit(command, command.name, "failed", result=result)
-            self._cancelled.discard(command.run_id)
+            try:
+                await self._emit(command, command.name, "accepted")
+                await self._emit(command, command.name, "failed", result=result)
+            finally:
+                self._clear_run_state(command.run_id)
             return result
 
         await self._emit(command, skill.name, "accepted")
         await self._emit(command, skill.name, "running")
         try:
             result = await self._execute_skill(command, skill, arguments)
+        except asyncio.CancelledError:
+            result = SkillResult(
+                False,
+                "skill cancelled",
+                "cancelled",
+                failure_mode="cancelled",
+            )
         except SkillCancelledError as exc:
-            result = SkillResult(False, "skill cancelled", "cancelled", error=str(exc))
+            result = SkillResult(
+                False,
+                "skill cancelled",
+                "cancelled",
+                failure_mode="cancelled",
+                error=str(exc),
+            )
         except TimeoutError:
             result = SkillResult(
                 False,
@@ -80,9 +95,15 @@ class SkillRunner:
             )
         result = _normalize_result(result)
         phase = result.status
-        await self._emit(command, skill.name, phase, result=result)
-        self._cancelled.discard(command.run_id)
+        try:
+            await self._emit(command, skill.name, phase, result=result)
+        finally:
+            self._clear_run_state(command.run_id)
         return result
+
+    def _clear_run_state(self, run_id: str) -> None:
+        self._cancelled.discard(run_id)
+        self._sequences.pop(run_id, None)
 
     async def _execute_skill(
         self,
@@ -93,6 +114,10 @@ class SkillRunner:
         context = self._context_factory(command)
 
         async def invoke(name: str, child_arguments: dict[str, Any]) -> SkillResult:
+            if name not in skill.dependencies:
+                raise RuntimeError(
+                    f"skill {skill.name!r} called undeclared dependency {name!r}"
+                )
             child = self._registry.get(name)
             resolved = validate_arguments(child.parameters, child_arguments)
             return await self._execute_skill(command, child, resolved)

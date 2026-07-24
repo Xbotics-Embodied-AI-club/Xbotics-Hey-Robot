@@ -74,7 +74,6 @@ class AutonomousAgentService:
         agent_id: str,
         skill_client: SkillClient | None = None,
         skill_catalog: SkillCatalogView | None = None,
-        owns_skill_client: bool = False,
     ) -> None:
         self.config = config
         self.agent_id = agent_id
@@ -112,7 +111,6 @@ class AutonomousAgentService:
         self.runner = AgentRunner(provider, self.tools)
         self.completion_verifier = TaskCompletionVerifier(provider)
         self.skill_client = skill_client
-        self._owns_skill_client = owns_skill_client
         if self.skill_client is None:
             raise ValueError("AutonomousAgentService requires native SkillClient")
         self.task_coordinator = TaskCoordinator(self.tasks, self.skill_client)
@@ -121,8 +119,6 @@ class AutonomousAgentService:
 
     async def start(self) -> None:
         await self.bus.connect()
-        if hasattr(self.skill_client, "start"):
-            await self.skill_client.start()
         await self.bus.subscribe([self.topics.conversation_turn], self._on_turn)
         await self.bus.subscribe(
             [self.topics.robot_observation], self._on_robot_observation
@@ -144,8 +140,6 @@ class AutonomousAgentService:
             self._skill_event_consumer = None
         self.conversations.close()
         self.tasks.close()
-        if self.skill_client is not None and self._owns_skill_client:
-            await self.skill_client.close()
         await self.bus.close()
 
     async def _on_turn(self, _topic: str, payload: dict) -> None:
@@ -462,6 +456,16 @@ class AutonomousAgentService:
                 "emergency_stop": "已请求紧急停止。",
             }[proposal.action]
         )
+        skill_client = getattr(self, "skill_client", None)
+        if proposal.action == "emergency_stop" and skill_client is not None:
+            robot_id = (
+                task.robot_id
+                if task is not None
+                else self.config.default_robot_id(self.agent_id)
+            )
+            if robot_id is None:
+                return "无法执行紧急停止：当前没有配置机器人。"
+            await skill_client.emergency_stop(robot_id, reason=reason)
         if task is not None:
             status = cast(
                 TaskStatus,
@@ -471,8 +475,7 @@ class AutonomousAgentService:
                     "emergency_stop": "cancelled",
                 }[proposal.action],
             )
-            skill_client = getattr(self, "skill_client", None)
-            if skill_client is not None:
+            if skill_client is not None and proposal.action != "emergency_stop":
                 for run_id in self.tasks.active_run_ids(task.task_id):
                     await skill_client.cancel(run_id, reason=reason)
             self.tasks.control_task(task.task_id, status, reason)
@@ -508,14 +511,10 @@ class AutonomousAgentService:
         )
 
     async def _consume_skill_events(self) -> None:
-        async for event in self.skill_client.events():
+        skill_client = self.skill_client
+        assert skill_client is not None
+        async for event in skill_client.events():
             await self._handle_skill_event(event)
-
-    async def _on_skill_event(self, _topic: str, payload: dict) -> None:
-        """Compatibility hook for tests and transitional bus subscribers."""
-        from hey_robot.skills.models import SkillEvent
-
-        await self._handle_skill_event(from_payload(SkillEvent, payload))
 
     async def _handle_skill_event(
         self,

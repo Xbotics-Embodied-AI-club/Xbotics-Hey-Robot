@@ -27,6 +27,7 @@ def skill_contract_from_native(skill: Skill) -> SkillContract:
         ),
         driver_primitives=skill.required_actions,
         required_resources=skill.resources,
+        dependencies=skill.dependencies,
         timeout_sec=skill.timeout_sec,
     )
 

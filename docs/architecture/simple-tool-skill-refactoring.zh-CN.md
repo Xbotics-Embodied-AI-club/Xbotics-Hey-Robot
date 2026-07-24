@@ -381,10 +381,11 @@ runtime/<deployment>/
   runs/<run_id>/
     events.jsonl
     result.json
-    artifacts/
+  media/artifacts/
 ```
 
 TaskStore 是慢系统任务事实来源，RunStore 是快系统 run 事实来源，两者由 Core Harness 进程持有。
+大型 observation、model output 和 action trace 由统一 media store 保存，RunStore 只记录 artifact reference。
 消息总线只负责已有跨服务消息，不保存任务或 Skill run 事实；独立服务不得共享这个 SQLite writer。
 
 ## 7. 范围边界

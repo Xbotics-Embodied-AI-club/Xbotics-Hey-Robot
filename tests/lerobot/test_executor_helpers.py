@@ -227,9 +227,7 @@ class _Runtime:
 
 def test_isolated_policy_worker_handles_standard_commands(monkeypatch) -> None:
     runtime = _Runtime()
-    connection = _Connection(
-        [("reset", 7), ("select_action", {}, "task"), ("close",)]
-    )
+    connection = _Connection([("reset", 7), ("select_action", {}, "task"), ("close",)])
     monkeypatch.setattr(executor, "_load_direct_policy_runtime", lambda *_: runtime)
 
     executor._policy_process_main(connection, "policy", "cpu", {})
@@ -242,9 +240,7 @@ def test_isolated_policy_worker_handles_standard_commands(monkeypatch) -> None:
 
 def test_isolated_policy_worker_reports_invalid_command(monkeypatch) -> None:
     connection = _Connection([("unknown",)])
-    monkeypatch.setattr(
-        executor, "_load_direct_policy_runtime", lambda *_: _Runtime()
-    )
+    monkeypatch.setattr(executor, "_load_direct_policy_runtime", lambda *_: _Runtime())
 
     executor._policy_process_main(connection, "policy", "cpu", {})
 

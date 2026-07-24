@@ -183,7 +183,7 @@ supervisor、agent 和 gateway。它们各自连接 NATS，不要依赖列表顺
 | 操作 | `set_gripper` | 控制夹爪开合 |
 
 `vla_manipulation` Skill 已注册，但当前三份真机配置的 `model_services` 都为空，也没有把
-VLA 加入 `skills.enabled`。因此默认真机系统不具备可启动的 VLA 服务。
+VLA 加入 `skills.tools`。因此默认真机系统不具备可启动的 VLA 服务。
 
 ## 摄像头配置
 
@@ -239,7 +239,7 @@ Agent request_skill
 3. 验证 `GetHealth` 的 online/loaded/busy；
 4. 添加 observation -> inference -> primitive -> RobotStatus 的端到端测试；
 5. 在仿真和空载机械臂上验证动作范围、取消和超时；
-6. 最后才把 semantic VLA skill 加入 `skills.enabled`。
+6. 最后才把 semantic VLA skill 加入 `skills.tools`。
 
 在这些条件完成前，不应把当前真机配置描述为支持 VLA 抓取。
 

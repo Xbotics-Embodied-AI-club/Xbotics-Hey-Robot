@@ -5,6 +5,8 @@ import contextlib
 import math
 import os
 import platform
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -145,22 +147,30 @@ class _DockSessionAdapter:
 
 
 def _test_egl_device_display() -> bool:
-    """Probe whether the EGL driver supports PLATFORM_DEVICE headless rendering.
-
-    A failed ``GLContext`` construction leaves ``mujoco.egl.EGL_DISPLAY`` pointing
-    at ``EGL_NO_DISPLAY``, which poisons any later EGL path.  We reset it so that
-    the OSMesa fallback operates from a clean slate.
-    """
-    import mujoco.egl
-
+    """Probe EGL without importing MuJoCo in the runtime process."""
+    env = dict(os.environ)
+    env["MUJOCO_GL"] = "egl"
+    env["PYOPENGL_PLATFORM"] = "egl"
     try:
-        ctx = mujoco.egl.GLContext(64, 64)
-    except Exception:
-        mujoco.egl.EGL_DISPLAY = None
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import mujoco.egl; "
+                    "ctx=mujoco.egl.GLContext(64,64); "
+                    "ctx.make_current(); ctx.free()"
+                ),
+            ],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
         return False
-    else:
-        ctx.free()
-        return True
+    return completed.returncode == 0
 
 
 def _is_egl_available() -> bool:
@@ -220,6 +230,7 @@ class XLeRobotSimDriver:
         self.robot_id = context.robot_id
         self.settings = dict(context.spec.settings or {})
         # 在测试或调用方绕过 ``start``、直接通过该驱动构造 MjModel/MjData 前完成配置。
+        _configure_mujoco_gl_backend()
         with contextlib.suppress(ImportError):
             configure_mujoco_warning_logging(context.deployment_id)
 

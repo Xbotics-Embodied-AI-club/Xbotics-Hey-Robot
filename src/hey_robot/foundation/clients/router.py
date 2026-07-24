@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from hey_robot.contracts import SkillContract
 from hey_robot.foundation.clients.manager import ModelServiceRegistry
 from hey_robot.foundation.clients.models import (
@@ -63,5 +65,12 @@ class RegistryModelRouter:
         )
 
     async def cancel(self, run_id: str) -> None:
-        for client in self._registry.clients.values():
-            await client.cancel(run_id)
+        results = await asyncio.gather(
+            *(client.cancel(run_id) for client in self._registry.clients.values()),
+            return_exceptions=True,
+        )
+        failures = [result for result in results if isinstance(result, Exception)]
+        if failures:
+            raise RuntimeError(
+                f"{len(failures)} model service cancellation request(s) failed"
+            ) from failures[0]

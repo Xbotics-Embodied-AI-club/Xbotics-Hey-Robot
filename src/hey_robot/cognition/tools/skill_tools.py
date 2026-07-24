@@ -41,7 +41,7 @@ class SkillTool:
     def proposal(self, arguments: dict[str, Any]) -> SkillCallProposal:
         normalized = validate_arguments(self._parameters, arguments)
         category = str(getattr(self._spec, "category", ""))
-        intent_kind = (
+        intent_kind: Literal["skill", "observation"] = (
             "observation"
             if self.name == "inspect_scene" or category in {"observe", "perception"}
             else "skill"
@@ -64,8 +64,11 @@ def skill_call_from_payload(payload: dict[str, Any]) -> SkillCallProposal:
     name = payload.get("name", payload.get("skill_name"))
     if not isinstance(name, str) or not name:
         raise ValueError("skill proposal payload must include name")
+    intent_kind = payload.get("intent_kind")
+    if intent_kind not in {"skill", "observation"}:
+        raise ValueError("skill proposal payload has invalid intent_kind")
     return SkillCallProposal(
-        payload["intent_kind"],
+        intent_kind,
         name,
         payload["objective"],
         dict(payload.get("arguments", {})),

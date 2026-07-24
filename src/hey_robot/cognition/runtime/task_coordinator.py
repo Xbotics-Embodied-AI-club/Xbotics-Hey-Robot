@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
 from hey_robot.cognition.runtime.agent_task_store import AgentTaskStep, AgentTaskStore
 from hey_robot.cognition.tools.skill_tools import SkillCallProposal
@@ -77,10 +78,9 @@ class TaskCoordinator:
     async def reconcile_active_runs(self) -> tuple[AgentTaskStep, ...]:
         """将 transport 已知 event 回填到持久化的 non-terminal step。
 
-        transport 无法恢复 historical status 时可以返回 ``None``。此时 step 保持
-        pending/running；只有 worker receipt/reconcile 实现才能决定 failed 或 resubmit。
-        这样 slow-system durable state 仍是事实来源，Agent process 不会重放 physical
-        robot command。
+        transport 不知道该 run 时可以返回 ``None``，此时 step 保持 pending/running。
+        持有 durable receipt 的 Worker 会把失去执行 ownership 的 non-terminal run 收敛为
+        ``failed/execution_lost``，Agent process 不会重放 physical robot command。
         """
         return tuple(step for _event, step in await self.reconcile_active_run_events())
 
@@ -121,17 +121,46 @@ class TaskCoordinator:
             )
         if event.result is None:
             return None
-        status = event.phase
+        status: Literal["completed", "failed", "cancelled"]
+        if event.phase == "completed":
+            status = "completed"
+        elif event.phase == "failed":
+            status = "failed"
+        elif event.phase == "cancelled":
+            status = "cancelled"
+        else:
+            return None
         outcome = ToolOutcome(
             "completed" if event.result.success else "failed",
             event.result.summary,
-            {**event.result.data, "evidence_ids": list(event.result.evidence_ids)},
+            {
+                **event.result.data,
+                "evidence_ids": list(event.result.evidence_ids),
+                "artifacts": [
+                    {
+                        "uri": artifact.uri,
+                        "artifact_type": artifact.artifact_type,
+                        "role": artifact.role,
+                    }
+                    for artifact in event.result.artifacts
+                ],
+            },
             operation_id=event.run_id,
             retryable=event.result.failure_mode in {"timeout", "unavailable"},
         )
-        return self._tasks.apply_skill_event(
+        step = self._tasks.apply_skill_event(
             event.run_id,
             outcome=outcome,
             status=status,
             event_sequence=event.sequence,
         )
+        if (
+            step is not None
+            and event.result.success
+            and event.result.data.get("termination_reason") == "environment_done"
+        ):
+            self._tasks.complete_from_environment(
+                step.task_id,
+                recap=event.result.summary or "Environment reported task completion.",
+            )
+        return step

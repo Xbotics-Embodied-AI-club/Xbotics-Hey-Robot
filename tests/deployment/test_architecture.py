@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 from hey_robot.config import DeploymentConfig
 from hey_robot.config.validation import validate_deployment
 from hey_robot.episode import JsonlEpisodeStore, allocate_episode
@@ -222,7 +224,6 @@ def test_runtime_configs_use_native_local_surface() -> None:
         assert config.skills.modules == ("hey_robot.skills.builtins",), path
         assert config.skills.execution_mode == "local", path
         assert config.skills.tools, path
-        assert config.skills.enabled == (), path
         assert "human_follow" not in config.skills.tools, path
         assert not [
             issue for issue in validate_deployment(config) if issue.level == "error"
@@ -245,15 +246,7 @@ def test_deployment_validation_requires_explicit_skill_surface() -> None:
     assert any("skills.tools must explicitly list" in item.message for item in issues)
 
 
-def test_deployment_validation_rejects_unknown_enabled_skill() -> None:
-    config = DeploymentConfig.from_dict({"skills": {"enabled": ["missing_skill"]}})
-
-    issues = validate_deployment(config)
-
-    assert any("skills.enabled 已移除" in item.message for item in issues)
-
-
-def test_deployment_config_accepts_tools_and_rejects_removed_enabled_surface() -> None:
+def test_deployment_config_accepts_tools_and_rejects_unknown_skill_fields() -> None:
     config = DeploymentConfig.from_dict({"skills": {"tools": ["inspect_scene"]}})
 
     assert config.skills.tool_names == ("inspect_scene",)
@@ -261,14 +254,10 @@ def test_deployment_config_accepts_tools_and_rejects_removed_enabled_surface() -
         issue for issue in validate_deployment(config) if issue.level == "error"
     ]
 
-    ambiguous = DeploymentConfig.from_dict(
-        {"skills": {"tools": ["inspect_scene"], "enabled": ["manipulate"]}}
-    )
-
-    assert any(
-        "skills.enabled 已移除" in issue.message
-        for issue in validate_deployment(ambiguous)
-    )
+    with pytest.raises(ValueError, match="skills uses unknown fields"):
+        DeploymentConfig.from_dict(
+            {"skills": {"tools": ["inspect_scene"], "legacy": ["manipulate"]}}
+        )
 
 
 def test_deployment_config_rejects_removed_event_driven_skill_mode() -> None:

@@ -188,7 +188,6 @@ class SkillSurfaceConfig:
     modules: tuple[str, ...] = ("hey_robot.skills.builtins",)
     tools: tuple[str, ...] = ()
     implementations: dict[str, str] = field(default_factory=dict)
-    enabled: tuple[str, ...] = ()
     mode: str = "production"  # 可选值："production" | "bringup"
     execution_mode: str = "local"
 
@@ -352,6 +351,17 @@ class DeploymentConfig:
             },
         )
         skills_data = data.get("skills", {}) or {}
+        unknown_skill_fields = set(skills_data) - {
+            "modules",
+            "tools",
+            "implementations",
+            "mode",
+            "execution_mode",
+        }
+        if unknown_skill_fields:
+            raise ValueError(
+                f"skills uses unknown fields: {sorted(unknown_skill_fields)}"
+            )
         return cls(
             deployment=deployment,
             logging=logging_spec,
@@ -487,11 +497,6 @@ class DeploymentConfig:
                     if str(item).strip()
                 )
                 or ("hey_robot.skills.builtins",),
-                enabled=tuple(
-                    str(item).strip()
-                    for item in skills_data.get("enabled", ()) or ()
-                    if str(item).strip()
-                ),
                 tools=tuple(
                     str(item).strip()
                     for item in skills_data.get("tools", ()) or ()

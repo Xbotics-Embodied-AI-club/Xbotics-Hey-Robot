@@ -33,7 +33,8 @@ async def manipulate(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResul
         )
 
     max_steps = max(1, int(arguments.get("max_steps", 1)))
-    observation = await ctx.observe()
+    fresh_timeout = float(arguments.get("fresh_observation_timeout_sec", 2.0))
+    observation = await ctx.observe(timeout_sec=fresh_timeout)
     before_frame_id = observation.frame_id
     after_frame_id: int | None = None
     executed_actions: list[dict[str, Any]] = []
@@ -55,6 +56,7 @@ async def manipulate(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResul
             robot_id=ctx.robot_id,
             timeout_sec=arguments.get("model_timeout_sec"),
         )
+        ctx.raise_if_cancelled()
         if not result.success:
             return SkillResult(
                 False,
@@ -66,12 +68,22 @@ async def manipulate(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResul
                     "before_frame_id": before_frame_id,
                     "after_frame_id": after_frame_id,
                 },
-                failure_mode=result.failure_mode or "vla_inference_failed",
+                failure_mode=result.failure_mode or "model_failed",
                 error=result.error,
             )
 
         model_data = dict(result.data)
         model_outputs.append(model_data)
+        if _environment_done(model_data):
+            return _vla_result(
+                success=True,
+                summary=result.summary,
+                model_outputs=model_outputs,
+                executed_actions=executed_actions,
+                before_frame_id=before_frame_id,
+                after_frame_id=after_frame_id,
+                termination_reason="environment_done",
+            )
         actions = _actions_from_model_data(model_data)
         if not actions:
             return _vla_result(
@@ -81,7 +93,7 @@ async def manipulate(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResul
                 executed_actions=executed_actions,
                 before_frame_id=before_frame_id,
                 after_frame_id=after_frame_id,
-                termination_reason="vla_done"
+                termination_reason="model_done"
                 if _vla_task_done(model_data)
                 else "no_action",
             )
@@ -118,6 +130,16 @@ async def manipulate(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResul
                     error=action_result.error,
                 )
             after_frame_id = action_result.frame_id
+            if _environment_done(action_result.data):
+                return _vla_result(
+                    success=True,
+                    summary=action_result.summary,
+                    model_outputs=model_outputs,
+                    executed_actions=executed_actions,
+                    before_frame_id=before_frame_id,
+                    after_frame_id=after_frame_id,
+                    termination_reason="environment_done",
+                )
 
         await ctx.progress(
             (step_index + 1) / max_steps,
@@ -131,12 +153,16 @@ async def manipulate(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResul
                 executed_actions=executed_actions,
                 before_frame_id=before_frame_id,
                 after_frame_id=after_frame_id,
-                termination_reason="vla_done",
+                termination_reason="model_done",
             )
 
         if step_index + 1 < max_steps:
-            observation = await _fresh_observation(ctx, observation.frame_id)
-            if observation is None:
+            try:
+                observation = await ctx.observe(
+                    after_frame_id=observation.frame_id,
+                    timeout_sec=fresh_timeout,
+                )
+            except TimeoutError:
                 return _vla_result(
                     success=False,
                     summary="VLA action 后未获得 fresh observation。",
@@ -174,6 +200,7 @@ MANIPULATE = Skill(
             "objective": {"type": "string"},
             "max_steps": {"type": "integer", "default": 1},
             "model_timeout_sec": {"type": "number"},
+            "fresh_observation_timeout_sec": {"type": "number", "default": 2.0},
         },
         "additionalProperties": True,
     },
@@ -236,6 +263,18 @@ def _vla_task_done(data: dict[str, Any]) -> bool:
     return False
 
 
+def _environment_done(data: dict[str, Any]) -> bool:
+    if bool(data.get("environment_done")):
+        return True
+    for key in ("policy_result", "action_chunk", "environment"):
+        value = data.get(key)
+        if isinstance(value, dict) and bool(
+            value.get("environment_done") or value.get("done_by_environment")
+        ):
+            return True
+    return False
+
+
 def _observation_payload(observation: Any) -> dict[str, Any]:
     return {
         "frame_id": observation.frame_id,
@@ -244,14 +283,6 @@ def _observation_payload(observation: Any) -> dict[str, Any]:
         "proprioception": list(observation.proprioception),
         "raw": dict(observation.raw),
     }
-
-
-async def _fresh_observation(ctx: SkillContext, frame_id: int):
-    """等待 fresh observation；当前 RobotClient 只保证一次新的 observe 调用。"""
-    observation = await ctx.observe()
-    if observation.frame_id <= frame_id:
-        return None
-    return observation
 
 
 def _vla_result(

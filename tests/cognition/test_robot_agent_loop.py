@@ -15,7 +15,6 @@ from hey_robot.cognition.runtime.conversation_store import ConversationStore
 from hey_robot.cognition.tools.robot import CompleteTaskProposal, ControlTaskProposal
 from hey_robot.cognition.tools.skill_tools import SkillCallProposal
 from hey_robot.protocol import Envelope, ToolOutcome
-from hey_robot.protocol.messages import to_payload
 from hey_robot.providers import ReasoningMessage
 from hey_robot.skills.models import SkillEvent, SkillResult
 
@@ -175,9 +174,13 @@ class _Bus:
 class _SkillClient:
     def __init__(self):
         self.cancelled = []
+        self.emergency_stops = []
 
     async def cancel(self, run_id, *, reason):
         self.cancelled.append((run_id, reason))
+
+    async def emergency_stop(self, robot_id, *, reason):
+        self.emergency_stops.append((robot_id, reason))
 
 
 class _Coordinator:
@@ -536,19 +539,16 @@ async def test_terminal_skill_event_resumes_active_task_and_publishes_result(
     service.bus = _Bus()
     service.topics = SimpleNamespace(conversation_result="conversation.result")
 
-    await service._on_skill_event(
-        "skill.run.event",
-        to_payload(
-            SkillEvent(
-                envelope=Envelope(robot_id="sim_robot"),
-                run_id=pending.run_id or "",
-                sequence=3,
-                name="inspect_scene",
-                phase="completed",
-                timestamp=0.0,
-                result=SkillResult(True, "桌面上有一个杯子。", "completed"),
-            )
-        ),
+    await service._handle_skill_event(
+        SkillEvent(
+            envelope=Envelope(robot_id="sim_robot"),
+            run_id=pending.run_id or "",
+            sequence=3,
+            name="inspect_scene",
+            phase="completed",
+            timestamp=0.0,
+            result=SkillResult(True, "桌面上有一个杯子。", "completed"),
+        )
     )
 
     assert store.task(task.task_id).status == "completed"  # type: ignore[union-attr]
@@ -590,5 +590,35 @@ async def test_control_task_cancels_active_skill_runs(tmp_path) -> None:
 
     assert text == "用户取消任务。"
     assert service.skill_client.cancelled == [("run-active", "用户取消任务。")]
+    assert store.task(task.task_id).status == "cancelled"  # type: ignore[union-attr]
+    store.close()
+
+
+@pytest.mark.asyncio
+async def test_control_task_emergency_stop_uses_priority_control_plane(
+    tmp_path,
+) -> None:
+    store = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    task = store.create_task(
+        session_key="session-1",
+        envelope=Envelope(robot_id="sim_robot"),
+        objective="移动到桌边",
+    )
+    store.add_pending_step(
+        task.task_id,
+        SkillCallProposal("skill", "move_base", "移动到桌边", {}),
+        run_id="run-active",
+        tool_call_id="move-1",
+    )
+    service = object.__new__(AutonomousAgentService)
+    service.tasks = store
+    service.skill_client = _SkillClient()
+
+    await service._control_task(
+        ControlTaskProposal("emergency_stop", "operator estop"), "session-1"
+    )
+
+    assert service.skill_client.emergency_stops == [("sim_robot", "operator estop")]
+    assert service.skill_client.cancelled == []
     assert store.task(task.task_id).status == "cancelled"  # type: ignore[union-attr]
     store.close()

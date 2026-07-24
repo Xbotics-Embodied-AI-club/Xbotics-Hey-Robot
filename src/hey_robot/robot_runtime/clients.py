@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
@@ -12,6 +14,7 @@ from hey_robot.protocol import (
     RobotSkillAction,
     SkillIntent,
 )
+from hey_robot.robot_runtime.runtime import RobotRuntime
 
 
 @dataclass(frozen=True)
@@ -44,7 +47,13 @@ class RobotActionResult:
 class RobotClient(Protocol):
     async def capabilities(self, robot_id: str) -> RobotClientCapabilities: ...
 
-    async def observe(self, robot_id: str) -> RobotObservation: ...
+    async def observe(
+        self,
+        robot_id: str,
+        *,
+        after_frame_id: int | None = None,
+        timeout_sec: float | None = None,
+    ) -> RobotObservation: ...
 
     async def execute(
         self,
@@ -58,11 +67,13 @@ class RobotClient(Protocol):
 
     async def stop(self, robot_id: str, *, reason: str) -> None: ...
 
+    async def emergency_stop(self, robot_id: str, *, reason: str) -> None: ...
+
 
 class LocalRobotClient:
     """Adapt an in-process RobotRuntime to the native Skill RobotClient boundary."""
 
-    def __init__(self, runtimes: dict[str, Any]) -> None:
+    def __init__(self, runtimes: dict[str, RobotRuntime]) -> None:
         self._runtimes = runtimes
 
     async def capabilities(self, robot_id: str) -> RobotClientCapabilities:
@@ -80,8 +91,25 @@ class LocalRobotClient:
             metadata=dict(capabilities.metadata),
         )
 
-    async def observe(self, robot_id: str) -> RobotObservation:
-        return await self._runtime(robot_id).observe()
+    async def observe(
+        self,
+        robot_id: str,
+        *,
+        after_frame_id: int | None = None,
+        timeout_sec: float | None = None,
+    ) -> RobotObservation:
+        runtime = self._runtime(robot_id)
+        deadline = None if timeout_sec is None else time.monotonic() + timeout_sec
+        while True:
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                raise TimeoutError(
+                    f"fresh observation timed out after frame {after_frame_id}"
+                )
+            observation = await asyncio.wait_for(runtime.observe(), timeout=remaining)
+            if after_frame_id is None or observation.frame_id > after_frame_id:
+                return observation
+            await asyncio.sleep(min(0.01, remaining or 0.01))
 
     async def execute(
         self,
@@ -159,7 +187,10 @@ class LocalRobotClient:
     async def stop(self, robot_id: str, *, reason: str) -> None:
         await self.execute(robot_id, "stop_motion", {"reason": reason}, run_id="stop")
 
-    def _runtime(self, robot_id: str) -> Any:
+    async def emergency_stop(self, robot_id: str, *, reason: str) -> None:
+        await self._runtime(robot_id).emergency_stop(reason=reason)
+
+    def _runtime(self, robot_id: str) -> RobotRuntime:
         try:
             return self._runtimes[robot_id]
         except KeyError as exc:

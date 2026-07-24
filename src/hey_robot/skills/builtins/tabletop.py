@@ -83,6 +83,11 @@ def pick_skill(*, implementation: str = "classic") -> Skill:
         timeout_sec=180.0,
         required_actions=() if implementation in {"vla", "hybrid"} else ("pick",),
         required_models=("manipulate",) if implementation in {"vla", "hybrid"} else (),
+        dependencies={
+            "classic": (),
+            "vla": ("manipulate",),
+            "hybrid": ("approach_object", "manipulate"),
+        }[implementation],
     )
 
 
@@ -103,6 +108,7 @@ def place_skill(*, implementation: str = "classic") -> Skill:
         timeout_sec=180.0,
         required_actions=() if implementation in {"vla", "hybrid"} else ("place",),
         required_models=("manipulate",) if implementation in {"vla", "hybrid"} else (),
+        dependencies=() if implementation == "classic" else ("manipulate",),
     )
 
 

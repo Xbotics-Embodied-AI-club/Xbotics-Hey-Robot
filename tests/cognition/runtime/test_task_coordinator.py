@@ -4,10 +4,11 @@ import sqlite3
 from dataclasses import dataclass, field
 
 from hey_robot.cognition.runtime.agent_task_store import AgentTaskStore
-from hey_robot.cognition.runtime.harness_store import HarnessStore
 from hey_robot.cognition.runtime.task_coordinator import TaskCoordinator
 from hey_robot.cognition.tools.skill_tools import SkillCallProposal
+from hey_robot.persistence import FileRunStore
 from hey_robot.protocol import Envelope, ToolOutcome
+from hey_robot.skills import SkillRegistry, SkillWorker
 from hey_robot.skills.models import SkillCommand, SkillEvent, SkillResult
 
 
@@ -64,6 +65,47 @@ async def test_coordinator_persists_before_submit_and_applies_terminal_event(
     assert resolved is not None
     assert resolved.status == "completed"
     assert resolved.outcome.data["evidence_ids"] == ["e1"]
+    store.close()
+
+
+async def test_environment_done_converges_step_and_task_terminal_state(
+    tmp_path,
+) -> None:
+    store = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    task = store.create_task(
+        session_key="session", envelope=Envelope(robot_id="robot"), objective="pick"
+    )
+    coordinator = TaskCoordinator(store, Client())  # type: ignore[arg-type]
+    step = await coordinator.submit(
+        task_id=task.task_id,
+        proposal=SkillCallProposal("skill", "manipulate", "pick", {}),
+        envelope=Envelope(robot_id="robot"),
+        tool_call_id="call-1",
+    )
+
+    resolved = coordinator.apply(
+        SkillEvent(
+            envelope=Envelope(robot_id="robot"),
+            run_id=step.run_id or "",
+            sequence=3,
+            name="manipulate",
+            phase="completed",
+            timestamp=0.0,
+            result=SkillResult(
+                True,
+                "environment success",
+                "completed",
+                data={"termination_reason": "environment_done"},
+            ),
+        )
+    )
+
+    assert resolved is not None
+    assert resolved.status == "completed"
+    completed = store.task(task.task_id)
+    assert completed is not None
+    assert completed.status == "completed"
+    assert completed.final_recap == "environment success"
     store.close()
 
 
@@ -189,17 +231,6 @@ def test_task_store_start_skill_step_matches_target_api(tmp_path) -> None:
     store.close()
 
 
-def test_harness_store_alias_uses_agent_task_store(tmp_path) -> None:
-    store = HarnessStore(tmp_path / "tasks.sqlite3")
-
-    task = store.create_task(
-        session_key="session", envelope=Envelope(robot_id="robot"), objective="inspect"
-    )
-
-    assert task.task_id.startswith("task_")
-    store.close()
-
-
 async def test_coordinator_marks_step_failed_when_submit_is_rejected(tmp_path) -> None:
     store = AgentTaskStore(tmp_path / "tasks.sqlite3")
     task = store.create_task(
@@ -255,3 +286,53 @@ async def test_coordinator_reconciles_transport_known_terminal_event(tmp_path) -
     assert reconciled[0].status == "completed"
     assert store.active_run_ids(task.task_id) == ()
     store.close()
+
+
+async def test_coordinator_reconciles_restarted_worker_without_replaying_action(
+    tmp_path,
+) -> None:
+    tasks = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    task = tasks.create_task(
+        session_key="session", envelope=Envelope(robot_id="robot"), objective="inspect"
+    )
+    run_id = "run-crashed"
+    tasks.start_skill_step(
+        task.task_id,
+        run_id=run_id,
+        tool_call_id="call-1",
+        tool_name="inspect_scene",
+        arguments={},
+    )
+    runs = FileRunStore(tmp_path / "runs")
+    command = SkillCommand(
+        envelope=Envelope(robot_id="robot"),
+        run_id=run_id,
+        task_id=task.task_id,
+        robot_id="robot",
+        name="inspect_scene",
+        arguments={},
+    )
+    runs.record_submission(command)
+    runs.append_event(
+        SkillEvent(
+            envelope=command.envelope,
+            run_id=run_id,
+            sequence=1,
+            name=command.name,
+            phase="running",
+            timestamp=1.0,
+        )
+    )
+    restarted_worker = SkillWorker(SkillRegistry(), run_store=runs)
+    coordinator = TaskCoordinator(tasks, restarted_worker)
+
+    reconciled = await coordinator.reconcile_active_run_events()
+
+    assert len(reconciled) == 1
+    event, step = reconciled[0]
+    assert event.result is not None
+    assert event.result.failure_mode == "execution_lost"
+    assert step.status == "failed"
+    assert tasks.active_run_ids(task.task_id) == ()
+    assert await coordinator.reconcile_active_run_events() == ()
+    tasks.close()

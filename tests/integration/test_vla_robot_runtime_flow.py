@@ -162,7 +162,7 @@ async def test_vla_action_reaches_real_robocasa_runtime_gate(tmp_path) -> None:
         await runtime.close()
 
     assert result.success is True
-    assert result.data["termination_reason"] == "vla_done"
+    assert result.data["termination_reason"] == "model_done"
     assert len(episode_client.steps) == 1
     assert episode_client.steps[0]["action"] == [0.0] * 12
     assert episode_client.steps[0]["expected_frame_id"] == 0

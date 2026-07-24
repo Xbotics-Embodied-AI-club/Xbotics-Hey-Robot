@@ -240,7 +240,7 @@ restore → build → run → save
 
 ### 6.3 Skill OS 与当前部署表面
 
-real/sim 主配置使用 `skills.mode: bringup`，默认启用 11 个非 VLA skill。它们适合硬件联调和系统验证，但同时包含语义能力与实现级 primitive，尚不是面向最终 Agent 的最小生产 skill surface。VLA 入口 `vla_manipulation` 已注册，但真机主配置没有对应 ModelService，也不把它加入 `skills.enabled`。实验配置 `xlerobot.sim.vla_vln.yaml` 单独声明 VLA/VLN 能力。
+real/sim 主配置使用 `skills.mode: bringup`，默认启用 11 个非 VLA skill。它们适合硬件联调和系统验证，但同时包含语义能力与实现级 primitive，尚不是面向最终 Agent 的最小生产 skill surface。VLA 入口 `vla_manipulation` 已注册，但真机主配置没有对应 ModelService，也不把它加入 `skills.tools`。实验配置 `xlerobot.sim.vla_vln.yaml` 单独声明 VLA/VLN 能力。
 
 | Skill | 当前状态 | 说明 |
 | --- | --- | --- |

@@ -17,6 +17,17 @@ class ValidationIssue:
 
 def validate_deployment(config: DeploymentConfig) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
+    enabled_agents = [
+        agent_id for agent_id, agent in config.agents.items() if agent.enabled
+    ]
+    if len(enabled_agents) > 1:
+        issues.append(
+            ValidationIssue(
+                "error",
+                "a deployment supports exactly one enabled autonomous agent; got "
+                + ",".join(enabled_agents),
+            )
+        )
     for agent_id, agent in config.agents.items():
         if agent.robot_id and agent.robot_id not in config.robots:
             issues.append(
@@ -67,18 +78,14 @@ def validate_deployment(config: DeploymentConfig) -> list[ValidationIssue]:
                 "skills.execution_mode 只支持 'local'；legacy Skill OS 已移除",
             )
         )
-    if not _uses_native_skill_modules(config):
+    if not config.skills.modules or any(
+        not str(module).startswith("hey_robot.skills.") or ".legacy" in str(module)
+        for module in config.skills.modules
+    ):
         issues.append(
             ValidationIssue(
                 "error",
                 "skills.modules 必须使用 native hey_robot.skills.* modules",
-            )
-        )
-    if config.skills.enabled:
-        issues.append(
-            ValidationIssue(
-                "error",
-                "skills.enabled 已移除，请使用 skills.tools",
             )
         )
     tool_names = config.skills.tool_names
@@ -104,9 +111,10 @@ def validate_deployment(config: DeploymentConfig) -> list[ValidationIssue]:
     except Exception as exc:
         issues.append(ValidationIssue("error", f"failed to load skill modules: {exc}"))
         return issues
+    known_tools: list[str] = []
     for skill_name in tool_names:
         try:
-            skill = registry.get(skill_name)
+            registry.get(skill_name)
         except KeyError:
             issues.append(
                 ValidationIssue(
@@ -115,7 +123,15 @@ def validate_deployment(config: DeploymentConfig) -> list[ValidationIssue]:
                 )
             )
             continue
-        skill_robots = _skill_robots(config)
+        known_tools.append(skill_name)
+    try:
+        deployment_skills = registry.resolve_dependencies(known_tools)
+    except ValueError as exc:
+        issues.append(ValidationIssue("error", str(exc)))
+        deployment_skills = ()
+    skill_robots = _skill_robots(config)
+    for skill in deployment_skills:
+        skill_name = skill.name
         unsupported = _unsupported_robot_families(skill, skill_robots.values())
         if unsupported:
             issues.append(
@@ -260,16 +276,6 @@ def _has_model_service_for_skill(config: DeploymentConfig, name: str) -> bool:
         service.enabled and name in service.provides
         for service in config.model_services.values()
     )
-
-
-def _uses_native_skill_modules(config: DeploymentConfig) -> bool:
-    return bool(config.skills.modules) and all(
-        _is_native_skill_module(str(module)) for module in config.skills.modules
-    )
-
-
-def _is_native_skill_module(module: str) -> bool:
-    return not module.startswith("hey_robot.skills.legacy_builtins")
 
 
 def _skill_robots(config: DeploymentConfig) -> dict[str, RobotSpec]:

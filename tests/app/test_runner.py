@@ -86,6 +86,7 @@ def test_deployment_runner_composes_native_local_agent_without_controller(
 
     assert info["issues"] == []
     assert "robot" in info["services"]
+    assert "skills" in info["services"]
     assert "agent:main" in info["services"]
     assert "skill-worker:local" not in info["services"]
     assert "skill-controller" not in info["services"]

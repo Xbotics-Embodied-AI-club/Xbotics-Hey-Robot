@@ -184,9 +184,7 @@ def test_checkpoint_cli_reports_factory_support(tmp_path, monkeypatch, capsys) -
     factory = ModuleType("lerobot.policies.factory")
     factory.get_policy_class = lambda policy_type: policy_type  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "lerobot.policies.factory", factory)
-    monkeypatch.setattr(
-        sys, "argv", ["checkpoint", "--policy-path", str(config)]
-    )
+    monkeypatch.setattr(sys, "argv", ["checkpoint", "--policy-path", str(config)])
 
     checkpoint_module.main()
 
@@ -220,9 +218,7 @@ def test_checkpoint_cli_rejects_missing_or_unregistered_type(
 
     factory.get_policy_class = unsupported  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "lerobot.policies.factory", factory)
-    monkeypatch.setattr(
-        sys, "argv", ["checkpoint", "--policy-path", str(config)]
-    )
+    monkeypatch.setattr(sys, "argv", ["checkpoint", "--policy-path", str(config)])
 
     with pytest.raises(SystemExit, match="2"):
         checkpoint_module.main()
