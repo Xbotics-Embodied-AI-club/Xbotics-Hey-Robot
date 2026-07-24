@@ -5,14 +5,12 @@ import io
 from types import SimpleNamespace
 
 import numpy as np
-import pytest
 from PIL import Image
 
 from hey_robot.config import DeploymentConfig
 from hey_robot.foundation.backends.vln.internvla_n1_system2 import (
     InternVLAN1System2Executor,
 )
-from hey_robot.skills.navigation_adapter import planner_output_to_primitive
 
 
 def _spec(settings: dict | None = None):
@@ -343,42 +341,6 @@ def test_internvla_n1_system2_resets_on_new_policy_session(tmp_path) -> None:
     assert result3["success"] is True
     assert model.reset_calls == 2
     assert result3["metrics"]["vln"]["policy_session_id"] == "session-b"
-
-
-def test_vln_adapter_maps_center_pixel_to_forward_step() -> None:
-    command = planner_output_to_primitive(
-        {"mode": "pixel_goal", "pixel_goal": [240, 320]},
-        image_width=640,
-    )
-
-    assert command.primitive == "move_base"
-    assert command.arguments == {"direction": "forward", "distance_cm": 15.0}
-
-
-def test_vln_adapter_maps_off_center_pixel_to_turn() -> None:
-    command = planner_output_to_primitive(
-        {"mode": "pixel_goal", "pixel_goal": [240, 32]},
-        image_width=640,
-    )
-
-    assert command.primitive == "turn_base"
-    assert command.arguments["direction"] == "left"
-    assert 10.0 <= command.arguments["angle_deg"] <= 30.0
-
-
-def test_vln_adapter_maps_heading_and_stop() -> None:
-    turn = planner_output_to_primitive({"mode": "heading", "heading_deg": 30.0})
-    stop = planner_output_to_primitive({"mode": "stop", "stop": True})
-
-    assert turn.primitive == "turn_base"
-    assert turn.arguments == {"direction": "right", "angle_deg": 30.0}
-    assert stop.primitive == "stop_motion"
-    assert stop.arguments == {}
-
-
-def test_vln_adapter_rejects_empty_planner_output() -> None:
-    with pytest.raises(ValueError, match="planner output"):
-        planner_output_to_primitive({})
 
 
 def test_action_to_heading_maps_direction_codes() -> None:

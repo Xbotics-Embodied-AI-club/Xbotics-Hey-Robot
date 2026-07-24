@@ -15,10 +15,6 @@ from google.protobuf.json_format import ParseDict
 from google.protobuf.struct_pb2 import Struct
 from PIL import Image
 
-from hey_robot.robocasa_runtime.v1 import (
-    robocasa_runtime_pb2 as _robocasa_runtime_pb2,
-    robocasa_runtime_pb2_grpc,
-)
 from hey_robot.robot_runtime.robocasa_remote.contract import (
     ALLOWED_TASKS,
     CAMERA_RENAME_MAP,
@@ -28,6 +24,10 @@ from hey_robot.robot_runtime.robocasa_remote.contract import (
 from hey_robot.robot_runtime.robocasa_remote.episode_manager import (
     ActiveTrial,
     EpisodeManager,
+)
+from hey_robot.robot_runtime.robocasa_remote.rpc.v1 import (
+    robocasa_runtime_pb2 as _robocasa_runtime_pb2,
+    robocasa_runtime_pb2_grpc,
 )
 
 robocasa_runtime_pb2: Any = _robocasa_runtime_pb2

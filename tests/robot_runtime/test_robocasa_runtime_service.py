@@ -6,8 +6,10 @@ import types
 import numpy as np
 import pytest
 
-from hey_robot.robocasa_runtime.v1 import robocasa_runtime_pb2 as pb
 from hey_robot.robot_runtime.robocasa_remote.episode_manager import EpisodeManager
+from hey_robot.robot_runtime.robocasa_remote.rpc.v1 import (
+    robocasa_runtime_pb2 as pb,
+)
 from hey_robot.robot_runtime.robocasa_remote.runtime_server import (
     RoboCasaRuntimeService,
     _assets_available,

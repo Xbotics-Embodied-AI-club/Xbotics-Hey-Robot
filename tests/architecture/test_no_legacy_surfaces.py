@@ -55,6 +55,10 @@ FORBIDDEN_PATH_PARTS = (
     Path("src/hey_robot/skills/clients.py"),
     Path("src/hey_robot/cognition/runtime/harness_store.py"),
     Path("src/hey_robot/skills/lifecycle.py"),
+    Path("src/hey_robot/skills/manipulation_adapter.py"),
+    Path("src/hey_robot/skills/navigation_adapter.py"),
+    Path("src/hey_robot/robot_runtime/identity.py"),
+    Path("src/hey_robot/robocasa_runtime"),
 )
 
 

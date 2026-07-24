@@ -133,8 +133,8 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 exclude = [
-    "^src/hey_robot/foundation/contract/v1/model_service_pb2.py$",
-    "^src/hey_robot/foundation/contract/v1/model_service_pb2_grpc.py$",
+    "foundation/contract/v1/model_service_pb2(_grpc)?[.]py$",
+    "robocasa_remote/rpc/v1/robocasa_runtime_pb2(_grpc)?[.]py$",
 ]
 
 [tool.coverage.run]

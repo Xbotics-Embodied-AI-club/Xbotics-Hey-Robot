@@ -6,14 +6,14 @@ from typing import Any
 import grpc
 from google.protobuf.json_format import MessageToDict
 
-from hey_robot.robocasa_runtime.v1 import (
-    robocasa_runtime_pb2 as _robocasa_runtime_pb2,
-    robocasa_runtime_pb2_grpc,
-)
 from hey_robot.robot_runtime.robocasa_remote.protocol import (
     RemoteImage,
     RemoteObservation,
     RemoteStep,
+)
+from hey_robot.robot_runtime.robocasa_remote.rpc.v1 import (
+    robocasa_runtime_pb2 as _robocasa_runtime_pb2,
+    robocasa_runtime_pb2_grpc,
 )
 
 # Protobuf message attributes are installed dynamically by generated code.
