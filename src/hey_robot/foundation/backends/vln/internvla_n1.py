@@ -21,11 +21,6 @@ DEFAULT_PROMPT_TEMPLATE = (
     "Please output STOP when you have successfully completed the task."
 )
 
-_ACTION_HEADING: dict[int, float] = {
-    1: 0.0,
-    2: -90.0,
-    3: 90.0,
-}
 _MODEL_LOAD_LOCK = threading.Lock()
 
 
@@ -36,6 +31,8 @@ class InternVLAN1Runtime:
         self.settings = dict(settings)
         self._model: Any | None = None
         self._current_policy_session_id: str | None = None
+        self._pending_actions: list[int] = []
+        self._last_llm_output: str | None = None
         # InternVLA keeps history on the policy object.  Serialize load, reset,
         # and inference so concurrent gRPC calls cannot corrupt that state.
         self._lock = threading.RLock()
@@ -112,6 +109,31 @@ class InternVLAN1Runtime:
                 reset_policy=reset_policy,
             )
             self._apply_prompt_override(model)
+            if self._pending_actions and not planner_input.look_down:
+                step_no_infer = getattr(model, "step_no_infer", None)
+                if callable(step_no_infer):
+                    step_no_infer(
+                        planner_input.rgb,
+                        planner_input.depth,
+                        planner_input.pose,
+                    )
+                current_action = self._pending_actions.pop(0)
+                return planner_result_from_output(
+                    None,
+                    image_width=int(self.settings.get("resize_w", 384)),
+                    image_height=int(self.settings.get("resize_h", 384)),
+                    image_source=planner_input.image_source,
+                    policy_session_id=policy_session_id,
+                    action_sequence=[current_action],
+                    remaining_action_count=len(self._pending_actions),
+                    raw_output=self._last_llm_output,
+                    turn_angle_deg=float(
+                        self.settings.get("discrete_turn_deg", 15.0)
+                    ),
+                    forward_distance_cm=float(
+                        self.settings.get("discrete_forward_cm", 25.0)
+                    ),
+                )
             output = model.s2_step(
                 planner_input.rgb,
                 planner_input.depth,
@@ -120,18 +142,32 @@ class InternVLAN1Runtime:
                 planner_input.intrinsic,
                 planner_input.look_down,
             )
+            self._last_llm_output = str(getattr(model, "llm_output", "") or "") or None
+            action_sequence = action_codes_from_output(output)
+            self._pending_actions = action_sequence[1:]
+            if action_sequence and action_sequence[0] in {0, 5}:
+                self._pending_actions.clear()
         return planner_result_from_output(
             output,
-            image_width=int(planner_input.rgb.shape[1]),
-            image_height=int(planner_input.rgb.shape[0]),
+            image_width=int(self.settings.get("resize_w", 384)),
+            image_height=int(self.settings.get("resize_h", 384)),
             image_source=planner_input.image_source,
             policy_session_id=policy_session_id,
+            action_sequence=action_sequence or None,
+            remaining_action_count=len(self._pending_actions),
+            raw_output=self._last_llm_output,
+            turn_angle_deg=float(self.settings.get("discrete_turn_deg", 15.0)),
+            forward_distance_cm=float(
+                self.settings.get("discrete_forward_cm", 25.0)
+            ),
         )
 
     def close(self) -> None:
         with self._lock:
             self._model = None
             self._current_policy_session_id = None
+            self._pending_actions.clear()
+            self._last_llm_output = None
 
     def _internnav_repo_path(self) -> Path:
         value = str(self.settings.get("internnav_repo") or "").strip()
@@ -199,6 +235,8 @@ class InternVLAN1Runtime:
             policy_session_id and policy_session_id != self._current_policy_session_id
         )
         if should_reset:
+            self._pending_actions.clear()
+            self._last_llm_output = None
             reset = getattr(model, "reset", None)
             if callable(reset):
                 reset()
@@ -225,8 +263,13 @@ def planner_result_from_output(
     image_height: int,
     image_source: str | None = None,
     policy_session_id: str | None = None,
+    action_sequence: list[int] | None = None,
+    remaining_action_count: int | None = None,
+    raw_output: str | None = None,
+    turn_angle_deg: float = 15.0,
+    forward_distance_cm: float = 25.0,
 ) -> VLNPlannerResult:
-    raw_output = _public_raw_output(output)
+    raw_output = raw_output or _public_raw_output(output)
     output_latent = getattr(output, "output_latent", None)
 
     def result(
@@ -235,6 +278,7 @@ def planner_result_from_output(
         *,
         pixel_goal: list[int] | None = None,
         heading_deg: float | None = None,
+        action_code: int | None = None,
         stop: bool = False,
         requires_secondary_observation: bool = False,
     ) -> VLNPlannerResult:
@@ -242,6 +286,16 @@ def planner_result_from_output(
             mode=mode,
             pixel_goal=pixel_goal,
             heading_deg=heading_deg,
+            action_code=action_code,
+            action_sequence=action_sequence,
+            remaining_action_count=(
+                remaining_action_count
+                if remaining_action_count is not None
+                else max(len(action_sequence or []) - 1, 0)
+            ),
+            forward_distance_cm=(
+                forward_distance_cm if action_code == 1 else None
+            ),
             stop=stop,
             reason=reason,
             raw_output=raw_output,
@@ -271,25 +325,30 @@ def planner_result_from_output(
             reason = "InternVLA-N1 System 2 output_pixel was clamped to image bounds"
         return result("pixel_goal", reason, pixel_goal=list(bounded))
 
-    action = getattr(output, "output_action", None)
-    if _is_stop_action(action):
+    if action_sequence is None:
+        action_sequence = action_codes_from_output(output)
+    current_action = action_sequence[0] if action_sequence else None
+    if current_action == 0:
         return result(
             "stop",
             "InternVLA-N1 System 2 returned STOP",
+            action_code=0,
             stop=True,
         )
-    if _is_look_down_action(action):
+    if current_action == 5:
         return result(
             "look_down_required",
             "InternVLA-N1 System 2 requested a look-down secondary observation",
+            action_code=5,
             requires_secondary_observation=True,
         )
-    heading = action_to_heading(action)
+    heading = action_to_heading(current_action, turn_angle_deg=turn_angle_deg)
     if heading is not None:
         return result(
             "heading",
             "InternVLA-N1 System 2 returned direction action",
             heading_deg=heading,
+            action_code=current_action,
         )
     raise VLNPlanningError(
         "vln_no_valid_goal",
@@ -297,9 +356,36 @@ def planner_result_from_output(
     )
 
 
-def action_to_heading(action: Any) -> float | None:
+def action_to_heading(
+    action: Any, *, turn_angle_deg: float = 15.0
+) -> float | None:
     current = _current_action_code(action)
-    return _ACTION_HEADING.get(current) if current is not None else None
+    if current == 1:
+        return 0.0
+    if current == 2:
+        return -abs(turn_angle_deg)
+    if current == 3:
+        return abs(turn_angle_deg)
+    return None
+
+
+def action_codes_from_output(output: Any) -> list[int]:
+    action = getattr(output, "output_action", None)
+    if action is None:
+        return []
+    array = np.asarray(action).reshape(-1)
+    codes: list[int] = []
+    for item in array:
+        if str(item).strip().upper() == "STOP":
+            codes.append(0)
+            continue
+        try:
+            code = int(item)
+        except (TypeError, ValueError):
+            continue
+        if code in {0, 1, 2, 3, 5}:
+            codes.append(code)
+    return codes
 
 
 def _parse_pixel_goal(value: Any) -> tuple[int, int] | None:
@@ -307,16 +393,6 @@ def _parse_pixel_goal(value: Any) -> tuple[int, int] | None:
     if array.size < 2:
         return None
     return (int(array[0]), int(array[1]))
-
-
-def _is_stop_action(value: Any) -> bool:
-    if isinstance(value, str):
-        return value.strip().upper() == "STOP"
-    return _current_action_code(value) == 0
-
-
-def _is_look_down_action(value: Any) -> bool:
-    return _current_action_code(value) == 5
 
 
 def _current_action_code(value: Any) -> int | None:

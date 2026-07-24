@@ -159,6 +159,8 @@ model_services:
       image_height: 480
       resize_w: 384
       resize_h: 384
+      discrete_turn_deg: 15
+      discrete_forward_cm: 25
       num_history: 8
       max_new_tokens: 128
       hfov: 90

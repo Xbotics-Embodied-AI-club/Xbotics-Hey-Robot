@@ -53,9 +53,11 @@ def _spec(settings: dict | None = None):
 
 
 class _FakeS2Model:
-    def __init__(self, output) -> None:
+    def __init__(self, output, *, llm_output: str = "") -> None:
         self.output = output
+        self.llm_output = llm_output
         self.calls: list[dict] = []
+        self.no_infer_calls: list[dict] = []
         self.reset_calls = 0
 
     def reset(self) -> None:
@@ -73,6 +75,9 @@ class _FakeS2Model:
             }
         )
         return self.output
+
+    def step_no_infer(self, rgb, depth, pose) -> None:
+        self.no_infer_calls.append({"rgb": rgb, "depth": depth, "pose": pose})
 
 
 def _real_spec(settings: dict | None = None):
@@ -231,7 +236,9 @@ def test_internvla_n1_system2_real_path_clamps_out_of_bounds_pixel(tmp_path) -> 
     )
 
     assert result["success"] is True
-    assert result["metrics"]["vln"]["pixel_goal"] == [5, 0]
+    assert result["metrics"]["vln"]["pixel_goal"] == [99, 0]
+    assert result["metrics"]["vln"]["image_width"] == 384
+    assert result["metrics"]["vln"]["image_height"] == 384
     assert "clamped" in result["metrics"]["vln"]["reason"]
 
 
@@ -296,6 +303,8 @@ def test_internvla_n1_system2_real_path_maps_non_stop_action_to_heading(
     assert result["success"] is True
     assert result["metrics"]["vln"]["mode"] == "heading"
     assert result["metrics"]["vln"]["heading_deg"] == 0.0
+    assert result["metrics"]["vln"]["action_code"] == 1
+    assert result["metrics"]["vln"]["forward_distance_cm"] == 25.0
 
 
 def test_internvla_n1_system2_loads_base64_observation_image() -> None:
@@ -350,17 +359,30 @@ def test_internvla_n1_system2_action_five_requires_look_down(tmp_path) -> None:
 def test_internvla_n1_system2_action_sequence_uses_current_step(tmp_path) -> None:
     image_path = tmp_path / "front.png"
     _write_rgb(image_path)
-    model = _FakeS2Model(SimpleNamespace(output_action=[1, 0], output_pixel=None))
+    model = _FakeS2Model(
+        SimpleNamespace(output_action=[1, 0], output_pixel=None),
+        llm_output="↑STOP",
+    )
     executor = InternVLAN1System2Executor("vln_nav", _real_spec())
     executor._model = model
 
-    result = executor.execute(
+    first = executor.execute(
+        {"arguments": {"target": "desk", "image_path": str(image_path)}}
+    )
+    second = executor.execute(
         {"arguments": {"target": "desk", "image_path": str(image_path)}}
     )
 
-    assert result["success"] is True
-    assert result["metrics"]["vln"]["mode"] == "heading"
-    assert result["metrics"]["vln"]["heading_deg"] == 0.0
+    assert first["success"] is True
+    assert first["metrics"]["vln"]["mode"] == "heading"
+    assert first["metrics"]["vln"]["action_sequence"] == [1, 0]
+    assert first["metrics"]["vln"]["remaining_action_count"] == 1
+    assert first["metrics"]["vln"]["raw_output"] == "↑STOP"
+    assert second["success"] is True
+    assert second["metrics"]["vln"]["mode"] == "stop"
+    assert second["metrics"]["vln"]["remaining_action_count"] == 0
+    assert len(model.calls) == 1
+    assert len(model.no_infer_calls) == 1
 
 
 def test_internvla_n1_system2_resets_on_new_policy_session(tmp_path) -> None:
@@ -398,8 +420,9 @@ def test_internvla_n1_system2_resets_on_new_policy_session(tmp_path) -> None:
 
 def test_action_to_heading_maps_direction_codes() -> None:
     assert action_to_heading([1]) == 0.0
-    assert action_to_heading([2]) == -90.0
-    assert action_to_heading([3]) == 90.0
+    assert action_to_heading([2]) == -15.0
+    assert action_to_heading([3]) == 15.0
+    assert action_to_heading([2], turn_angle_deg=30.0) == -30.0
     assert action_to_heading([5]) is None
     assert action_to_heading([1, 0]) == 0.0
     assert action_to_heading([0]) is None

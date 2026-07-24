@@ -228,6 +228,8 @@ model_services:
       image_height: 480
       resize_w: 384
       resize_h: 384
+      discrete_turn_deg: 15       # InternNav 离散转向 token 的官方步长
+      discrete_forward_cm: 25     # InternNav 离散前进 token 的官方步长
       num_history: 8
       max_new_tokens: 128
       hfov: 90

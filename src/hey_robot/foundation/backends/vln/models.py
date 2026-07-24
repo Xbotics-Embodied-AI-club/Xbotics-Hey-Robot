@@ -31,6 +31,10 @@ class VLNPlannerResult:
     pixel_goal: list[int] | None = None
     waypoint: list[float] | None = None
     heading_deg: float | None = None
+    action_code: int | None = None
+    action_sequence: list[int] | None = None
+    remaining_action_count: int = 0
+    forward_distance_cm: float | None = None
     stop: bool = False
     confidence: float | None = None
     reason: str | None = None
@@ -50,6 +54,8 @@ class VLNPlannerResult:
             "pixel_goal": self.pixel_goal,
             "waypoint": self.waypoint,
             "heading_deg": self.heading_deg,
+            "action_code": self.action_code,
+            "forward_distance_cm": self.forward_distance_cm,
             "stop": self.stop,
             "confidence": self.confidence,
             "frame_id": None,
@@ -77,6 +83,10 @@ class VLNPlannerResult:
             "pixel_goal": self.pixel_goal,
             "waypoint": self.waypoint,
             "heading_deg": self.heading_deg,
+            "action_code": self.action_code,
+            "action_sequence": self.action_sequence,
+            "remaining_action_count": self.remaining_action_count,
+            "forward_distance_cm": self.forward_distance_cm,
             "stop": self.stop,
             "confidence": self.confidence,
             "reason": self.reason,

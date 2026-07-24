@@ -302,6 +302,28 @@ def _environment_done(data: dict[str, Any]) -> bool:
 def planner_to_action(planner: dict[str, Any]) -> dict[str, Any]:
     if bool(planner.get("stop")) or planner.get("mode") == "stop":
         return {"name": "stop_motion", "arguments": {}, "reason": "planner_stop"}
+    action_code = planner.get("action_code")
+    if isinstance(action_code, int | float):
+        code = int(action_code)
+        if code == 1:
+            return {
+                "name": "move_base",
+                "arguments": {
+                    "direction": "forward",
+                    "distance_cm": float(planner.get("forward_distance_cm") or 25.0),
+                },
+                "reason": "planner_discrete_forward",
+            }
+        if code in {2, 3}:
+            discrete_heading = float(planner.get("heading_deg") or 0.0)
+            return {
+                "name": "turn_base",
+                "arguments": {
+                    "direction": "left" if code == 2 else "right",
+                    "angle_deg": abs(discrete_heading) or 15.0,
+                },
+                "reason": "planner_discrete_turn",
+            }
     heading = planner.get("heading_deg")
     if isinstance(heading, int | float):
         if abs(heading) < 10.0:
