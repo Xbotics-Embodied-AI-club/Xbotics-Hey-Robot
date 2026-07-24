@@ -17,6 +17,7 @@
   let thinkingMsgEl = null;
   let renderedCount = 0;           // number of Store messages already in DOM
   const progressCards = new Map();   // skill_id → DOM element
+  const streamingMessageEls = new Map(); // interaction_id → DOM element
 
   // ── Init ──
   WS.connect();
@@ -72,6 +73,12 @@
   function bindStore() {
     // Conversation updates
     Store.on('conversation', (conv) => {
+      for (const msg of conv.slice(0, renderedCount)) {
+        if (!msg.streamKey) continue;
+        const el = streamingMessageEls.get(msg.streamKey);
+        const content = el && el.querySelector('.msg-content');
+        if (content) content.textContent = msg.content;
+      }
       const newMsgs = conv.slice(renderedCount);
       for (const msg of newMsgs) {
         appendMessage(msg);
@@ -293,6 +300,9 @@
     `;
 
     const body = div.querySelector('.msg-body');
+    if (msg.streamKey) {
+      streamingMessageEls.set(msg.streamKey, div);
+    }
 
     // Observation images (from agent reply metadata)
     if (msg.metadata && msg.metadata.images && msg.metadata.images.length > 0) {

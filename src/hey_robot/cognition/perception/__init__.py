@@ -1,6 +1,6 @@
 from hey_robot.cognition.perception.scene import (
     DeterministicSceneCaptioner,
-    ReasoningSceneCaptioner,
+    ModelSceneCaptioner,
     SceneCaptioner,
     SceneObject,
     SceneUnderstanding,
@@ -9,7 +9,7 @@ from hey_robot.cognition.perception.scene import (
 
 __all__ = [
     "DeterministicSceneCaptioner",
-    "ReasoningSceneCaptioner",
+    "ModelSceneCaptioner",
     "SceneCaptioner",
     "SceneObject",
     "SceneUnderstanding",

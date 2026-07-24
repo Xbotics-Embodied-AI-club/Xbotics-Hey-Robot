@@ -12,6 +12,7 @@ from hey_robot.events.bus import BusEventPublisher
 from hey_robot.gateway import GatewayService
 from hey_robot.protocol import (
     AgentReply,
+    ConversationResult,
     Envelope,
     RobotStatus,
     SkillEvent,
@@ -127,6 +128,30 @@ def test_gateway_publishes_goal_prefixed_text_as_ordinary_turn(
         if topic == gateway.topics.conversation_turn
     ]
     assert [item["text"] for item in turns] == ["pick up the cup", create.text]
+
+
+def test_gateway_preserves_streaming_conversation_result(tmp_path) -> None:
+    gateway = _gateway(tmp_path)
+    result = ConversationResult(
+        Envelope(channel="web", episode_id="episode-1"),
+        "interaction-1",
+        "你",
+        final=False,
+    )
+
+    asyncio.run(
+        gateway._on_conversation_result(
+            gateway.topics.conversation_result,
+            to_payload(result),
+        )
+    )
+
+    fake_bus = cast(FakeBus, gateway.bus)
+    topic, payload = fake_bus.published[-1]
+    assert topic == gateway.topics.agent_reply
+    assert payload["text"] == "你"
+    assert payload["final"] is False
+    assert payload["metadata"]["interaction_id"] == "interaction-1"
 
 
 def test_gateway_never_routes_natural_language_directly_to_skill_intent(

@@ -80,6 +80,7 @@ DEEPSEEK_API_KEY
 DEEPSEEK_BASE_URL
 DASHSCOPE_MODEL
 DASHSCOPE_API_KEY
+DASHSCOPE_BASE_URL
 ```
 
 > For complete environment, model, channel, simulation, and real-hardware

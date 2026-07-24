@@ -57,7 +57,7 @@ Agent，而且观察问题没有传给视觉模型。水壶明明位于画面左
 ### 3.3 Agent 返回但没有创建任务时，benchmark 会空等
 
 DeepSeek 曾返回 `APITimeoutError`，Agent turn 已结束，但 benchmark 因找不到 AgentTask 而继续
-等待到 wall-clock timeout。现增加 `agent_no_task` 终止原因，使 provider 失败可以快速、明确地
+等待到 wall-clock timeout。现增加 `agent_no_task` 终止原因，使模型请求失败可以快速、明确地
 归因到 planner，而不是表现成仿真卡死。
 
 ### 3.4 所有任务被错误限制为 1000 步

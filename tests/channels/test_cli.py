@@ -75,6 +75,19 @@ def test_cli_channel_formats_notifications(capsys) -> None:
     assert "assistant> [WARNING] task watchdog: watchdog stale" in out
 
 
+def test_cli_channel_streams_deltas_without_repeating_final_text(capsys) -> None:
+    channel = CLIChannel(
+        ChannelContext(name="cli", deployment_id="d1", spec=ChannelSpec(type="cli"))
+    )
+    envelope = Envelope(channel="cli", trace_id="stream-1")
+
+    asyncio.run(channel.send(AgentReply(envelope, "你", final=False)))
+    asyncio.run(channel.send(AgentReply(envelope, "好", final=False)))
+    asyncio.run(channel.send(AgentReply(envelope, "你好", final=True)))
+
+    assert capsys.readouterr().out == "assistant> 你好\n"
+
+
 def test_cli_channel_start_stop_and_on_event(monkeypatch) -> None:
     channel = CLIChannel(
         ChannelContext(name="cli", deployment_id="d1", spec=ChannelSpec(type="cli"))

@@ -27,14 +27,14 @@ def test_cli_has_one_agent_entrypoint() -> None:
     assert "--episode-dir" not in agent
 
 
-def test_robot_agent_owns_one_provider_and_one_runner() -> None:
+def test_robot_agent_owns_one_model_client_and_one_runner() -> None:
     source = _read("cognition/autonomous_agent_service.py")
-    assert source.count("build_provider(") == 1
+    assert source.count("create_model_client(") == 1
     assert source.count("AgentRunner(") == 1
     assert source.count("ToolRegistry(") == 1
 
 
-def test_only_one_model_tool_registry_exists() -> None:
+def test_only_one_tool_registry_exists() -> None:
     tools = SRC / "cognition" / "tools"
     registries = [
         path.name

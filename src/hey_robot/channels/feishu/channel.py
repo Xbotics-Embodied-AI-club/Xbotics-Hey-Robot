@@ -136,6 +136,8 @@ class FeishuChannel:
         await self._stopped.wait()
 
     async def send(self, reply: AgentReply) -> None:
+        if not reply.final:
+            return
         if self._client is None:
             logger.debug("feishu 发送跳过: client 未初始化")
             return

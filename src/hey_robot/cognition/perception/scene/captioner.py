@@ -5,13 +5,13 @@ from typing import Any, Protocol
 
 from hey_robot.cognition.perception.scene.schema import SceneObject, SceneUnderstanding
 from hey_robot.config import DeploymentConfig
-from hey_robot.protocol import RobotObservation, RobotStatus
-from hey_robot.providers import (
-    ReasoningImage,
-    ReasoningMessage,
-    ReasoningProvider,
-    build_provider,
+from hey_robot.model import (
+    ModelClientLike,
+    ModelImage,
+    ModelMessage,
+    create_model_client,
 )
+from hey_robot.protocol import RobotObservation, RobotStatus
 from hey_robot.robot_runtime.media import MediaResolver
 from hey_robot.templates.loader import TemplateStore
 
@@ -73,19 +73,19 @@ class DeterministicSceneCaptioner:
             if observation.images
             else "Get a fresh observation with a valid camera frame.",
             confidence=0.45 if observation.images else 0.25,
-            metadata={"provider": "deterministic"},
+            metadata={"model": "deterministic"},
         )
 
 
-class ReasoningSceneCaptioner:
+class ModelSceneCaptioner:
     def __init__(
         self,
-        provider: ReasoningProvider,
+        model: ModelClientLike,
         *,
         image_resolver: MediaResolver | None = None,
         templates: TemplateStore | None = None,
     ) -> None:
-        self.provider = provider
+        self.model = model
         self.image_resolver = image_resolver
         self.fallback = DeterministicSceneCaptioner()
         self.templates = templates or TemplateStore()
@@ -100,13 +100,13 @@ class ReasoningSceneCaptioner:
         images = self._images(observation)
         if not images:
             return await self.fallback.caption(observation, status)
-        response = await self.provider.chat(
+        response = await self.model.chat(
             messages=[
-                ReasoningMessage(
+                ModelMessage(
                     role="system",
                     content=self.templates.render("robot/scene_captioner/SYSTEM.md"),
                 ),
-                ReasoningMessage(
+                ModelMessage(
                     role="user",
                     content=self.templates.render(
                         "robot/scene_captioner/USER.md",
@@ -133,15 +133,15 @@ class ReasoningSceneCaptioner:
                 risks=[*fallback.risks, response.content or "scene captioning failed"],
                 next_observation_hint=fallback.next_observation_hint,
                 confidence=fallback.confidence,
-                metadata={"provider": "provider", "error": response.content},
+                metadata={"model": "client", "error": response.content},
             )
         return _parse_scene_understanding(response.content or "")
 
-    def _images(self, observation: RobotObservation) -> list[ReasoningImage]:
+    def _images(self, observation: RobotObservation) -> list[ModelImage]:
         if self.image_resolver is None:
             return []
         return [
-            ReasoningImage(data=image, name=f"scene_{index}")
+            ModelImage(data=image, name=f"scene_{index}")
             for index, image in enumerate(
                 self.image_resolver.resolve_images(observation.images[:4])
             )
@@ -164,24 +164,24 @@ def build_scene_captioner(
             if isinstance(scene, dict):
                 cfg = scene
                 template_root = cfg.get("template_root") or template_root
-        # 配置了 provider 就表示显式请求场景 caption。
-        # runtime 配置统一以 ``providers`` 为单一来源；
+        # 配置了模型就表示显式请求场景 caption。
+        # runtime 配置统一以 ``models`` 为单一来源；
         # deployment 不需要重复的 perception 开关。
         if not cfg:
-            providers = agent.settings.get("providers")
-            if isinstance(providers, dict) and isinstance(
-                providers.get("scene_captioner"), dict
+            models = agent.settings.get("models")
+            if isinstance(models, dict) and isinstance(
+                models.get("scene_captioner"), dict
             ):
                 cfg = {"enabled": True, "purpose": "scene_captioner"}
     else:
         template_root = None
     if not bool(cfg.get("enabled", False)):
         return DeterministicSceneCaptioner()
-    provider = build_provider(
+    model = create_model_client(
         config, agent_id, purpose=str(cfg.get("purpose") or "scene_captioner")
     )
-    return ReasoningSceneCaptioner(
-        provider,
+    return ModelSceneCaptioner(
+        model,
         image_resolver=image_resolver,
         templates=TemplateStore(template_root),
     )

@@ -46,6 +46,12 @@ from hey_robot.cognition.tools.task_tools import (
     ControlTaskProposal,
 )
 from hey_robot.config import DeploymentConfig
+from hey_robot.model import (
+    ModelMessage,
+    ModelToolCall,
+    TextDeltaCallback,
+    create_model_client,
+)
 from hey_robot.protocol import (
     ConversationResult,
     ConversationTurn,
@@ -55,7 +61,6 @@ from hey_robot.protocol import (
     Topics,
 )
 from hey_robot.protocol.messages import from_payload, to_payload
-from hey_robot.providers import ReasoningMessage, ReasoningToolCall, build_provider
 from hey_robot.skills import registry_from_config
 from hey_robot.skills.client import SkillClient
 from hey_robot.skills.models import SkillEvent as HarnessSkillEvent
@@ -73,7 +78,7 @@ class _StepOutcome:
 
 @dataclass(frozen=True)
 class _ToolDispatchContext:
-    messages: list[ReasoningMessage]
+    messages: list[ModelMessage]
     envelope: Envelope
     session_key: str
     decision: AgentTurnResult
@@ -81,7 +86,7 @@ class _ToolDispatchContext:
 
 
 class AutonomousAgentService:
-    """每个已配置 Agent 只拥有一个 Provider、Runner 和工具注册表。"""
+    """每个已配置 Agent 只拥有一个模型客户端、Runner 和工具注册表。"""
 
     def __init__(
         self,
@@ -124,9 +129,9 @@ class AutonomousAgentService:
             aliases=config.agent_runtime.entity_aliases,
         )
         self.tools = ToolRegistry(ToolDependencies(catalog, extra_tools))
-        provider = build_provider(config, agent_id, purpose="agent")
-        self.runner = AgentRunner(provider, self.tools)
-        self.completion_verifier = TaskCompletionVerifier(provider)
+        model_client = create_model_client(config, agent_id, purpose="agent")
+        self.runner = AgentRunner(model_client, self.tools)
+        self.completion_verifier = TaskCompletionVerifier(model_client)
         self.skill_client = skill_client
         if self.skill_client is None:
             raise ValueError("AutonomousAgentService requires native SkillClient")
@@ -175,6 +180,20 @@ class AutonomousAgentService:
         if turn.envelope.agent_id and turn.envelope.agent_id != self.agent_id:
             return
         lock = self._session_locks.setdefault(turn.session_key, asyncio.Lock())
+
+        async def publish_text_delta(delta: str) -> None:
+            await self.bus.publish(
+                self.topics.conversation_result,
+                to_payload(
+                    ConversationResult(
+                        turn.envelope,
+                        turn.interaction_id,
+                        delta,
+                        final=False,
+                    )
+                ),
+            )
+
         async with lock:
             messages = self._conversation_context(turn)
             self.conversations.append(turn.session_key, "user", turn.text)
@@ -184,6 +203,7 @@ class AutonomousAgentService:
                 turn.session_key,
                 turn.interaction_id,
                 turn.text,
+                on_text_delta=publish_text_delta,
             )
             self.conversations.append(turn.session_key, "assistant", text)
         await self.bus.publish(
@@ -191,7 +211,7 @@ class AutonomousAgentService:
             to_payload(ConversationResult(turn.envelope, turn.interaction_id, text)),
         )
 
-    def _conversation_context(self, turn: ConversationTurn) -> list[ReasoningMessage]:
+    def _conversation_context(self, turn: ConversationTurn) -> list[ModelMessage]:
         policy = self.templates.render(
             "agent/SYSTEM.md",
             agent_soul=self.templates.render("agent/SOUL.md"),
@@ -200,18 +220,20 @@ class AutonomousAgentService:
             tool_instructions=self.tools.instructions,
         )
         return [
-            ReasoningMessage(role="system", content=policy),
+            ModelMessage(role="system", content=policy),
             *self.conversations.recent(turn.session_key),
-            ReasoningMessage(role="user", content=turn.text),
+            ModelMessage(role="user", content=turn.text),
         ]
 
     async def _run_conversation_loop(
         self,
-        messages: list[ReasoningMessage],
+        messages: list[ModelMessage],
         envelope: Envelope,
         session_key: str,
         run_id: str,
         objective: str,
+        *,
+        on_text_delta: TextDeltaCallback | None = None,
     ) -> str:
         """Run one unified task loop for ordinary turns and active tasks."""
         max_continuations = max(
@@ -241,6 +263,7 @@ class AutonomousAgentService:
                 deadline,
                 active_task,
                 objective,
+                on_text_delta=on_text_delta if active_task is None else None,
             )
             if outcome.final_text is not None:
                 return outcome.final_text
@@ -263,7 +286,7 @@ class AutonomousAgentService:
                 return "任务已暂停：达到持续执行切片预算，需要你确认后再继续。"
             self.tasks.continue_task(active_task.task_id)
             messages.append(
-                ReasoningMessage(
+                ModelMessage(
                     role="user",
                     content=_continuation_message(active_task),
                 )
@@ -272,25 +295,32 @@ class AutonomousAgentService:
 
     async def _run_task_step(
         self,
-        messages: list[ReasoningMessage],
+        messages: list[ModelMessage],
         envelope: Envelope,
         session_key: str,
         run_id: str,
         deadline: float,
         active_task: AgentTask | None,
         objective: str,
+        *,
+        on_text_delta: TextDeltaCallback | None = None,
     ) -> _StepOutcome:
-        decision = await self.runner.run(
-            AgentTurnRequest(tuple(messages), self.tools.names, deadline, run_id)
-        )
+        request = AgentTurnRequest(tuple(messages), self.tools.names, deadline, run_id)
+        if on_text_delta is None:
+            decision = await self.runner.run(request)
+        else:
+            decision = await self.runner.run(
+                request,
+                on_text_delta=on_text_delta,
+            )
         if decision.status == "returned":
             if active_task is not None:
                 messages.extend(
                     (
-                        ReasoningMessage(
+                        ModelMessage(
                             role="assistant", content=decision.final_text or ""
                         ),
-                        ReasoningMessage(
+                        ModelMessage(
                             role="user", content=_continuation_message(active_task)
                         ),
                     )
@@ -377,20 +407,19 @@ class AutonomousAgentService:
             step = self.tasks.add_step(current_task.task_id, proposal, outcome)
         messages.extend(
             (
-                ReasoningMessage(
+                ModelMessage(
                     role="assistant",
                     content="",
                     tool_calls=[
-                        ReasoningToolCall(call.tool_call_id, call.name, call.arguments)
+                        ModelToolCall(call.tool_call_id, call.name, call.arguments)
                     ],
                 ),
-                ReasoningMessage(
+                ModelMessage(
                     role="tool",
                     content=_tool_outcome_context(
                         proposal, outcome, step, current_task
                     ),
                     tool_call_id=call.tool_call_id,
-                    tool_name=call.name,
                 ),
             )
         )
@@ -587,21 +616,21 @@ class AutonomousAgentService:
 
     @staticmethod
     def _append_nonphysical_tool_result(
-        messages: list[ReasoningMessage],
+        messages: list[ModelMessage],
         decision: AgentTurnResult,
         outcome: ToolOutcome,
     ) -> None:
         call = decision.tool_calls[0]
         messages.extend(
             (
-                ReasoningMessage(
+                ModelMessage(
                     role="assistant",
                     content="",
                     tool_calls=[
-                        ReasoningToolCall(call.tool_call_id, call.name, call.arguments)
+                        ModelToolCall(call.tool_call_id, call.name, call.arguments)
                     ],
                 ),
-                ReasoningMessage(
+                ModelMessage(
                     role="tool",
                     content=(
                         f"tool_result status={outcome.status}; "
@@ -609,7 +638,6 @@ class AutonomousAgentService:
                         f"data={json.dumps(outcome.data, ensure_ascii=False)}"
                     ),
                     tool_call_id=call.tool_call_id,
-                    tool_name=call.name,
                 ),
             )
         )
@@ -664,9 +692,7 @@ class AutonomousAgentService:
     async def _on_robot_observation(self, _topic: str, payload: dict) -> None:
         self.entities.update(from_payload(RobotObservation, payload))
 
-    def _skill_event_context(
-        self, task: AgentTask, step: object
-    ) -> list[ReasoningMessage]:
+    def _skill_event_context(self, task: AgentTask, step: object) -> list[ModelMessage]:
         policy = self.templates.render(
             "agent/SYSTEM.md",
             agent_soul=self.templates.render("agent/SOUL.md"),
@@ -677,9 +703,9 @@ class AutonomousAgentService:
         proposal = getattr(step, "proposal")
         outcome = getattr(step, "outcome")
         return [
-            ReasoningMessage(role="system", content=policy),
+            ModelMessage(role="system", content=policy),
             *self.conversations.recent(task.session_key),
-            ReasoningMessage(
+            ModelMessage(
                 role="user",
                 content=(
                     "机器人 Skill 已返回终态事件。以下是权威工具结果；"
@@ -688,7 +714,7 @@ class AutonomousAgentService:
                     + _tool_outcome_context(proposal, outcome, step, task)
                 ),
             ),
-            ReasoningMessage(role="user", content=_continuation_message(task)),
+            ModelMessage(role="user", content=_continuation_message(task)),
         ]
 
 

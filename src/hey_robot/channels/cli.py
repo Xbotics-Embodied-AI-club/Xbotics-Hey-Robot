@@ -19,6 +19,7 @@ class CLIChannel:
         self.name = context.name
         self._task: asyncio.Task | None = None
         self._stopped = asyncio.Event()
+        self._streamed_replies: dict[str, str] = {}
 
     async def start(self, handler: InboundHandler) -> None:
         if not self._supports_interactive_input():
@@ -30,6 +31,27 @@ class CLIChannel:
 
     async def send(self, reply: AgentReply) -> None:
         prefix = self.context.spec.settings.get("reply_prefix", "assistant")
+        stream_key = str(
+            reply.metadata.get("interaction_id") or reply.envelope.trace_id
+        )
+        if not reply.final:
+            if stream_key not in self._streamed_replies:
+                sys.stdout.write(f"{prefix}> ")
+                self._streamed_replies[stream_key] = ""
+            sys.stdout.write(reply.text)
+            sys.stdout.flush()
+            self._streamed_replies[stream_key] += reply.text
+            return
+        streamed = self._streamed_replies.pop(stream_key, None)
+        if streamed is not None:
+            if reply.text.startswith(streamed):
+                sys.stdout.write(f"{reply.text[len(streamed) :]}\n")
+            elif reply.text != streamed:
+                sys.stdout.write(f"\n{prefix}> {format_notification_text(reply)}\n")
+            else:
+                sys.stdout.write("\n")
+            sys.stdout.flush()
+            return
         sys.stdout.write(f"{prefix}> {format_notification_text(reply)}\n")
 
     async def on_event(self, _event: RuntimeEvent) -> None:

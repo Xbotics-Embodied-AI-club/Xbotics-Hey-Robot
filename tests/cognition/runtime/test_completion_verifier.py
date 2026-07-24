@@ -5,12 +5,12 @@ import pytest
 from hey_robot.cognition.runtime.agent_task_store import AgentTask, AgentTaskStep
 from hey_robot.cognition.runtime.completion_verifier import TaskCompletionVerifier
 from hey_robot.cognition.tools.skill_tools import SkillCallProposal
+from hey_robot.model import ModelResponse, ModelToolCall
 from hey_robot.protocol import ToolOutcome
-from hey_robot.providers import ReasoningResponse, ReasoningToolCall
 
 
-class _Provider:
-    def __init__(self, response: ReasoningResponse) -> None:
+class _Model:
+    def __init__(self, response: ModelResponse) -> None:
         self.response = response
         self.calls = []
 
@@ -60,10 +60,10 @@ def _step() -> AgentTaskStep:
 
 @pytest.mark.asyncio
 async def test_completion_verifier_rejects_unsupported_world_state() -> None:
-    provider = _Provider(
-        ReasoningResponse(
+    model = _Model(
+        ModelResponse(
             tool_calls=[
-                ReasoningToolCall(
+                ModelToolCall(
                     "verdict-1",
                     "reject_task_completion",
                     {"reason": "观察只证明门仍在前方，不能证明已经进入。"},
@@ -71,7 +71,7 @@ async def test_completion_verifier_rejects_unsupported_world_state() -> None:
             ]
         )
     )
-    verifier = TaskCompletionVerifier(provider)
+    verifier = TaskCompletionVerifier(model)
 
     verdict = await verifier.verify(
         _task(), "已经进入门内。", (_step(),), ("step:step-1",)
@@ -79,7 +79,7 @@ async def test_completion_verifier_rejects_unsupported_world_state() -> None:
 
     assert not verdict.accepted
     assert "不能证明已经进入" in verdict.reason
-    request = provider.calls[0]
+    request = model.calls[0]
     assert {tool["function"]["name"] for tool in request["tools"]} == {
         "accept_task_completion",
         "reject_task_completion",
@@ -89,9 +89,7 @@ async def test_completion_verifier_rejects_unsupported_world_state() -> None:
 
 @pytest.mark.asyncio
 async def test_completion_verifier_fails_closed_without_structured_verdict() -> None:
-    verifier = TaskCompletionVerifier(
-        _Provider(ReasoningResponse(content="看起来完成了"))
-    )
+    verifier = TaskCompletionVerifier(_Model(ModelResponse(content="看起来完成了")))
 
     verdict = await verifier.verify(
         _task(), "已经进入门内。", (_step(),), ("step:step-1",)

@@ -340,8 +340,9 @@ class WebChannel:
 
     async def send(self, reply: AgentReply) -> None:
         payload = to_payload(reply)
-        self._replies.append(payload)
-        self._replies = self._replies[-500:]
+        if reply.final:
+            self._replies.append(payload)
+            self._replies = self._replies[-500:]
         stale = []
         for sock in self._websockets:
             try:

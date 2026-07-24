@@ -98,7 +98,7 @@ LLM 选择了语义上合理的技能，但当前机器人状态不允许执行�
 
 ## 4. 系统架构
 
-Hey Robot 是一个原生实现、面向服务的 Embodied Agent Harness。它没有把 planning、tool loop 或 task state 委托给通用 LLM Agent 框架；OpenAI-compatible SDK 只作为模型 provider client。Agent 循环、工具协议、任务状态和执行反馈由 `AgentRuntime`、`RobotAgentCore` 及任务运行时自主实现。
+Hey Robot 是一个原生实现、面向服务的 Embodied Agent Harness。它没有把 planning、tool loop 或 task state 委托给通用 LLM Agent 框架；模型调用统一使用 OpenAI Python SDK 的 Chat Completions 接口。Agent 循环、工具协议、任务状态和执行反馈由 `AgentRuntime`、`RobotAgentCore` 及任务运行时自主实现。
 
 默认 `hey-robot run` 会在同一进程中启动多个独立 asyncio 服务，各服务通过 NATS client 交换消息；VLA/VLN 等模型可作为独立 gRPC `ModelService` 部署。因此，“面向服务”描述协议和责任边界，不表示默认部署必须是多主机微服务。
 

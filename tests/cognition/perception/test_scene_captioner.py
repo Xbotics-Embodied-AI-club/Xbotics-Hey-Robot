@@ -4,20 +4,20 @@ import numpy as np
 
 from hey_robot.cognition.perception.scene import (
     DeterministicSceneCaptioner,
-    ReasoningSceneCaptioner,
+    ModelSceneCaptioner,
     SceneUnderstanding,
 )
+from hey_robot.model import ModelMessage, ModelResponse
 from hey_robot.protocol import Envelope, ImageRef, RobotObservation, RobotStatus
-from hey_robot.providers import ReasoningMessage, ReasoningResponse
 
 
-class FakeProvider:
+class FakeModelClient:
     def __init__(self) -> None:
-        self.messages: list[ReasoningMessage] = []
+        self.messages: list[ModelMessage] = []
 
     async def chat(self, **kwargs):
         self.messages = list(kwargs.get("messages") or [])
-        return ReasoningResponse(
+        return ModelResponse(
             content=(
                 '{"summary":"桌面上有一个杯子","objects":[{"name":"杯子","location":"桌面中央",'
                 '"confidence":0.8}],"task_relevance":"目标可见","risks":[],"next_observation_hint":"靠近前保持目标居中",'
@@ -44,8 +44,8 @@ async def test_deterministic_scene_captioner_without_image() -> None:
     assert result.risks
 
 
-async def test_reasoning_scene_captioner_parses_structured_scene() -> None:
-    provider = FakeProvider()
+async def test_model_scene_captioner_parses_structured_scene() -> None:
+    model = FakeModelClient()
     observation = RobotObservation(
         envelope=Envelope(robot_id="xlerobot"),
         frame_id=4,
@@ -54,17 +54,17 @@ async def test_reasoning_scene_captioner_parses_structured_scene() -> None:
         raw={"policy_task": "Place the kettle on a burner."},
     )
 
-    result = await ReasoningSceneCaptioner(
-        provider, image_resolver=FakeResolver()
-    ).caption(observation, question="杯子在哪里？")  # type: ignore[arg-type]
+    result = await ModelSceneCaptioner(model, image_resolver=FakeResolver()).caption(
+        observation, question="杯子在哪里？"
+    )  # type: ignore[arg-type]
 
     assert result.summary == "桌面上有一个杯子"
     assert result.objects[0].name == "杯子"
     assert result.next_observation_hint == "靠近前保持目标居中"
-    assert "机器人前视相机的场景理解器" in provider.messages[0].content
-    assert "frame_id: 4" in provider.messages[1].content
-    assert "杯子在哪里？" in provider.messages[1].content
-    assert "Place the kettle on a burner." in provider.messages[1].content
+    assert "机器人前视相机的场景理解器" in model.messages[0].content
+    assert "frame_id: 4" in model.messages[1].content
+    assert "杯子在哪里？" in model.messages[1].content
+    assert "Place the kettle on a burner." in model.messages[1].content
 
 
 def test_scene_understanding_accepts_string_risks() -> None:

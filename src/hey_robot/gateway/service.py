@@ -191,7 +191,14 @@ class GatewayService:
 
     async def _on_conversation_result(self, _topic: str, payload: dict) -> None:
         result = from_payload(ConversationResult, payload)
-        await self._send_reply(AgentReply(envelope=result.envelope, text=result.text))
+        await self._send_reply(
+            AgentReply(
+                envelope=result.envelope,
+                text=result.text,
+                final=result.final,
+                metadata={"interaction_id": result.interaction_id},
+            )
+        )
 
     def _session_key(self, envelope: Envelope) -> str:
         if self.config.identity.unified_user_episodes and envelope.user_id:
@@ -302,7 +309,7 @@ class GatewayService:
             f"gateway received agent reply trace={reply.envelope.trace_id} "
             f"channel={reply.envelope.channel} text_len={len(reply.text)}"
         )
-        if reply.envelope.episode_id:
+        if reply.final and reply.envelope.episode_id:
             self.episodes.append_agent_reply(reply.envelope.episode_id, reply)
         await self.channels.send(reply)
 

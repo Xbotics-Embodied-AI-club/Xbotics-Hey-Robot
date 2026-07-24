@@ -7,10 +7,9 @@ ROOT = Path(__file__).resolve().parents[2]
 COGNITION = ROOT / "src" / "hey_robot" / "cognition"
 
 
-def test_no_fallback_provider_in_src() -> None:
-    """fallback_provider.py must not exist in providers/."""
-    fallback = ROOT / "src" / "hey_robot" / "providers" / "fallback_provider.py"
-    assert not fallback.exists(), "fallback_provider.py must be deleted"
+def test_no_provider_framework_in_src() -> None:
+    providers = ROOT / "src" / "hey_robot" / "providers"
+    assert not providers.exists(), "model provider framework must be deleted"
 
 
 def test_no_text_fallback_in_runtime() -> None:

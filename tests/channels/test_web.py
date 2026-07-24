@@ -60,6 +60,24 @@ def test_web_channel_payload_and_live_broadcasts() -> None:
     assert channel._events[-1]["kind"] == "robot.status"
 
 
+def test_web_channel_broadcasts_but_does_not_cache_partial_reply() -> None:
+    channel = WebChannel(
+        ChannelContext(name="web", spec=ChannelSpec(type="web"), deployment_id="d1")
+    )
+
+    asyncio.run(
+        channel.send(
+            AgentReply(
+                envelope=Envelope(channel="web"),
+                text="partial",
+                final=False,
+            )
+        )
+    )
+
+    assert channel._replies == []
+
+
 def test_interaction_ui_treats_progress_replies_as_non_terminal() -> None:
     script = WebChannel(
         ChannelContext(name="web", spec=ChannelSpec(type="web"), deployment_id="d1")
@@ -80,6 +98,13 @@ def test_interaction_ui_treats_progress_replies_as_non_terminal() -> None:
     assert "WS.connect" in static_js
     assert "bindStore" in static_js
     assert "loadLastMessages" in static_js
+    assert "streamingMessageEls" in static_js
+
+    ws_js = (
+        frontend_root().joinpath("shared", "js", "ws.js").read_text(encoding="utf-8")
+    )
+    assert "upsertAgentReply" in ws_js
+    assert "payload.final !== false" in ws_js
 
 
 def test_web_history_restores_persisted_episode(tmp_path) -> None:

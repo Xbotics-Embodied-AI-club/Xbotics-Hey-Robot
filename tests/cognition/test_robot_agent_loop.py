@@ -14,8 +14,8 @@ from hey_robot.cognition.runtime.agent_task_store import AgentTaskStore
 from hey_robot.cognition.runtime.conversation_store import ConversationStore
 from hey_robot.cognition.tools.robot import CompleteTaskProposal, ControlTaskProposal
 from hey_robot.cognition.tools.skill_tools import SkillCallProposal
+from hey_robot.model import ModelMessage
 from hey_robot.protocol import Envelope, ToolOutcome
-from hey_robot.providers import ReasoningMessage
 from hey_robot.skills.models import SkillEvent, SkillResult
 
 
@@ -252,7 +252,7 @@ async def test_conversation_loop_continues_after_observation_failure() -> None:
     service.completion_verifier = _CompletionVerifier()
 
     text = await service._run_conversation_loop(
-        [ReasoningMessage("user", "往前走走")],
+        [ModelMessage("user", "往前走走")],
         Envelope(robot_id="sim_robot"),
         "session-1",
         "turn-1",
@@ -309,7 +309,7 @@ async def test_conversation_loop_never_finalizes_pending_robot_outcome() -> None
     service.completion_verifier = _CompletionVerifier()
 
     text = await service._run_conversation_loop(
-        [ReasoningMessage("user", "往前走走")],
+        [ModelMessage("user", "往前走走")],
         Envelope(robot_id="sim_robot"),
         "session-1",
         "turn-1",
@@ -378,7 +378,7 @@ async def test_conversation_loop_tracks_every_robot_step_in_one_task() -> None:
     service.completion_verifier = _CompletionVerifier()
 
     text = await service._run_conversation_loop(
-        [ReasoningMessage("user", "往前走走")],
+        [ModelMessage("user", "往前走走")],
         Envelope(robot_id="sim_robot"),
         "session-1",
         "turn-1",
@@ -468,7 +468,7 @@ async def test_rejected_completion_keeps_driving_the_same_task() -> None:
     service.completion_verifier = verifier
 
     text = await service._run_conversation_loop(
-        [ReasoningMessage("user", "进入前面的门")],
+        [ModelMessage("user", "进入前面的门")],
         Envelope(robot_id="sim_robot"),
         "session-1",
         "turn-1",

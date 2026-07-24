@@ -198,9 +198,8 @@ agents:
     policy_id: embodied_skills
     settings:
       mode: autonomous
-      providers:
+      models:
         planner:
-          type: deepseek
           model_env: DEEPSEEK_MODEL
           api_key_env: DEEPSEEK_API_KEY
           base_url_env: DEEPSEEK_BASE_URL
@@ -211,8 +210,8 @@ agents:
             thinking:
               type: disabled
         scene_captioner:
-          type: dashscope
           model_env: DASHSCOPE_MODEL
           api_key_env: DASHSCOPE_API_KEY
+          base_url_env: DASHSCOPE_BASE_URL
           temperature: 0.0
           max_tokens: 1024

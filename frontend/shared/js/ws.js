@@ -64,7 +64,7 @@ const WS = (() => {
         metadata.images = payload.media;
       }
       if (text) {
-        addMessage({ role: 'agent', content: text, timestamp: Date.now(), metadata });
+        upsertAgentReply(payload, text, metadata);
       }
     } else if (type === 'runtime.event') {
       handleRuntimeEvent(data.payload || {});
@@ -192,6 +192,38 @@ const WS = (() => {
   function addMessage(msg) {
     const conv = Store.get('conversation');
     const updated = [...conv, msg];
+    Store.set('conversation', updated);
+  }
+
+  function upsertAgentReply(payload, text, metadata) {
+    const envelope = payload.envelope || {};
+    const streamKey = metadata.interaction_id || envelope.trace_id || null;
+    const final = payload.final !== false;
+    if (!streamKey) {
+      addMessage({ role: 'agent', content: text, timestamp: Date.now(), metadata });
+      return;
+    }
+    const conv = Store.get('conversation');
+    const index = conv.findIndex(msg => msg.streamKey === streamKey);
+    if (index < 0) {
+      Store.set('conversation', [...conv, {
+        role: 'agent',
+        content: text,
+        timestamp: Date.now(),
+        metadata,
+        streamKey,
+        final,
+      }]);
+      return;
+    }
+    const updated = [...conv];
+    const current = updated[index];
+    updated[index] = {
+      ...current,
+      content: final ? text : current.content + text,
+      metadata,
+      final,
+    };
     Store.set('conversation', updated);
   }
 

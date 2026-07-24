@@ -98,7 +98,7 @@ RoboCasa assets。它会验证 assets 完整性，并把新环境中的 RoboCasa
 `artifacts/robocasa365/merged-assets`。CUDA driver、EGL/OpenGL 系统库、模型权重和
 RoboCasa assets 是运行资源，不属于 Python dependency group。
 
-### 4.2 Provider 配置
+### 4.2 模型配置
 
 项目根目录的 `.env` 需要配置以下变量：
 
@@ -112,7 +112,9 @@ DEEPSEEK_API_KEY=...
 DEEPSEEK_BASE_URL=...
 ```
 
-不要把真实 API key 写入本文、命令行参数或评测 artifact。唯一启动器会自动读取 `.env`。
+这些模型都通过 OpenAI Python SDK 的 Chat Completions 接口调用；DeepSeek 与 Qwen 使用各自
+的 OpenAI-compatible `BASE_URL`。不要把真实 API key 写入本文、命令行参数或评测 artifact。
+唯一启动器会自动读取 `.env`。
 
 PI052 checkpoint、device、prompt mode、horizon 和 timeout 只在
 `configs/evaluation/robocasa365.agent.yaml` 中配置：

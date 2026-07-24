@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass
 
 from hey_robot.cognition.runtime.agent_task_store import AgentTask, AgentTaskStep
-from hey_robot.providers import ReasoningMessage, ReasoningProvider
+from hey_robot.model import ModelClientLike, ModelMessage
 
 _ACCEPT_TOOL = "accept_task_completion"
 _REJECT_TOOL = "reject_task_completion"
@@ -50,8 +50,8 @@ class CompletionVerdict:
 class TaskCompletionVerifier:
     """Use a separate evidence-review pass before closing a physical task."""
 
-    def __init__(self, provider: ReasoningProvider) -> None:
-        self._provider = provider
+    def __init__(self, model: ModelClientLike) -> None:
+        self._model = model
 
     async def verify(
         self,
@@ -80,7 +80,7 @@ class TaskCompletionVerifier:
             for step in referenced
         ]
         messages = [
-            ReasoningMessage(
+            ModelMessage(
                 role="system",
                 content=(
                     "你是机器人持续任务的完成证据审计器。只审查证据，不规划动作。"
@@ -91,7 +91,7 @@ class TaskCompletionVerifier:
                     "必须且只能调用一个 verdict 工具，不要输出普通文本。"
                 ),
             ),
-            ReasoningMessage(
+            ModelMessage(
                 role="user",
                 content=json.dumps(
                     {
@@ -105,7 +105,7 @@ class TaskCompletionVerifier:
         ]
         try:
             response = await asyncio.wait_for(
-                self._provider.chat(messages=messages, tools=_VERDICT_TOOLS),
+                self._model.chat(messages=messages, tools=_VERDICT_TOOLS),
                 timeout=max(0.001, timeout_sec),
             )
         except Exception as exc:

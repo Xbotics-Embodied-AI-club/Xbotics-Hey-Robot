@@ -11,7 +11,7 @@ from hey_robot.cognition.runtime.agent_runner import (
     AgentTurnRequest,
 )
 from hey_robot.cognition.tools.robot import ToolDependencies, ToolRegistry
-from hey_robot.providers import ReasoningMessage, ReasoningResponse, ReasoningToolCall
+from hey_robot.model import ModelMessage, ModelResponse, ModelToolCall
 from hey_robot.skills.models import Skill, SkillResult
 
 
@@ -30,10 +30,10 @@ async def _noop(*_args: Any, **_kwargs: Any) -> SkillResult:
     return SkillResult(True, "ok", "completed")
 
 
-class Provider:
+class Model:
     def __init__(
         self,
-        response: ReasoningResponse | None = None,
+        response: ModelResponse | None = None,
         *,
         error: Exception | None = None,
         delay: float = 0,
@@ -84,11 +84,11 @@ def _tools():
 
 @pytest.mark.asyncio
 async def test_conversation_can_return_text_with_the_shared_runner() -> None:
-    provider = Provider(ReasoningResponse(content="你好"))
-    runner = AgentRunner(provider, _tools())
+    model = Model(ModelResponse(content="你好"))
+    runner = AgentRunner(model, _tools())
     result = await runner.run(
         AgentTurnRequest(
-            (ReasoningMessage("user", "你好"),),
+            (ModelMessage("user", "你好"),),
             frozenset({"move", "complete_task"}),
             time.monotonic() + 1,
             "turn-1",
@@ -99,11 +99,40 @@ async def test_conversation_can_return_text_with_the_shared_runner() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runner_forwards_text_delta_callback_to_model() -> None:
+    class StreamingModel(Model):
+        async def chat(self, **kwargs):
+            callback = kwargs["on_text_delta"]
+            await callback("你")
+            await callback("好")
+            return ModelResponse(content="你好")
+
+    deltas: list[str] = []
+
+    async def collect(delta: str) -> None:
+        deltas.append(delta)
+
+    runner = AgentRunner(StreamingModel(), _tools())
+    result = await runner.run(
+        AgentTurnRequest(
+            (ModelMessage("user", "你好"),),
+            frozenset({"move"}),
+            time.monotonic() + 1,
+            "turn-stream",
+        ),
+        on_text_delta=collect,
+    )
+
+    assert deltas == ["你", "好"]
+    assert result.final_text == "你好"
+
+
+@pytest.mark.asyncio
 async def test_removed_start_task_tool_is_rejected() -> None:
-    provider = Provider(
-        ReasoningResponse(
+    model = Model(
+        ModelResponse(
             tool_calls=[
-                ReasoningToolCall(
+                ModelToolCall(
                     "g1",
                     "start_task",
                     {"objective": "find the cup"},
@@ -111,10 +140,10 @@ async def test_removed_start_task_tool_is_rejected() -> None:
             ]
         )
     )
-    runner = AgentRunner(provider, _tools())
+    runner = AgentRunner(model, _tools())
     result = await runner.run(
         AgentTurnRequest(
-            (ReasoningMessage("system", "continue goal"),),
+            (ModelMessage("system", "continue goal"),),
             frozenset({"inspect_scene", "move"}),
             time.monotonic() + 1,
             "goal-1",
@@ -123,38 +152,38 @@ async def test_removed_start_task_tool_is_rejected() -> None:
     assert result.status == "failed"
     assert result.failure is not None
     assert result.failure.code == "UNKNOWN_TOOL"
-    sent_names = {item["function"]["name"] for item in provider.calls[0]["tools"]}
+    sent_names = {item["function"]["name"] for item in model.calls[0]["tools"]}
     assert sent_names == {"inspect_scene", "move"}
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("provider", "deadline_offset", "expected_code"),
+    ("model", "deadline_offset", "expected_code"),
     [
-        (Provider(error=RuntimeError("boom")), 1, "PROVIDER_ERROR"),
+        (Model(error=RuntimeError("boom")), 1, "MODEL_ERROR"),
         (
-            Provider(ReasoningResponse(content="", finish_reason="stop")),
+            Model(ModelResponse(content="", finish_reason="stop")),
             1,
             "EMPTY_MODEL_RESPONSE",
         ),
         (
-            Provider(ReasoningResponse(content="bad", finish_reason="error")),
+            Model(ModelResponse(content="bad", finish_reason="error")),
             1,
-            "PROVIDER_ERROR",
+            "MODEL_ERROR",
         ),
         (
-            Provider(ReasoningResponse(content="late"), delay=0.1),
+            Model(ModelResponse(content="late"), delay=0.1),
             0.01,
-            "PROVIDER_TIMEOUT",
+            "MODEL_TIMEOUT",
         ),
     ],
 )
-async def test_provider_and_protocol_failures_are_typed(
-    provider: Provider, deadline_offset: float, expected_code: str
+async def test_model_and_protocol_failures_are_typed(
+    model: Model, deadline_offset: float, expected_code: str
 ) -> None:
-    result = await AgentRunner(provider, _tools()).run(
+    result = await AgentRunner(model, _tools()).run(
         AgentTurnRequest(
-            (ReasoningMessage("system", "test"),),
+            (ModelMessage("system", "test"),),
             frozenset({"inspect_scene", "move"}),
             time.monotonic() + deadline_offset,
             "failure-turn",
@@ -166,31 +195,31 @@ async def test_provider_and_protocol_failures_are_typed(
 
 
 @pytest.mark.asyncio
-async def test_elapsed_deadline_does_not_call_provider() -> None:
-    provider = Provider(ReasoningResponse(content="unused"))
-    result = await AgentRunner(provider, _tools()).run(
+async def test_elapsed_deadline_does_not_call_model() -> None:
+    model = Model(ModelResponse(content="unused"))
+    result = await AgentRunner(model, _tools()).run(
         AgentTurnRequest(
-            (ReasoningMessage("system", "test"),),
+            (ModelMessage("system", "test"),),
             frozenset({"move"}),
             time.monotonic() - 1,
             "expired",
         )
     )
     assert result.failure is not None
-    assert result.failure.code == "PROVIDER_TIMEOUT"
-    assert provider.calls == []
+    assert result.failure.code == "MODEL_TIMEOUT"
+    assert model.calls == []
 
 
 @pytest.mark.asyncio
-async def test_invalid_context_and_tool_set_are_rejected_before_provider() -> None:
-    provider = Provider(ReasoningResponse(content="unused"))
-    runner = AgentRunner(provider, _tools())
+async def test_invalid_context_and_tool_set_are_rejected_before_model() -> None:
+    model = Model(ModelResponse(content="unused"))
+    runner = AgentRunner(model, _tools())
     invalid_messages = await runner.run(
         AgentTurnRequest((), frozenset({"move"}), time.monotonic() + 1, "m")
     )
     invalid_tools = await runner.run(
         AgentTurnRequest(
-            (ReasoningMessage("system", "test"),),
+            (ModelMessage("system", "test"),),
             frozenset({"missing_tool"}),
             time.monotonic() + 1,
             "t",
@@ -200,26 +229,26 @@ async def test_invalid_context_and_tool_set_are_rejected_before_provider() -> No
     assert invalid_messages.failure.code == "INVALID_MODEL_MESSAGES"
     assert invalid_tools.failure is not None
     assert invalid_tools.failure.code == "INVALID_TOOL_SET"
-    assert provider.calls == []
+    assert model.calls == []
 
 
 @pytest.mark.asyncio
 async def test_multiple_and_invalid_tool_calls_do_not_produce_proposals() -> None:
-    multiple = Provider(
-        ReasoningResponse(
+    multiple = Model(
+        ModelResponse(
             tool_calls=[
-                ReasoningToolCall("a", "inspect_scene", {"question": "front"}),
-                ReasoningToolCall("b", "inspect_scene", {"question": "back"}),
+                ModelToolCall("a", "inspect_scene", {"question": "front"}),
+                ModelToolCall("b", "inspect_scene", {"question": "back"}),
             ]
         )
     )
-    invalid = Provider(
-        ReasoningResponse(
-            tool_calls=[ReasoningToolCall("c", "inspect_scene", {"question": ""})]
+    invalid = Model(
+        ModelResponse(
+            tool_calls=[ModelToolCall("c", "inspect_scene", {"question": ""})]
         )
     )
     request = AgentTurnRequest(
-        (ReasoningMessage("system", "test"),),
+        (ModelMessage("system", "test"),),
         frozenset({"inspect_scene", "move"}),
         time.monotonic() + 1,
         "tool-errors",
@@ -234,10 +263,10 @@ async def test_multiple_and_invalid_tool_calls_do_not_produce_proposals() -> Non
 
 @pytest.mark.asyncio
 async def test_one_valid_skill_call_returns_one_proposal() -> None:
-    provider = Provider(
-        ReasoningResponse(
+    model = Model(
+        ModelResponse(
             tool_calls=[
-                ReasoningToolCall(
+                ModelToolCall(
                     "move-1",
                     "move",
                     {},
@@ -245,9 +274,9 @@ async def test_one_valid_skill_call_returns_one_proposal() -> None:
             ]
         )
     )
-    result = await AgentRunner(provider, _tools()).run(
+    result = await AgentRunner(model, _tools()).run(
         AgentTurnRequest(
-            (ReasoningMessage("system", "test"),),
+            (ModelMessage("system", "test"),),
             frozenset({"move"}),
             time.monotonic() + 1,
             "one-action",
@@ -256,4 +285,4 @@ async def test_one_valid_skill_call_returns_one_proposal() -> None:
     assert result.status == "action_proposed"
     assert result.proposal is not None
     assert result.proposal.skill_name == "move"
-    assert len(provider.calls) == 1
+    assert len(model.calls) == 1

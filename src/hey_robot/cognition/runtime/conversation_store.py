@@ -6,7 +6,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from hey_robot.providers import ReasoningMessage
+from hey_robot.model import ModelMessage
 
 
 class ConversationStore:
@@ -18,14 +18,13 @@ class ConversationStore:
         )
         self._db.commit()
 
-    def recent(self, session_key: str, limit: int = 16) -> list[ReasoningMessage]:
+    def recent(self, session_key: str, limit: int = 16) -> list[ModelMessage]:
         rows = self._db.execute(
             "SELECT role, content FROM messages WHERE session_key=? ORDER BY position DESC LIMIT ?",
             (session_key, limit),
         ).fetchall()
         return [
-            ReasoningMessage(role=role, content=content)
-            for role, content in reversed(rows)
+            ModelMessage(role=role, content=content) for role, content in reversed(rows)
         ]
 
     def append(self, session_key: str, role: str, content: str) -> None:

@@ -152,9 +152,8 @@ agents:
     policy_id: embodied_skills
     settings:
       mode: autonomous
-      providers:
+      models:
         planner:
-          type: deepseek
           model_env: DEEPSEEK_MODEL
           api_key_env: DEEPSEEK_API_KEY
           base_url_env: DEEPSEEK_BASE_URL

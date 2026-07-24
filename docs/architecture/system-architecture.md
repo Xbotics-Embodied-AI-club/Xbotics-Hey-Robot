@@ -10,8 +10,9 @@ Hey Robot 是一个不依赖通用 LLM Agent 框架、面向真实机器人原�
 Embodied Agent Harness，不是单独的 LLM loop，也不是端到端神经网络控制器。
 
 核心 Agent Runtime、tool protocol、任务状态机、记忆路由和 execution-feedback loop
-均由项目自主实现。OpenAI-compatible SDK 只作为模型 provider client，不承担 Agent
-编排。这里的“原生”指系统从一开始围绕异步物理执行、观测过期、硬件状态和失败恢复设计。
+均由项目自主实现。模型调用统一使用 OpenAI Python SDK 的 Chat Completions 接口，不承担
+Agent 编排；OpenAI、DeepSeek、Qwen 和 vLLM 仅通过模型名、API key 与 `base_url` 区分。
+这里的“原生”指系统从一开始围绕异步物理执行、观测过期、硬件状态和失败恢复设计。
 
 系统围绕以下工程问题提供统一实现：
 

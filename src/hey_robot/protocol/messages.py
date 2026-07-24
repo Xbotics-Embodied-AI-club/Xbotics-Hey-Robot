@@ -112,6 +112,7 @@ class ConversationResult:
     envelope: Envelope
     interaction_id: str
     text: str
+    final: bool = True
 
 
 @dataclass(frozen=True)

@@ -24,12 +24,11 @@ def test_deployment_runner_inspect(tmp_path: Path) -> None:
                     "robot_id": "mock0",
                     "settings": {
                         "mode": "agent",
-                        "providers": {
+                        "models": {
                             "planner": {
-                                "type": "openai_compat",
                                 "model": "mock-planner",
                                 "api_key": "test-key",
-                                "api_base": "http://127.0.0.1:9/v1",
+                                "base_url": "http://127.0.0.1:9/v1",
                             }
                         },
                     },
@@ -68,12 +67,11 @@ def test_deployment_runner_composes_native_local_agent_without_controller(
                 "main": {
                     "robot_id": "mock0",
                     "settings": {
-                        "providers": {
+                        "models": {
                             "planner": {
-                                "type": "openai_compat",
                                 "model": "mock-planner",
                                 "api_key": "test-key",
-                                "api_base": "http://127.0.0.1:9/v1",
+                                "base_url": "http://127.0.0.1:9/v1",
                             }
                         }
                     },
