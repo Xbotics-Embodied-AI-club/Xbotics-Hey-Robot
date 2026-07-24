@@ -165,13 +165,14 @@ def test_robot_runtime_does_not_depend_on_skill_os() -> None:
 
 def test_production_code_does_not_import_skill_os() -> None:
     offenders: list[str] = []
-    for path in Path("src/hey_robot").rglob("*.py"):
-        text = path.read_text(encoding="utf-8")
-        imports_skill_os = re.search(
-            r"\bfrom\s+hey_robot\.skill_os(?:\s+|\.|$)", text
-        ) or re.search(r"\bimport\s+hey_robot\.skill_os(?:\s+|\.|$)", text)
-        if imports_skill_os:
-            offenders.append(str(path))
+    for root in (Path("src/hey_robot"), Path("scripts")):
+        for path in root.rglob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            imports_skill_os = re.search(
+                r"\bfrom\s+hey_robot\.skill_os(?:\s+|\.|$)", text
+            ) or re.search(r"\bimport\s+hey_robot\.skill_os(?:\s+|\.|$)", text)
+            if imports_skill_os:
+                offenders.append(str(path))
 
     assert offenders == []
     assert not Path("src/hey_robot/skill_os").exists()

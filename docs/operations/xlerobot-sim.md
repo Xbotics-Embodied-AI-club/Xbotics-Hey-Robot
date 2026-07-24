@@ -2,10 +2,6 @@
 
 在本地 MuJoCo 中运行 XLeRobot 仿真，验证仿真驱动、场景文件、相机观测和系统配置。
 
-单臂 SO101 tabletop 参考基线使用独立驱动和配置，参见
-[`docs/operations/so101-tabletop-sim.md`](so101-tabletop-sim.md)。该基线不包含
-LeKiwi，也不使用当前 XLeRobot 的双臂 actuator 映射。
-
 ## 配置文件
 
 | OS | 配置 |

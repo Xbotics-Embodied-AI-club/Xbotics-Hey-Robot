@@ -59,6 +59,7 @@ FORBIDDEN_PATH_PARTS = (
     Path("src/hey_robot/skills/navigation_adapter.py"),
     Path("src/hey_robot/robot_runtime/identity.py"),
     Path("src/hey_robot/robocasa_runtime"),
+    Path("scripts/robots/so101_tabletop"),
 )
 
 
