@@ -114,7 +114,7 @@ User Channel -> Gateway -> Agent/Cognition
 ---------------------------+--------------------------------
                          fast system
                      Skill OS
-                     | SkillContractRuntime
+                     | SkillAdmissionGate
                      | resource/readiness/backend gates
                      +------------------+
                      |                  |
@@ -174,7 +174,7 @@ Hey Robot 将对话状态与任务状态绑定，而不是只保存聊天历史�
 
 ### 4.6 技能契约
 
-`SkillContractRuntime` 根据 skill catalog、当前 implementation 和机器人状态检查技能请求：
+`SkillAdmissionGate` 根据 skill catalog、当前 implementation 和机器人状态检查技能请求：
 
 - 技能是否存在、是否启用以及能否解析到 implementation。
 - 必需参数是否齐全。
@@ -259,7 +259,7 @@ real/sim 主配置使用 `skills.mode: bringup`，默认启用 11 个非 VLA ski
 
 因此当前主配置可以验证感知、底盘、跟随、安全、机械臂和夹爪能力，以及 Harness 到 Robot Runtime 的完整消息链路。它不能直接证明开放词汇抓取、放置、交付或中程任务成功。后续生产 profile 应隐藏关节和夹爪 primitive，只暴露经过验证的 semantic skills。
 
-`SkillContractRuntime` 在每个 skill 执行前检查：skill 存在性、必需参数、resource lock（arm/gripper/camera/base）、电量阈值、急停状态、readiness gate 和 ModelService availability。这相当于把 LLM 的动作提议放进确定性的安全和可行性门控。
+`SkillAdmissionGate` 在每个 skill 执行前检查：skill 存在性、必需参数、resource lock（arm/gripper/camera/base）、电量阈值、急停状态、readiness gate 和 ModelService availability。这相当于把 LLM 的动作提议放进确定性的安全和可行性门控。
 
 ### 6.4 ModelServices
 

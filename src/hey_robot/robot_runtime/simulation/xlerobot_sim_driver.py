@@ -13,7 +13,6 @@ from typing import Any
 
 import numpy as np
 
-from hey_robot.contracts import SkillContractRuntime
 from hey_robot.logging import HeyRobotLogger
 from hey_robot.protocol import (
     Envelope,
@@ -32,6 +31,7 @@ from hey_robot.robot_runtime.simulation.mujoco_logging import (
     configure_mujoco_warning_logging,
 )
 from hey_robot.robot_runtime.simulation.skill_adapter import XLeRobotSimSkillAdapter
+from hey_robot.robot_runtime.skill_gate import SkillAdmissionGate
 
 logger = HeyRobotLogger(name="xlerobot_sim")
 _ROBOT_BODY = "base_link"
@@ -253,7 +253,7 @@ class XLeRobotSimDriver:
             angular_speed=self._angular_speed,
             embodiment=context.embodiment,
         )
-        self.contracts = SkillContractRuntime(context.skill_catalog)
+        self.contracts = SkillAdmissionGate(context.skill_catalog)
 
         self.model: Any = None
         self.data: Any = None

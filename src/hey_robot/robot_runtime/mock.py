@@ -7,7 +7,6 @@ from typing import Any, ClassVar
 
 import numpy as np
 
-from hey_robot.contracts import SkillContractRuntime
 from hey_robot.protocol import (
     Envelope,
     RobotAction,
@@ -22,6 +21,7 @@ from hey_robot.robot_runtime.base import (
 )
 from hey_robot.robot_runtime.classic.primitives import SUPPORTED_CLASSIC_PRIMITIVES
 from hey_robot.robot_runtime.observations import DriverObservation, ObservationAsset
+from hey_robot.robot_runtime.skill_gate import SkillAdmissionGate
 
 
 class MockRobotDriver:
@@ -77,7 +77,7 @@ class MockRobotDriver:
         self.context = context
         self.robot_id = context.robot_id
         self.settings = dict(context.spec.settings or {})
-        self.contracts = SkillContractRuntime(context.skill_catalog)
+        self.contracts = SkillAdmissionGate(context.skill_catalog)
         self.frame_id = 0
         self.observe_count = 0
         self.action_attempts = 0

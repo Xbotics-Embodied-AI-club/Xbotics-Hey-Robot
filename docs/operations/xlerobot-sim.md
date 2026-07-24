@@ -25,7 +25,7 @@ Windows/Ubuntu 主配置只运行 11 个 native/sim skill，不包含 ModelServi
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  主进程 (.venv)  →  gateway / agent / Skill OS / robot │
+│  主进程 (.venv)  →  gateway / agent / skills / robot   │
 │  端口 8080 (web)  →  DeepSeek / DashScope             │
 │  端口 4222 (nats) →  NATS 消息总线                     │
 └────────┬──────────────────────────┬─────────────────┘
@@ -40,7 +40,7 @@ Windows/Ubuntu 主配置只运行 11 个 native/sim skill，不包含 ModelServi
 ```
 
 该图只适用于 `xlerobot.sim.vla_vln.yaml`。普通 sim 配置没有模型服务。
-VLA 和 VLN 都是独立的 gRPC 模型服务，主进程通过 Skill OS 调用它们。
+VLA 和 VLN 都是独立的 gRPC 模型服务，主进程由 skill 调用它们。
 VLA 负责操作（manipulate），VLN 负责导航（navigate_to / approach_object）。
 
 ## 依赖分组
@@ -90,8 +90,7 @@ uv sync --group sim --group dev
 与主环境的 `transformers>=5.4` + `huggingface-hub>=1.0` 不兼容，必须创建独立 venv：
 
 ```bash
-python3.12 -m venv .vln-venv
-uv sync --group vln --python .vln-venv/bin/python
+scripts/dev/setup_vln_env.sh
 ```
 
 ### VLA 开发环境（.vla-venv，可选）
@@ -220,7 +219,7 @@ model_services:
       backend: internvla_n1_system2
       mock_mode: false              # 内部测试开关；true 时跳过模型
       model_path: models/InternVLA-N1-System2
-      device: cuda:1                # 使用 GPU 1，留 GPU 0 给其他任务
+      device: cuda                  # 物理 GPU 由 CUDA_VISIBLE_DEVICES / 容器映射选择
       attn_implementation: sdpa     # 用 PyTorch 内置 SDPA 代替 flash_attn
       internnav_repo: third_party/InternNav
       control_mode: planner_only    # 当前仅支持 planner_only
@@ -292,7 +291,7 @@ model_services:
 
 VLA 操作已合并为单一 `manipulate` skill，由 LeRobot Policy 直接推理，模型在进程中加载
 （不再需要独立 HTTP 推理服务器或 `.vla-venv`）。已通过 MuJoCo 仿真端到端验证：
-Skill OS → gRPC → LeRobot Policy 推理 → 解析原语 → 仿真执行，全部链路正常。
+Skill → gRPC → LeRobot Policy 推理 → 解析原语 → 仿真执行，全部链路正常。
 
 ## VLA 模型注册
 
@@ -353,7 +352,7 @@ manipulate:
      ▼         ▼         ▼
 ┌─────────┐ ┌─────────┐ ┌──────────────────────────┐
 │ vla     │ │ vln     │ │ runtime                  │
-│ GPU 0   │ │ GPU 1   │ │ Agent / Skill OS / Robot │
+│ GPU 0   │ │ GPU 1   │ │ Agent / Skills / Robot   │
 │ :9090   │ │ :9091   │ │ :8080 (web)              │
 └─────────┘ └─────────┘ └──────────────────────────┘
 ```
@@ -394,7 +393,7 @@ docker compose --profile gpu up -d
 | `HEY_ROBOT_VLA_SERVICE_ID` | `manipulate` | VLA 服务 ID |
 | `HEY_ROBOT_VLN_PORT` | 9091 | VLN gRPC 端口 |
 | `HEY_ROBOT_VLN_GPU` | 1 | VLN 使用的 GPU 编号 |
-| `HEY_ROBOT_VLN_CONFIG` | `configs/xlerobot.sim.ubuntu.yaml` | VLN 配置文件 |
+| `HEY_ROBOT_VLN_CONFIG` | `configs/xlerobot.sim.vla_vln.yaml` | VLN 配置文件 |
 | `HEY_ROBOT_VLN_SERVICE_ID` | `vln_nav` | VLN 服务 ID |
 | `HEY_ROBOT_GATEWAY_PORT` | 8080 | Web gateway 端口 |
 | `HEY_ROBOT_MONITOR_PORT` | 8081 | 监控端口 |
@@ -414,7 +413,7 @@ docker compose --profile gpu up -d
 
 **`docker/Dockerfile.vln`** — VLN 导航服务：
 - 基础镜像：`nvidia/cuda:12.6.2-cudnn-runtime-ubuntu24.04`
-- 分步安装保证版本链：先装 `huggingface-hub<1.0`，再装 `transformers==4.51.0`，最后 `--no-deps` 装项目
+- 依赖：通过 `uv.lock` 同步独立 `vln` group，不与主运行时或 VLA 环境混装
 - 入口：`python -m hey_robot.cli.model_service --service-id vln_nav`
 - GPU 1，gRPC :9091
 
@@ -432,8 +431,10 @@ export MUJOCO_GL=egl
 
 ### VLN 报 huggingface-hub 版本冲突
 
-说明 VLN 服务用了主环境。VLN 需要 `huggingface-hub==0.33.4`，主运行时不依赖
-huggingface-hub。必须用 `.vln-venv` 启动 VLN 服务。详见上方「依赖分组」。
+说明 VLN 服务用了主环境或 `.vln-venv` 没有按锁文件同步。VLN 需要
+`huggingface-hub==0.33.4`。运行 `scripts/dev/setup_vln_env.sh` 重建独立环境，
+不要使用 `uv sync --group vln --python .vln-venv/bin/python`；后者仍可能选择项目
+默认 `.venv`。
 
 ### flash_attn 编译/加载失败
 

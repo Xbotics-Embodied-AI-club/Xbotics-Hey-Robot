@@ -27,5 +27,5 @@ Gateway 只读任务投影、处理渠道和持有自身的投递回执；它把
 reconcile 请求发布给 Supervisor。Supervisor 是 `autonomy.sqlite3` 的唯一任务状态写者。
 
 Supervisor 的 `DispatchPreflight` 是调度预检，用于尽早拒绝明显无效的 intent。Skill
-Controller 在实际执行前重新调用 `SkillContractRuntime.validate` 并检查资源冲突；这是最终
+Controller 在实际执行前重新调用 `SkillAdmissionGate.validate_action` 并检查资源冲突；这是最终
 准入点，避免消息传输期间机器人状态或资源占用变化造成 TOCTOU 问题。

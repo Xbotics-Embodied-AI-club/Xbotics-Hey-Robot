@@ -39,7 +39,7 @@ User Channel
       -> SkillGateway
   -> NATS topic: skill.intent
   -> SkillControllerService
-      -> SkillContractRuntime
+      -> SkillAdmissionGate
       -> SkillScheduler / SkillRuntime
       -> optional ModelServiceRegistry -> gRPC ModelService
   -> NATS topic: robot.action

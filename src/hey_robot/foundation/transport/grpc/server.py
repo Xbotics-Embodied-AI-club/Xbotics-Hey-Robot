@@ -219,9 +219,7 @@ class VLNPlannerService:
         host: str | None = None,
         port: int | None = None,
     ) -> None:
-        from hey_robot.foundation.backends.vln.internvla_n1_system2 import (
-            InternVLAN1System2Executor,
-        )
+        from hey_robot.foundation.backends.vln import build_vln_executor
 
         self.config = config
         self.service_id = service_id
@@ -229,13 +227,18 @@ class VLNPlannerService:
         self.host = host or str(self.spec.settings.get("host", "127.0.0.1"))
         self.port = port or int(self.spec.settings.get("port", 9091))
         self.state = ModelServiceState(service_id, self.spec)
-        self.executor = InternVLAN1System2Executor(service_id, self.spec)
+        self.executor: ModelServiceExecutor = build_vln_executor(service_id, self.spec)
         self._server: grpc.aio.Server | None = None
 
     async def start(self) -> None:
+        load = getattr(self.executor, "load", None)
+        if callable(load):
+            await asyncio.to_thread(load)
         self._server = grpc.aio.server()
+        token_env = str(self.spec.settings.get("auth_token_env") or "")
+        bearer_token = os.environ.get(token_env) if token_env else None
         model_service_pb2_grpc.add_ModelServiceServicer_to_server(
-            ModelServiceServicer(self.state, self.executor),
+            ModelServiceServicer(self.state, self.executor, bearer_token=bearer_token),
             self._server,
         )
         bind_target = f"{self.host}:{self.port}"
@@ -248,6 +251,9 @@ class VLNPlannerService:
 
     async def stop(self) -> None:
         self.executor.cancel()
+        close = getattr(self.executor, "close", None)
+        if callable(close):
+            close()
         if self._server is not None:
             await self._server.stop(grace=0.5)
 

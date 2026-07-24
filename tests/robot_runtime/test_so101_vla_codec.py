@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from hey_robot.vla.so101_schema import (
+from hey_robot.robot_runtime.so101.vla_codec import (
     ACTION_SPACE,
     SO101_STATE_SCHEMA,
     action_chunk_first_vector,

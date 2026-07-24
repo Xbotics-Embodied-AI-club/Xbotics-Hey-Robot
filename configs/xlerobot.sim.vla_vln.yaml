@@ -190,7 +190,8 @@ model_services:
       execute_low_level_control: false
       mock_mode: false
       model_path: models/InternVLA-N1-System2
-      device: cuda:1
+      # 由 CUDA_VISIBLE_DEVICES / 容器 GPU 映射选择物理设备；容器内不要绑定宿主机编号。
+      device: cuda
       dtype: bf16
       attn_implementation: sdpa
       media_root: runtime/xlerobot.sim.vla_vln/media

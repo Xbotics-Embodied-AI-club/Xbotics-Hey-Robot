@@ -9,7 +9,9 @@ FROM nvidia/cuda:${CUDA_VERSION}-cudnn-runtime-ubuntu24.04
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    DEBIAN_FRONTEND=noninteractive
+    DEBIAN_FRONTEND=noninteractive \
+    UV_PROJECT_ENVIRONMENT=/app/.venv \
+    PATH=/app/.venv/bin:${PATH}
 
 WORKDIR /app
 
@@ -30,41 +32,21 @@ RUN apt-get update \
     && ln -sf /usr/bin/python3.12 /usr/bin/python3 \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Python dependencies (order matters) ──
+# Install exactly the isolated VLN dependency group from the shared lockfile.
+# InternNav is loaded from the pinned repository submodule at runtime so its
+# broad optional extras cannot silently alter this environment.
+RUN pip install --break-system-packages uv
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --frozen --no-default-groups --group vln --no-install-project
 
-# Step 1: huggingface-hub < 1.0 (must come before any package that pulls >= 1.0)
-RUN pip install --break-system-packages "huggingface-hub>=0.30.0,<1.0"
-
-# Step 2: PyTorch with CUDA support
-RUN pip install --break-system-packages \
-    torch torchvision --index-url https://download.pytorch.org/whl/cu126
-
-# Step 3: InternNav and its core deps
 COPY third_party/InternNav /app/third_party/InternNav
-RUN pip install --break-system-packages \
-    transformers==4.51.0 \
-    accelerate \
-    diffusers \
-    && pip install --break-system-packages -e /app/third_party/InternNav
-
-# Step 4: Project (--no-deps avoids pulling huggingface-hub >= 1.0 from pyproject.toml)
-# Then install the subset of deps VLN executor actually needs.
-COPY pyproject.toml README.md ./
 COPY src ./src
 COPY configs ./configs
-RUN pip install --no-deps --break-system-packages -e . \
-    && pip install --break-system-packages \
-        grpcio \
-        protobuf \
-        numpy \
-        pillow \
-        pyyaml \
-        python-dotenv \
-        imageio
+RUN uv sync --frozen --no-default-groups --group vln
 
 # ── Runtime ──
 
 # Default entrypoint: start the VLN capability service.
 # Override --config at runtime to switch between sim / real / mock configs.
 ENTRYPOINT ["python", "-m", "hey_robot.cli.model_service"]
-CMD ["--config", "configs/xlerobot.sim.ubuntu.yaml", "--service-id", "vln_nav"]
+CMD ["--config", "configs/xlerobot.sim.vla_vln.yaml", "--service-id", "vln_nav"]

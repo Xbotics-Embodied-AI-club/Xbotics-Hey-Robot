@@ -63,7 +63,7 @@ GatewayService
           v
 2. Skill OS
   SkillControllerService
-  SkillContractRuntime / SkillScheduler / SkillRuntime
+  SkillAdmissionGate / SkillScheduler / SkillRuntime
           |                           |
           | NATS: robot.action        | gRPC
           v                           v

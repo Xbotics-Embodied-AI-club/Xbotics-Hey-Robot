@@ -47,5 +47,7 @@ def test_foundation_runtime_does_not_import_cognition_or_skill_os() -> None:
             re.compile(r"\bimport\s+hey_robot\.cognition(?:\s+|\.|$)"),
             re.compile(r"\bfrom\s+hey_robot\.skill_os(?:\s+|\.|$)"),
             re.compile(r"\bimport\s+hey_robot\.skill_os(?:\s+|\.|$)"),
+            re.compile(r"\bfrom\s+hey_robot\.robot_runtime(?:\s+|\.|$)"),
+            re.compile(r"\bimport\s+hey_robot\.robot_runtime(?:\s+|\.|$)"),
         ),
     )

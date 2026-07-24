@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import suppress
 
 from hey_robot.config import DeploymentConfig
 from hey_robot.foundation.transport.grpc import build_model_service
@@ -29,13 +30,18 @@ async def async_main() -> None:
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
     try:
-        await service.start()
+        # asyncio.run cancels the main task on SIGINT. Treat that as an
+        # operator-requested shutdown, not a model-service failure.
+        with suppress(asyncio.CancelledError):
+            await service.start()
     finally:
-        await service.stop()
+        with suppress(asyncio.CancelledError):
+            await service.stop()
 
 
 def main() -> None:
-    asyncio.run(async_main())
+    with suppress(KeyboardInterrupt):
+        asyncio.run(async_main())
 
 
 if __name__ == "__main__":

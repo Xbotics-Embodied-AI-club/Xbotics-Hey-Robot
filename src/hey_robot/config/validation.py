@@ -52,6 +52,7 @@ def validate_deployment(config: DeploymentConfig) -> list[ValidationIssue]:
                 )
             )
     issues.extend(_robot_policy_configuration_issues(config))
+    issues.extend(_vln_configuration_issues(config))
     issues.extend(_robocasa_configuration_issues(config))
     for path in (
         config.resources.runtime_dir,
@@ -201,6 +202,41 @@ def _robot_policy_configuration_issues(
                     f"model service {service_id} requires positive action_dimensions",
                 )
             )
+    return issues
+
+
+def _vln_configuration_issues(config: DeploymentConfig) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    for service_id, service in config.model_services.items():
+        if service.type != "vln_planner":
+            continue
+        backend = str(service.settings.get("backend") or "internvla_n1_system2")
+        if backend != "internvla_n1_system2":
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    f"model service {service_id} has unsupported VLN backend "
+                    f"{backend!r}",
+                )
+            )
+        control_mode = str(service.settings.get("control_mode") or "planner_only")
+        if control_mode != "planner_only":
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    f"model service {service_id} has unsupported VLN control_mode "
+                    f"{control_mode!r}",
+                )
+            )
+        if bool(service.settings.get("mock_mode", False)):
+            continue
+        issues.extend(
+            ValidationIssue(
+                "error", f"model service {service_id} requires setting {required}"
+            )
+            for required in ("model_path", "internnav_repo", "media_root")
+            if not str(service.settings.get(required) or "").strip()
+        )
     return issues
 
 

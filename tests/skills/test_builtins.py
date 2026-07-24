@@ -394,6 +394,21 @@ async def test_native_vln_navigation_runs_bounded_observe_plan_act_loop() -> Non
     ]
 
 
+async def test_native_vln_budget_exhaustion_does_not_claim_success() -> None:
+    robot = FreshRobot()
+    models = SequencedModels(
+        [{"vln": {"mode": "pixel_goal", "pixel_goal": [240, 320]}}]
+    )
+
+    result = await _runner(robot, Sink(), models=models).execute(
+        _command("navigate_to", {"target": "desk", "max_steps": 1})
+    )
+
+    assert result.success is False
+    assert result.failure_mode == "budget_exhausted"
+    assert result.data["termination_reason"] == "max_steps"
+
+
 async def test_native_dock_skills_use_robot_client_primitives() -> None:
     robot = DockRobot()
     sink = Sink()

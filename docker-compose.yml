@@ -69,7 +69,7 @@ services:
       - "${HEY_ROBOT_VLN_PORT:-9091}:9091"
     command:
       - --config
-      - ${HEY_ROBOT_VLN_CONFIG:-/app/configs/xlerobot.sim.ubuntu.yaml}
+      - ${HEY_ROBOT_VLN_CONFIG:-/app/configs/xlerobot.sim.vla_vln.yaml}
       - --service-id
       - ${HEY_ROBOT_VLN_SERVICE_ID:-vln_nav}
       - --host

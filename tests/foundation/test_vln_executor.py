@@ -8,9 +8,27 @@ import numpy as np
 from PIL import Image
 
 from hey_robot.config import DeploymentConfig
-from hey_robot.foundation.backends.vln.internvla_n1_system2 import (
-    InternVLAN1System2Executor,
+from hey_robot.foundation.backends.vln import VLNPlannerExecutor
+from hey_robot.foundation.backends.vln.input import to_float_list
+from hey_robot.foundation.backends.vln.internvla_n1 import (
+    InternVLAN1Runtime,
+    action_to_heading,
 )
+
+
+class InternVLAN1System2Executor(VLNPlannerExecutor):
+    """Test adapter that injects a tiny fake model into the real runtime wrapper."""
+
+    @property
+    def _model(self):
+        runtime = self._runtime
+        return getattr(runtime, "_model", None)
+
+    @_model.setter
+    def _model(self, value) -> None:
+        runtime = InternVLAN1Runtime(dict(self.spec.settings))
+        runtime._model = value
+        self._runtime = runtime
 
 
 def _spec(settings: dict | None = None):
@@ -59,7 +77,13 @@ class _FakeS2Model:
 
 def _real_spec(settings: dict | None = None):
     return _spec(
-        {"mock_mode": False, "model_path": "dummy-model", **dict(settings or {})}
+        {
+            "mock_mode": False,
+            "model_path": "dummy-model",
+            "internnav_repo": "third_party/InternNav",
+            "media_root": ".",
+            **dict(settings or {}),
+        }
     )
 
 
@@ -79,6 +103,16 @@ def test_internvla_n1_system2_mock_health_is_loaded() -> None:
     assert health["metrics"]["backend"] == "internvla_n1_system2"
     assert health["metrics"]["control_mode"] == "planner_only"
     assert health["metrics"]["mock_mode"] is True
+
+
+def test_real_vln_health_is_not_loaded_before_runtime_load() -> None:
+    executor = VLNPlannerExecutor("vln_nav", _real_spec())
+
+    health = executor.health()
+
+    assert health["online"] is True
+    assert health["loaded"] is False
+    assert health["error"] is None
 
 
 def test_internvla_n1_system2_mock_returns_center_pixel_goal() -> None:
@@ -227,6 +261,25 @@ def test_internvla_n1_system2_real_path_requires_image() -> None:
     assert result["failure_mode"] == "image_unavailable"
 
 
+def test_vln_rejects_unsafe_local_media_uri(tmp_path) -> None:
+    executor = InternVLAN1System2Executor(
+        "vln_nav", _real_spec({"media_root": str(tmp_path)})
+    )
+    executor._model = _FakeS2Model(SimpleNamespace(output_pixel=np.asarray([1, 2])))
+
+    result = executor.execute(
+        {
+            "arguments": {
+                "target": "desk",
+                "image_ref": "media://local/../outside.png",
+            }
+        }
+    )
+
+    assert result["success"] is False
+    assert result["failure_mode"] == "image_unavailable"
+
+
 def test_internvla_n1_system2_real_path_maps_non_stop_action_to_heading(
     tmp_path,
 ) -> None:
@@ -344,24 +397,16 @@ def test_internvla_n1_system2_resets_on_new_policy_session(tmp_path) -> None:
 
 
 def test_action_to_heading_maps_direction_codes() -> None:
-    from hey_robot.foundation.backends.vln.internvla_n1_system2.executor import (
-        _action_to_heading,
-    )
-
-    assert _action_to_heading([1]) == 0.0
-    assert _action_to_heading([2]) == -90.0
-    assert _action_to_heading([3]) == 90.0
-    assert _action_to_heading([5]) is None
-    assert _action_to_heading([1, 0]) == 0.0
-    assert _action_to_heading([0]) is None
-    assert _action_to_heading(None) is None
+    assert action_to_heading([1]) == 0.0
+    assert action_to_heading([2]) == -90.0
+    assert action_to_heading([3]) == 90.0
+    assert action_to_heading([5]) is None
+    assert action_to_heading([1, 0]) == 0.0
+    assert action_to_heading([0]) is None
+    assert action_to_heading(None) is None
 
 
 def test_to_float_list_handles_iterables() -> None:
-    from hey_robot.foundation.backends.vln.internvla_n1_system2.executor import (
-        _to_float_list,
-    )
-
-    assert _to_float_list([1.0, 2.0, 3.0]) == [1.0, 2.0, 3.0]
-    assert _to_float_list((4.0, 5.0, 6.0)) == [4.0, 5.0, 6.0]
-    assert _to_float_list("not a list") == []
+    assert to_float_list([1.0, 2.0, 3.0]) == [1.0, 2.0, 3.0]
+    assert to_float_list((4.0, 5.0, 6.0)) == [4.0, 5.0, 6.0]
+    assert to_float_list("not a list") == []

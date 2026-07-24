@@ -96,6 +96,35 @@ def test_validate_deployment_requires_explicit_lerobot_policy_contract(
     assert "model service policy requires positive action_dimensions" in messages
 
 
+def test_validate_deployment_requires_explicit_vln_backend_contract(tmp_path) -> None:
+    config = DeploymentConfig.from_dict(
+        {
+            "resources": {"runtime_dir": str(tmp_path / "runtime")},
+            "model_services": {
+                "planner": {
+                    "type": "vln_planner",
+                    "robot_id": "robot",
+                    "settings": {
+                        "backend": "unknown",
+                        "control_mode": "direct_velocity",
+                    },
+                }
+            },
+        }
+    )
+
+    messages = {issue.message for issue in validate_deployment(config)}
+
+    assert "model service planner has unsupported VLN backend 'unknown'" in messages
+    assert (
+        "model service planner has unsupported VLN control_mode 'direct_velocity'"
+        in messages
+    )
+    assert "model service planner requires setting model_path" in messages
+    assert "model service planner requires setting internnav_repo" in messages
+    assert "model service planner requires setting media_root" in messages
+
+
 def test_deployment_config_rejects_unknown_skill_surface_field(
     tmp_path,
 ) -> None:

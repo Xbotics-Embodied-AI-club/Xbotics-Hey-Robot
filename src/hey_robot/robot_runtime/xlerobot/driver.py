@@ -4,7 +4,6 @@ import asyncio
 import time
 from typing import Any, Protocol
 
-from hey_robot.contracts import SkillContractRuntime
 from hey_robot.logging import HeyRobotLogger
 from hey_robot.protocol import (
     Envelope,
@@ -19,6 +18,7 @@ from hey_robot.robot_runtime.base import (
     RobotHealth,
 )
 from hey_robot.robot_runtime.observations import DriverObservation, ObservationAsset
+from hey_robot.robot_runtime.skill_gate import SkillAdmissionGate
 from hey_robot.robot_runtime.xlerobot.client import XLeRobotClient
 from hey_robot.robot_runtime.xlerobot.executor import XLeRobotSkillExecutor
 from hey_robot.robot_runtime.xlerobot.hardware.config import (
@@ -57,7 +57,7 @@ class XLeRobotDriver:
             motion_time_scale=float(settings.get("motion_time_scale", 2.0)),
         )
         self.executor = XLeRobotSkillExecutor(self.client)
-        self.contracts = SkillContractRuntime(context.skill_catalog)
+        self.contracts = SkillAdmissionGate(context.skill_catalog)
         self.state = "created"
         self.frame_id = 0
         self.last_error: str | None = None
