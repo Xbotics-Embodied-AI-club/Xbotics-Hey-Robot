@@ -41,7 +41,7 @@ def test_only_one_model_tool_registry_exists() -> None:
         for path in tools.glob("*.py")
         if "class ToolRegistry" in path.read_text(encoding="utf-8")
     ]
-    assert registries == ["robot.py"]
+    assert registries == ["registry.py"]
 
 
 def test_shared_runner_has_no_io_or_robot_dependencies() -> None:

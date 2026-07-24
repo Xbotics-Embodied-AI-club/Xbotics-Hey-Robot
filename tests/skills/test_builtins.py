@@ -14,6 +14,7 @@ from hey_robot.skills import (
     load_skill_registry,
     registry_from_config,
 )
+from hey_robot.skills.builtins.tabletop import pick_skill, place_skill
 
 
 @dataclass
@@ -114,6 +115,7 @@ class FreshRobot(Robot):
     def __init__(self) -> None:
         super().__init__()
         self.frame_id = 12
+        self.observation_after_ids: list[int | None] = []
 
     async def observe(
         self,
@@ -122,7 +124,8 @@ class FreshRobot(Robot):
         after_frame_id: int | None = None,
         timeout_sec: float | None = None,
     ) -> RobotObservation:
-        del after_frame_id, timeout_sec
+        del timeout_sec
+        self.observation_after_ids.append(after_frame_id)
         return RobotObservation(
             Envelope(robot_id=robot_id), frame_id=self.frame_id, task="desk"
         )
@@ -299,6 +302,8 @@ async def test_native_vla_manipulate_uses_model_router_and_robot_client() -> Non
 
     assert result.success is True
     assert result.data["requires_reobservation"] is True
+    assert result.data["option_completed"] is True
+    assert result.data["subgoal_succeeded"] is None
     assert models.requests[0]["capability"] == "manipulate"
     assert models.requests[0]["request"]["observation"]["frame_id"] == 12
     assert robot.calls == [("mock0", "set_gripper", {"action": "close"}, "run-1")]
@@ -323,6 +328,7 @@ async def test_native_vla_manipulate_reobserves_between_bounded_steps() -> None:
 
     assert result.success is True
     assert result.data["termination_reason"] == "model_done"
+    assert result.data["subgoal_succeeded"] is True
     assert len(result.data["steps"]) == 2
     assert [
         request["request"]["observation"]["frame_id"] for request in models.requests
@@ -337,6 +343,7 @@ async def test_native_vla_manipulate_reobserves_between_bounded_steps() -> None:
         "progress",
         "completed",
     ]
+    assert robot.observation_after_ids == [None, 12]
 
 
 async def test_native_vla_environment_done_stops_before_action() -> None:
@@ -354,6 +361,7 @@ async def test_native_vla_environment_done_stops_before_action() -> None:
 
     assert result.success is True
     assert result.data["termination_reason"] == "environment_done"
+    assert result.data["subgoal_succeeded"] is True
     assert robot.calls == []
 
 
@@ -429,6 +437,54 @@ async def test_native_tabletop_implementation_selection() -> None:
     assert robot.calls == [("mock0", "set_gripper", {"action": "close"}, "run-1")]
 
 
+async def test_vla_pick_preserves_prompt_and_maps_only_child_parameters() -> None:
+    robot = Robot()
+    models = Models(
+        {"action": {"name": "set_gripper", "arguments": {"action": "close"}}}
+    )
+
+    result = await _runner(
+        robot,
+        Sink(),
+        models=models,
+        implementations={"pick": "vla"},
+    ).execute(
+        _command(
+            "pick",
+            {
+                "object": "cup",
+                "target": "left cup",
+                "task_prompt": "grasp the blue cup by its handle",
+                "max_attempts": 1,
+            },
+        )
+    )
+
+    assert result.success is True
+    request = models.requests[0]["request"]
+    assert request["task_prompt"] == "grasp the blue cup by its handle"
+    assert request["max_steps"] == 1
+    assert "object" not in request
+    assert "target" not in request
+
+
+async def test_manipulate_rejects_internal_and_unknown_parameters() -> None:
+    models = Models({"done": True})
+    result = await _runner(Robot(), Sink(), models=models).execute(
+        _command(
+            "manipulate",
+            {
+                "task_prompt": "close the fridge",
+                "model_timeout_sec": 30,
+            },
+        )
+    )
+
+    assert result.success is False
+    assert result.failure_mode == "invalid_request"
+    assert models.requests == []
+
+
 def test_native_registry_from_config_uses_skill_implementations() -> None:
     config = DeploymentConfig.from_dict(
         {
@@ -443,3 +499,11 @@ def test_native_registry_from_config_uses_skill_implementations() -> None:
     registry = registry_from_config(config)
 
     assert registry.get("pick").required_models == ("manipulate",)
+
+
+def test_tabletop_implementation_switch_keeps_agent_schema() -> None:
+    picks = [pick_skill(implementation=name) for name in ("classic", "vla", "hybrid")]
+    places = [place_skill(implementation=name) for name in ("classic", "vla", "hybrid")]
+
+    assert all(skill.parameters == picks[0].parameters for skill in picks[1:])
+    assert all(skill.parameters == places[0].parameters for skill in places[1:])

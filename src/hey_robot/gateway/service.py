@@ -744,7 +744,9 @@ def _run_payload(event: Any) -> dict[str, Any]:
     return {
         "run_id": event.run_id,
         "sequence": event.sequence,
+        "name": event.name,
         "skill": event.name,
+        "envelope": to_payload(event.envelope),
         "phase": event.phase,
         "timestamp": event.timestamp,
         "progress": event.progress,

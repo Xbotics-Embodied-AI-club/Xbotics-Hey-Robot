@@ -132,6 +132,29 @@ def test_option_records_come_from_skill_os_manipulate_events() -> None:
     assert len(_option_records(snapshots, trial_id="trial-1")) == 1
 
 
+def test_option_records_accept_current_gateway_run_payload() -> None:
+    snapshots = [
+        {
+            "skills": [
+                {
+                    "name": "manipulate",
+                    "skill": "manipulate",
+                    "envelope": {"chat_id": "trial-1"},
+                    "phase": "completed",
+                },
+                {
+                    "name": "inspect_scene",
+                    "skill": "inspect_scene",
+                    "envelope": {"chat_id": "trial-1"},
+                    "phase": "completed",
+                },
+            ]
+        }
+    ]
+
+    assert _option_records(snapshots, trial_id="trial-1") == [snapshots[0]["skills"][0]]
+
+
 def test_flat_condition_has_an_executable_single_option_limit() -> None:
     assert condition_for("b0").manipulate_call_limit == 1
     assert condition_for("b1").manipulate_call_limit is None

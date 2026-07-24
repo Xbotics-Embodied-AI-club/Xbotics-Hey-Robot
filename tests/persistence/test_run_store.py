@@ -127,8 +127,11 @@ def test_file_run_store_externalizes_bounded_execution_trace(tmp_path) -> None:
                 "vla_history": [{"values": list(range(128))}],
                 "steps": [{"action": {"values": list(range(32))}}],
                 "termination_reason": "model_done",
+                "option_completed": True,
+                "subgoal_succeeded": True,
                 "before_frame_id": 7,
                 "after_frame_id": 8,
+                "steps_used": 1,
             },
         ),
     )
@@ -138,8 +141,11 @@ def test_file_run_store_externalizes_bounded_execution_trace(tmp_path) -> None:
     assert persisted.result is not None
     assert persisted.result.data == {
         "termination_reason": "model_done",
+        "option_completed": True,
+        "subgoal_succeeded": True,
         "before_frame_id": 7,
         "after_frame_id": 8,
+        "steps_used": 1,
         "steps_executed": 1,
         "execution_trace": persisted.result.artifacts[0].uri,
     }

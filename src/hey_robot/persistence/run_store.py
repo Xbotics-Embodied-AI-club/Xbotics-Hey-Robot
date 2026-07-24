@@ -223,8 +223,11 @@ class FileRunStore:
             if key
             in {
                 "termination_reason",
+                "option_completed",
+                "subgoal_succeeded",
                 "before_frame_id",
                 "after_frame_id",
+                "steps_used",
                 "requires_reobservation",
                 "command",
             }

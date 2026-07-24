@@ -88,7 +88,6 @@ def test_no_legacy_tool_files() -> None:
         "get_task_context.py",
         "loader.py",
         "propose_skill.py",
-        "registry.py",
         "request_perception.py",
         "request_skill.py",
         "schema.py",

@@ -229,6 +229,9 @@ tests/      单元与集成测试
 | 完整配置 | [在线配置指南（持续更新）](https://my.feishu.cn/docx/LT3odU5yyoMOCNxXmmicvbCznBb) |
 | 系统概览 | [部署与运行形态](docs/overview/runtime-shape.md) |
 | 架构设计 | [系统架构](docs/architecture/system-architecture.md) |
+| 最小架构与演进 | [最小化 Embodied Agent Harness 设计](docs/architecture/minimal-embodied-agent-harness.zh-CN.md) |
+| Tool/Skill 与 VLA 增量重构 | [Tool/Skill 边界与 VLA 能力增量重构方案](docs/architecture/minimal-harness-refactoring-plan.zh-CN.md) |
+| RoboCasa365 重构门禁 | [Tool/Skill 与 VLA 重构评估记录](docs/evaluation/robocasa365/tool-skill-vla-refactoring-evaluation-20260724.zh-CN.md) |
 | Agent 与机器人能力 | [Agent 与 Skill 边界](docs/architecture/agent-skill-boundaries.md) |
 | MuJoCo 仿真 | [XLeRobot 仿真部署](docs/operations/xlerobot-sim.md) |
 | 真实机器人 | [XLeRobot 真机部署](docs/operations/xlerobot-real.md) |

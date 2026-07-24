@@ -15,8 +15,13 @@ PICK_PARAMETERS = {
         "object": {"type": "string"},
         "target": {"type": "string"},
         "task_prompt": {"type": "string"},
+        "max_attempts": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+        },
     },
-    "additionalProperties": True,
+    "additionalProperties": False,
 }
 
 PLACE_PARAMETERS = {
@@ -26,8 +31,14 @@ PLACE_PARAMETERS = {
         "location": {"type": "string"},
         "target": {"type": "string"},
         "task_prompt": {"type": "string"},
+        "placement_hint": {"type": "string"},
+        "max_attempts": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+        },
     },
-    "additionalProperties": True,
+    "additionalProperties": False,
 }
 
 
@@ -41,17 +52,25 @@ async def classic_place(ctx: SkillContext, arguments: dict[str, Any]) -> SkillRe
 
 async def vla_pick(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResult:
     target = arguments.get("object") or arguments.get("target") or "object"
+    task_prompt = arguments.get("task_prompt") or f"grasp {target}"
     return await ctx.run(
         "manipulate",
-        {**dict(arguments), "task_prompt": f"grasp {target}"},
+        {
+            "task_prompt": task_prompt,
+            "max_steps": int(arguments.get("max_attempts", 1)),
+        },
     )
 
 
 async def vla_place(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResult:
     location = arguments.get("location") or arguments.get("target") or "target"
+    task_prompt = arguments.get("task_prompt") or f"place at {location}"
     return await ctx.run(
         "manipulate",
-        {**dict(arguments), "task_prompt": f"place at {location}"},
+        {
+            "task_prompt": task_prompt,
+            "max_steps": int(arguments.get("max_attempts", 1)),
+        },
     )
 
 

@@ -2,24 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Literal
 
+from hey_robot.cognition.tools.models import SkillCallProposal, ToolSpec
 from hey_robot.skills.runner import validate_arguments
-
-
-@dataclass(frozen=True)
-class SkillCallProposal:
-    """Cognition-internal proposal for one bounded skill call."""
-
-    intent_kind: Literal["skill", "observation"]
-    name: str
-    objective: str
-    arguments: dict[str, Any]
-
-    @property
-    def skill_name(self) -> str:
-        return self.name
 
 
 class SkillTool:
@@ -29,16 +15,13 @@ class SkillTool:
         self._spec = spec
         self.name = str(spec.name)
         self._parameters = _parameters_for(spec)
-        self.schema: dict[str, Any] = {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": str(spec.description),
-                "parameters": self._parameters,
-            },
-        }
+        self.spec = ToolSpec(self.name, str(spec.description), self._parameters)
 
-    def proposal(self, arguments: dict[str, Any]) -> SkillCallProposal:
+    @property
+    def schema(self) -> dict[str, Any]:
+        return self.spec.definition
+
+    def prepare(self, arguments: dict[str, Any]) -> SkillCallProposal:
         normalized = validate_arguments(self._parameters, arguments)
         category = str(getattr(self._spec, "category", ""))
         intent_kind: Literal["skill", "observation"] = (
@@ -48,6 +31,10 @@ class SkillTool:
         )
         objective = _objective(self.name, normalized)
         return SkillCallProposal(intent_kind, self.name, objective, normalized)
+
+    def proposal(self, arguments: dict[str, Any]) -> SkillCallProposal:
+        """Compatibility alias while callers migrate to ``prepare``."""
+        return self.prepare(arguments)
 
 
 def skill_call_payload(proposal: SkillCallProposal) -> dict[str, Any]:

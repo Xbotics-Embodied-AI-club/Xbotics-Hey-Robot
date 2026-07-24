@@ -8,7 +8,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from hey_robot.app.runtime_components import SkillToolCatalog
 from hey_robot.bus.factory import create_bus_client
@@ -27,7 +27,13 @@ from hey_robot.cognition.runtime.agent_task_store import (
 from hey_robot.cognition.runtime.completion_verifier import TaskCompletionVerifier
 from hey_robot.cognition.runtime.conversation_store import ConversationStore
 from hey_robot.cognition.runtime.task_coordinator import TaskCoordinator
-from hey_robot.cognition.tools.robot import (
+from hey_robot.cognition.tools.dispatcher import ToolDispatcher
+from hey_robot.cognition.tools.models import (
+    AgentTool,
+    HarnessToolCall,
+    PreparedToolCall,
+)
+from hey_robot.cognition.tools.registry import (
     SkillCatalogView,
     ToolDependencies,
     ToolRegistry,
@@ -62,6 +68,16 @@ _DEFAULT_HARD_MAX_CONTINUATIONS = 12
 @dataclass(frozen=True)
 class _StepOutcome:
     final_text: str | None = None
+    continue_without_task: bool = False
+
+
+@dataclass(frozen=True)
+class _ToolDispatchContext:
+    messages: list[ReasoningMessage]
+    envelope: Envelope
+    session_key: str
+    decision: AgentTurnResult
+    objective: str
 
 
 class AutonomousAgentService:
@@ -74,6 +90,7 @@ class AutonomousAgentService:
         agent_id: str,
         skill_client: SkillClient | None = None,
         skill_catalog: SkillCatalogView | None = None,
+        extra_tools: tuple[AgentTool, ...] = (),
     ) -> None:
         self.config = config
         self.agent_id = agent_id
@@ -106,7 +123,7 @@ class AutonomousAgentService:
             config.agent_runtime.entity_catalog,
             aliases=config.agent_runtime.entity_aliases,
         )
-        self.tools = ToolRegistry(ToolDependencies(catalog))
+        self.tools = ToolRegistry(ToolDependencies(catalog, extra_tools))
         provider = build_provider(config, agent_id, purpose="agent")
         self.runner = AgentRunner(provider, self.tools)
         self.completion_verifier = TaskCompletionVerifier(provider)
@@ -114,8 +131,19 @@ class AutonomousAgentService:
         if self.skill_client is None:
             raise ValueError("AutonomousAgentService requires native SkillClient")
         self.task_coordinator = TaskCoordinator(self.tasks, self.skill_client)
+        self.tool_dispatcher = self._build_tool_dispatcher()
         self._skill_event_consumer: asyncio.Task[object] | None = None
         self._session_locks: dict[str, asyncio.Lock] = {}
+
+    def _build_tool_dispatcher(self) -> ToolDispatcher:
+        return ToolDispatcher(
+            {
+                SkillCallProposal: self._dispatch_skill_call,
+                CompleteTaskProposal: self._dispatch_complete_task,
+                ControlTaskProposal: self._dispatch_control_task,
+                HarnessToolCall: self._dispatch_harness_tool,
+            }
+        )
 
     async def start(self) -> None:
         await self.bus.connect()
@@ -219,6 +247,10 @@ class AutonomousAgentService:
             slice_used += 1
             active_task = self.tasks.active_task(session_key)
             if active_task is None:
+                if outcome.continue_without_task and slice_used < _MAX_STEPS_PER_SLICE:
+                    continue
+                if outcome.continue_without_task:
+                    return "普通工具调用已达到单轮预算，请继续下一轮。"
                 return "这次请求已经处理。"
             if slice_used < _MAX_STEPS_PER_SLICE:
                 continue
@@ -267,84 +299,156 @@ class AutonomousAgentService:
             return _StepOutcome(decision.final_text or "")
         if decision.status == "failed":
             return _StepOutcome(_decision_failure_text(decision))
-        proposal = decision.proposal
-        if isinstance(proposal, SkillCallProposal):
-            current_task = self.tasks.active_task(session_key)
-            max_skills = max(1, int(self.config.agent_runtime.hard_max_skills))
-            if current_task is not None and current_task.step_count >= max_skills:
-                self.tasks.control_task(
-                    current_task.task_id,
-                    "blocked",
-                    "任务已达到最大机器人步骤预算，需要人工确认后再继续。",
-                )
-                return _StepOutcome(
-                    "任务已暂停：达到最大机器人步骤预算，需要你确认后再继续。"
-                )
-            if current_task is None:
-                current_task = self.tasks.create_task(
-                    session_key=session_key,
-                    envelope=envelope,
-                    objective=objective,
-                    ui_summary=objective,
-                    deadline_at=time.time()
-                    + self.config.agent_runtime.hard_max_wall_time_sec,
-                )
-            outcome = self._duplicate_observation_gate(current_task, proposal)
-            if outcome is None:
-                outcome = self._reobservation_gate(current_task, proposal)
-            call = decision.tool_calls[0]
-            if outcome is None:
-                step = await self.task_coordinator.submit(
-                    task_id=current_task.task_id,
-                    proposal=proposal,
-                    envelope=envelope,
-                    tool_call_id=call.tool_call_id,
-                    deadline_at=current_task.deadline_at,
-                )
-                outcome = step.outcome
-            else:
-                step = self.tasks.add_step(current_task.task_id, proposal, outcome)
-            messages.extend(
-                (
-                    ReasoningMessage(
-                        role="assistant",
-                        content="",
-                        tool_calls=[
-                            ReasoningToolCall(
-                                call.tool_call_id, call.name, call.arguments
-                            )
-                        ],
-                    ),
-                    ReasoningMessage(
-                        role="tool",
-                        content=_tool_outcome_context(
-                            proposal, outcome, step, current_task
-                        ),
-                        tool_call_id=call.tool_call_id,
-                        tool_name=call.name,
-                    ),
-                )
+        prepared = decision.proposal
+        if not isinstance(
+            prepared,
+            SkillCallProposal
+            | CompleteTaskProposal
+            | ControlTaskProposal
+            | HarnessToolCall,
+        ):
+            return _StepOutcome("这次请求没有完成：工具没有产生有效的调用。")
+        dispatcher = getattr(self, "tool_dispatcher", None)
+        if dispatcher is None:
+            dispatcher = self._build_tool_dispatcher()
+            self.tool_dispatcher = dispatcher
+        return cast(
+            _StepOutcome,
+            await dispatcher.dispatch(
+                prepared,
+                _ToolDispatchContext(
+                    messages,
+                    envelope,
+                    session_key,
+                    decision,
+                    objective,
+                ),
+            ),
+        )
+
+    async def _dispatch_skill_call(
+        self, prepared: PreparedToolCall, raw_context: Any
+    ) -> _StepOutcome:
+        if not isinstance(prepared, SkillCallProposal) or not isinstance(
+            raw_context, _ToolDispatchContext
+        ):
+            raise TypeError("invalid Skill Tool dispatch")
+        proposal = prepared
+        context = raw_context
+        session_key = context.session_key
+        envelope = context.envelope
+        decision = context.decision
+        messages = context.messages
+        objective = context.objective
+        current_task = self.tasks.active_task(session_key)
+        max_skills = max(1, int(self.config.agent_runtime.hard_max_skills))
+        if current_task is not None and current_task.step_count >= max_skills:
+            self.tasks.control_task(
+                current_task.task_id,
+                "blocked",
+                "任务已达到最大机器人步骤预算，需要人工确认后再继续。",
             )
-            if outcome.status in {"accepted", "waiting"}:
-                return _StepOutcome("已提交机器人操作，正在等待执行结果。")
-            if not outcome.retryable and outcome.status == "failed":
-                if current_task is not None:
-                    self.tasks.control_task(
-                        current_task.task_id,
-                        "blocked",
-                        outcome.user_summary or "操作没有完成。",
-                    )
-                return _StepOutcome(_tool_outcome_text(outcome))
-            return _StepOutcome()
-        if isinstance(proposal, CompleteTaskProposal):
-            outcome = await self._complete_task(proposal, session_key)
-            self._append_nonphysical_tool_result(messages, decision, outcome)
-            if outcome.status == "completed":
-                return _StepOutcome(proposal.recap)
-            return _StepOutcome()
-        if isinstance(proposal, ControlTaskProposal):
-            return _StepOutcome(await self._control_task(proposal, session_key))
-        return _StepOutcome("这次请求没有完成：工具没有产生有效的机器人提案。")
+            return _StepOutcome(
+                "任务已暂停：达到最大机器人步骤预算，需要你确认后再继续。"
+            )
+        if current_task is None:
+            current_task = self.tasks.create_task(
+                session_key=session_key,
+                envelope=envelope,
+                objective=objective,
+                ui_summary=objective,
+                deadline_at=time.time()
+                + self.config.agent_runtime.hard_max_wall_time_sec,
+            )
+        outcome = self._duplicate_observation_gate(current_task, proposal)
+        if outcome is None:
+            outcome = self._reobservation_gate(current_task, proposal)
+        call = decision.tool_calls[0]
+        if outcome is None:
+            step = await self.task_coordinator.submit(
+                task_id=current_task.task_id,
+                proposal=proposal,
+                envelope=envelope,
+                tool_call_id=call.tool_call_id,
+                deadline_at=current_task.deadline_at,
+            )
+            outcome = step.outcome
+        else:
+            step = self.tasks.add_step(current_task.task_id, proposal, outcome)
+        messages.extend(
+            (
+                ReasoningMessage(
+                    role="assistant",
+                    content="",
+                    tool_calls=[
+                        ReasoningToolCall(call.tool_call_id, call.name, call.arguments)
+                    ],
+                ),
+                ReasoningMessage(
+                    role="tool",
+                    content=_tool_outcome_context(
+                        proposal, outcome, step, current_task
+                    ),
+                    tool_call_id=call.tool_call_id,
+                    tool_name=call.name,
+                ),
+            )
+        )
+        if outcome.status in {"accepted", "waiting"}:
+            return _StepOutcome("已提交机器人操作，正在等待执行结果。")
+        if not outcome.retryable and outcome.status == "failed":
+            self.tasks.control_task(
+                current_task.task_id,
+                "blocked",
+                outcome.user_summary or "操作没有完成。",
+            )
+            return _StepOutcome(_tool_outcome_text(outcome))
+        return _StepOutcome()
+
+    async def _dispatch_complete_task(
+        self, prepared: PreparedToolCall, raw_context: Any
+    ) -> _StepOutcome:
+        if not isinstance(prepared, CompleteTaskProposal) or not isinstance(
+            raw_context, _ToolDispatchContext
+        ):
+            raise TypeError("invalid completion Tool dispatch")
+        outcome = await self._complete_task(prepared, raw_context.session_key)
+        self._append_nonphysical_tool_result(
+            raw_context.messages, raw_context.decision, outcome
+        )
+        if outcome.status == "completed":
+            return _StepOutcome(prepared.recap)
+        return _StepOutcome()
+
+    async def _dispatch_control_task(
+        self, prepared: PreparedToolCall, raw_context: Any
+    ) -> _StepOutcome:
+        if not isinstance(prepared, ControlTaskProposal) or not isinstance(
+            raw_context, _ToolDispatchContext
+        ):
+            raise TypeError("invalid control Tool dispatch")
+        return _StepOutcome(await self._control_task(prepared, raw_context.session_key))
+
+    async def _dispatch_harness_tool(
+        self, prepared: PreparedToolCall, raw_context: Any
+    ) -> _StepOutcome:
+        if not isinstance(prepared, HarnessToolCall) or not isinstance(
+            raw_context, _ToolDispatchContext
+        ):
+            raise TypeError("invalid Harness Tool dispatch")
+        try:
+            outcome = await prepared.execute()
+        except Exception as exc:
+            outcome = ToolOutcome(
+                "failed",
+                f"普通工具 {prepared.name} 执行失败。",
+                data={"failure_mode": "harness_tool_failed", "error": str(exc)},
+                retryable=True,
+            )
+        self._append_nonphysical_tool_result(
+            raw_context.messages, raw_context.decision, outcome
+        )
+        return _StepOutcome(continue_without_task=True)
 
     def _reobservation_gate(
         self, task: AgentTask, proposal: SkillCallProposal

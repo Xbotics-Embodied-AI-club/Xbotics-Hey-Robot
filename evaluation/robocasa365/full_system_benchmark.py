@@ -462,6 +462,9 @@ def _option_records(
 
 
 def _skill_belongs_to_trial(item: dict[str, object], trial_id: str) -> bool:
+    envelope = item.get("envelope", {})
+    if isinstance(envelope, dict) and envelope.get("chat_id") == trial_id:
+        return True
     timeline = item.get("timeline", [])
     if not isinstance(timeline, list):
         return False

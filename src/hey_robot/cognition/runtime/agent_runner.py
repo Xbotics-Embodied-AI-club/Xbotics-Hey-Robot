@@ -17,7 +17,7 @@ class ToolRegistryLike(Protocol):
     @property
     def definitions(self) -> list[dict[str, object]]: ...
 
-    def proposal(self, name: str, arguments: dict[str, object]) -> object: ...
+    def prepare(self, name: str, arguments: dict[str, object]) -> object: ...
 
 
 @dataclass(frozen=True)
@@ -105,7 +105,7 @@ class AgentRunner:
                     "TOOL_VALIDATION", "UNKNOWN_TOOL", call.name, (record,)
                 )
             try:
-                proposal = self._tools.proposal(call.name, dict(call.arguments))
+                proposal = self._tools.prepare(call.name, dict(call.arguments))
             except (KeyError, TypeError, ValueError) as exc:
                 return self._failure(
                     "TOOL_VALIDATION", "INVALID_TOOL_ARGUMENTS", str(exc), (record,)

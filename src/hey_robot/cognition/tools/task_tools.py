@@ -2,20 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, ClassVar
 
-
-@dataclass(frozen=True)
-class CompleteTaskProposal:
-    recap: str
-    evidence_ids: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class ControlTaskProposal:
-    action: str
-    reason: str
+from hey_robot.cognition.tools.models import (
+    CompleteTaskProposal,
+    ControlTaskProposal,
+    ToolSpec,
+)
 
 
 class CompleteTaskTool:
@@ -40,7 +33,13 @@ class CompleteTaskTool:
         },
     }
 
-    def proposal(self, arguments: dict[str, Any]) -> CompleteTaskProposal:
+    spec: ClassVar[ToolSpec] = ToolSpec(
+        name,
+        schema["function"]["description"],
+        schema["function"]["parameters"],
+    )
+
+    def prepare(self, arguments: dict[str, Any]) -> CompleteTaskProposal:
         recap = arguments.get("recap")
         evidence_ids = arguments.get("evidence_ids")
         if not isinstance(recap, str) or not recap.strip():
@@ -55,6 +54,9 @@ class CompleteTaskTool:
         if len(normalized) != len(evidence_ids):
             raise ValueError("evidence_ids must contain only non-empty strings")
         return CompleteTaskProposal(recap.strip(), normalized)
+
+    def proposal(self, arguments: dict[str, Any]) -> CompleteTaskProposal:
+        return self.prepare(arguments)
 
 
 class ControlTaskTool:
@@ -82,7 +84,13 @@ class ControlTaskTool:
         },
     }
 
-    def proposal(self, arguments: dict[str, Any]) -> ControlTaskProposal:
+    spec: ClassVar[ToolSpec] = ToolSpec(
+        name,
+        schema["function"]["description"],
+        schema["function"]["parameters"],
+    )
+
+    def prepare(self, arguments: dict[str, Any]) -> ControlTaskProposal:
         action = arguments.get("action")
         if action not in {"cancel", "block", "emergency_stop"}:
             raise ValueError("action is invalid")
@@ -92,3 +100,6 @@ class ControlTaskTool:
         return ControlTaskProposal(
             action, reason.strip() if isinstance(reason, str) else ""
         )
+
+    def proposal(self, arguments: dict[str, Any]) -> ControlTaskProposal:
+        return self.prepare(arguments)
