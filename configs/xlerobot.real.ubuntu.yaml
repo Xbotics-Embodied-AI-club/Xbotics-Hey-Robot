@@ -1,23 +1,19 @@
-# XLeRobot real hardware deployment for Ubuntu.
-# Usage: hey-robot run --config configs/xlerobot.real.ubuntu.yaml
-
 deployment:
   id: xlerobot.real.ubuntu
   bus:
     type: nats
     url: nats://127.0.0.1:4222
-
     options:
       robot_publish_hz: 2.0
       camera_stream_hz: 15.0
       human_follow_service_enabled: true
       robot_status_log_every_frames: 30
-
 agent_runtime:
   enabled: true
   robot_id: xlerobot
-  entity_catalog: [robot:xlerobot, scene]
-
+  entity_catalog:
+  - robot:xlerobot
+  - scene
 logging:
   level: INFO
   theme: dark
@@ -25,7 +21,6 @@ logging:
   file_path: logs/xlerobot.real.ubuntu/app.log
   json_file_path: logs/xlerobot.real.ubuntu/app.jsonl
   throttle_sec: 0.0
-
 resources:
   runtime_dir: runtime/xlerobot.real.ubuntu
   media:
@@ -36,58 +31,57 @@ resources:
     root: runtime/xlerobot.real.ubuntu/episodes
   events:
     retain: 2000
-
 skills:
   modules:
-    - hey_robot.skill_os.builtins
+  - hey_robot.skills.builtins
   mode: bringup
-  enabled:
-    - inspect_scene
-    - look_around
-    - detect_marker
-    - move_base
-    - turn_base
-    - base_velocity_step
-    - human_follow
-    - stop_motion
-    - reset_posture
-    - set_arm_pose
-    - move_arm_joints
-    - set_gripper
-
+  tools:
+  - inspect_scene
+  - look_around
+  - detect_marker
+  - move_base
+  - turn_base
+  - base_velocity_step
+  - stop_motion
+  - reset_posture
+  - set_arm_pose
+  - move_arm_joints
+  - set_gripper
+  execution_mode: local
 notifications:
   defaults:
-    channels: [web]
+    channels:
+    - web
   channels:
     web: {}
     voice:
       chat_id: xlerobot-voice
       sender_id: voice-user
     feishu:
-      chat_id: ""
+      chat_id: ''
   kinds:
     task_watchdog:
       severity: critical
-      channels: [web, feishu]
+      channels:
+      - web
+      - feishu
     proactive_message:
       severity: info
-      channels: [web]
-
+      channels:
+      - web
 identity:
   enabled: true
   unified_user_episodes: true
   bindings:
-    "web:sender:web-user": owner
-    "voice:sender:voice-user": owner
-    # Replace the Feishu open_id with your actual account after binding/inspection.
-    "feishu:sender:ou_0a4a65d2ef03d22693b3a9939ae8a803": owner
-
+    web:sender:web-user: owner
+    voice:sender:voice-user: owner
+    feishu:sender:ou_0a4a65d2ef03d22693b3a9939ae8a803: owner
 channels:
   cli:
     type: cli
     enabled: false
     account_id: xlerobot
-    prompt: "xlerobot> "
+    prompt: 'xlerobot> '
     sender_id: local-user
     chat_id: xlerobot-local
   web:
@@ -108,18 +102,18 @@ channels:
     activation:
       enabled: true
       wake_words:
-        - 小白
-        - 机器人
-        - robot
+      - 小白
+      - 机器人
+      - robot
       strip_wake_word: true
       session_timeout_sec: 60.0
       min_route_chars: 2
     tts_echo_guard_sec: 1.0
     reply_tts: true
     recorder:
-      input_device: "sof-hda-dsp: - (hw:1,7)"  # DMIC 16kHz 原生输入。
+      input_device: 'sof-hda-dsp: - (hw:1,7)'
       sample_rate: 16000
-      channels: 2  # DMIC 为双声道，streaming_asr 会自动下混为单声道。
+      channels: 2
       block_ms: 100
       energy_threshold: 0.012
       silence_sec: 0.9
@@ -152,7 +146,7 @@ channels:
       endpoint: wss://openspeech.bytedance.com/api/v3/tts/bidirection
       encoding: pcm
       sample_rate: 16000
-      output_device: null  # 使用系统默认输出设备（PulseAudio）。
+      output_device: null
   feishu:
     type: feishu
     enabled: true
@@ -165,9 +159,8 @@ channels:
     reply_to_message: true
     domain: feishu
     allow_from:
-      - "*"
+    - '*'
     media_root: runtime/xlerobot.real.ubuntu/media/feishu
-
 robots:
   xlerobot:
     type: xlerobot
@@ -212,7 +205,6 @@ robots:
         default_acc: 50
         auto_home_on_startup: false
         home_on_close: false
-        # Low forward-facing center pose.
         rest_position:
           base: 0
           shoulder: 10
@@ -250,12 +242,24 @@ robots:
             wrist_roll: 0
             gripper: 30
         joint_limits:
-          base: [-180, 180]
-          shoulder: [0, 180]
-          elbow: [0, 180]
-          wrist_flex: [-90, 90]
-          wrist_roll: [-180, 180]
-          gripper: [0, 90]
+          base:
+          - -180
+          - 180
+          shoulder:
+          - 0
+          - 180
+          elbow:
+          - 0
+          - 180
+          wrist_flex:
+          - -90
+          - 90
+          wrist_roll:
+          - -180
+          - 180
+          gripper:
+          - 0
+          - 90
       default_camera: front
       cameras:
         front:
@@ -279,22 +283,20 @@ robots:
       battery:
         type: servo_bus_battery
         enabled: true
-        servo_ids: [1]
+        servo_ids:
+        - 1
         full_voltage: 12.6
         low_voltage: 10.5
         critical_voltage: 9.5
         min_voltage: 9.0
     safety:
       max_abs_action: null
-
 model_services: {}
-
 policies:
   embodied_skills:
     enabled: true
     robot_id: xlerobot
     freq_hz: 1.0
-
 agents:
   main:
     enabled: true
@@ -320,6 +322,3 @@ agents:
           api_key_env: DASHSCOPE_API_KEY
           temperature: 0.0
           max_tokens: 512
-
-
-

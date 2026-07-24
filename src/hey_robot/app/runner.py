@@ -22,10 +22,7 @@ from hey_robot.human_follow import HumanFollowService
 from hey_robot.logging import HeyRobotLogger
 from hey_robot.robot_runtime import RobotService
 from hey_robot.robot_runtime.media import MediaResolver
-from hey_robot.skill_os.controller import SkillControllerService
-from hey_robot.skill_os.registry import registry_from_config
-from hey_robot.skills import legacy_registry_from_native_config
-from hey_robot.skills.transport import LegacySkillWorkerBridgeService
+from hey_robot.skills import skill_contract_catalog_from_config
 
 logger = logging.getLogger(__name__)
 
@@ -140,11 +137,7 @@ class DeploymentRunner:
         services: list[ManagedService] = []
         robot = None
         runtime_components: RuntimeComponents | None = None
-        skill_catalog = (
-            legacy_registry_from_native_config(self.config).robot_skill_catalog()
-            if _uses_native_skill_modules(self.config)
-            else registry_from_config(self.config).robot_skill_catalog()
-        )
+        skill_catalog = skill_contract_catalog_from_config(self.config)
         if self.config.robots:
             robot = RobotService(
                 self.config,
@@ -167,40 +160,11 @@ class DeploymentRunner:
                         "human-follow", human_follow.start, human_follow.stop
                     )
                 )
-        if (
-            self.config.skills.execution_mode == "local"
-            and robot is not None
-            and self.config.skills.modules
-            and all(
-                str(module).startswith("hey_robot.skills")
-                for module in self.config.skills.modules
-            )
-        ):
+        if robot is not None:
             runtime_components = build_local_runtime_components(
                 self.config,
                 robot_service=robot,
             )
-            local_worker = _LocalSkillWorkerService(runtime_components.skill_client)
-            services.append(
-                ManagedService(
-                    "skill-worker:local",
-                    local_worker.start,
-                    local_worker.stop,
-                )
-            )
-        if (
-            any(spec.enabled for spec in self.config.policies.values())
-            and self.config.skills.execution_mode != "local"
-        ):
-            skills = SkillControllerService(self.config)
-            services.append(
-                ManagedService("skill-controller", skills.start, skills.stop)
-            )
-            if self.config.skills.execution_mode == "event_driven":
-                bridge = LegacySkillWorkerBridgeService(self.config)
-                services.append(
-                    ManagedService("skill-worker-bridge", bridge.start, bridge.stop)
-                )
         for agent_id, spec in self.config.agents.items():
             if not spec.enabled:
                 continue
@@ -217,6 +181,7 @@ class DeploymentRunner:
                     if runtime_components is not None
                     else None
                 ),
+                owns_skill_client=runtime_components is not None,
             )
             services.append(
                 ManagedService(f"agent:{agent_id}", agent.start, agent.stop)
@@ -225,25 +190,6 @@ class DeploymentRunner:
             gateway = GatewayService(self.config, episode_dir=self.episode_dir)
             services.append(ManagedService("gateway", gateway.start, gateway.stop))
         return services
-
-
-class _LocalSkillWorkerService:
-    def __init__(self, skill_client: object) -> None:
-        self._skill_client = skill_client
-        self._stop = asyncio.Event()
-
-    async def start(self) -> None:
-        start = getattr(self._skill_client, "_ensure_started", None)
-        if callable(start):
-            await start()
-        await self._stop.wait()
-
-    async def stop(self) -> None:
-        self._stop.set()
-        close = getattr(self._skill_client, "close", None)
-        if callable(close):
-            await close()
-
 
 def _uses_native_skill_modules(config: DeploymentConfig) -> bool:
     return any(

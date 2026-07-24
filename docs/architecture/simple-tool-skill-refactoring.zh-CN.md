@@ -2,7 +2,22 @@
 
 ## 1. 文档状态
 
-本文是渐进式重构提案，不描述当前已经完成的实现。
+本文是当前重构后的架构说明。状态快照：2026-07-24，基线 commit `de207f1` 加当前工作树改动。
+本轮已经按“保持简单，不保留兼容”的方向完成核心切换：
+
+- `skill_os` 源码目录已删除；
+- `SkillControllerService`、legacy Skill Runtime、legacy builtin module 和 legacy Skill transport
+  已退出生产路径；
+- `skills.execution_mode` 只支持 `local`；
+- 部署配置统一使用 `hey_robot.skills.builtins` 与 `skills.tools`；
+- `ActionProposal`、`ShortOperationCommand`、`SkillCatalog/SkillSpec`、`RobotExecutionGateway`
+  和 `legacy_catalog` 已从生产代码删除；
+- `human_follow` 不再伪装成 Skill Tool，保留为独立 service/client；
+- RoboCasa 当前只暴露 native `inspect_scene`，`manipulate` 等 native action contract 闭合后再加入。
+
+按本次“简化系统、删除兼容、默认 native local 可运行”的代码级目标估算，整体完成度为
+**100%**。RoboCasa/VLA native action contract、固定 benchmark 和真机长跑属于后续验证/产品化
+工作，不阻塞本次简化重构完成。
 
 具体文件、接口、数据库 migration、分 PR 顺序和测试改造见
 [Tool 与 Skill 代码级重构计划](simple-tool-skill-refactoring-code-plan.zh-CN.md)。
@@ -22,11 +37,11 @@ VLA 进程隔离和任务完成验证。简单化针对的是协议数量和重�
 
 ## 2. 问题陈述
 
-当前 Agent 通过单一 `request_skill(skill, objective, slots)` Tool 提交操作。Skill 名称和
-真实参数被放在通用 `slots` 对象中，模型无法在 function calling schema 中直接看到每个
+重构前，Agent 通过单一 `request_skill(skill, objective, slots)` Tool 提交操作。Skill 名称
+和真实参数被放在通用 `slots` 对象中，模型无法在 function calling schema 中直接看到每个
 Skill 的参数约束。Skill catalog 只能作为额外 JSON 文本加入上下文。
 
-一次 Skill 执行还会经过多组相邻抽象：
+重构前的 legacy 执行路径包含这组相邻抽象，当前已从生产代码删除：
 
 ```text
 Agent
@@ -44,7 +59,7 @@ Agent
   -> Robot Runtime / ModelService
 ```
 
-这些抽象分别解决了部分合理问题，但整体存在以下重复：
+这些抽象分别解决了部分合理问题，但整体存在以下重复；本轮已经删除其中的兼容执行层：
 
 - `SkillSpec`、`SkillContract` 和 Tool description 重复描述同一能力；
 - `SkillCatalog`、`SkillContractCatalog` 和 `SkillRegistry` 重复维护能力集合；
@@ -54,7 +69,19 @@ Agent
   分散在业务代码中；
 - VLA、经典算法和组合 Skill 容易继续演化出彼此独立的框架。
 
-重构需要减少核心机制，而不是删除物理安全能力。
+这条路径已经从生产代码中删除。重构继续减少核心机制，但不删除 Robot Runtime 的物理安全边界。
+
+### 2.1 当前问题收敛状态
+
+独立 Skill Tool 已替代模型侧的 `request_skill` 聚合接口，因此 Tool schema 问题已经基本
+解决。执行和部署层已经收敛为 native local：
+
+```text
+Agent -> TaskCoordinator -> LocalSkillClient -> SkillRunner -> native Skill
+```
+
+`request_skill` 聚合接口和旧 Controller 执行路径均已退出当前主线。后续重点是补齐 native
+RoboCasa/VLA contract 和真机/benchmark 验证。
 
 ## 3. 设计原则
 
@@ -319,12 +346,8 @@ class SkillClient(Protocol):
     async def events(self, run_id: str) -> AsyncIterator[SkillEvent]: ...
 ```
 
-提供两个实现：
-
-- `LocalSkillClient`：单进程测试和开发，通过 async queue 连接 Runner；
-- `NatsSkillClient`：多进程、真机和分布式部署，通过 NATS 传输相同协议。
-
-Agent、任务存储和 Tool adapter 不根据部署模式改变业务逻辑。
+当前只提供 `LocalSkillClient`：单进程测试和开发通过 async queue 连接 Runner。真机仍可使用
+`RobotClient`/gRPC 边界，但不为 Skill execution 额外引入 NATS command transport。
 
 ## 6. Agent Tool 设计
 
@@ -367,8 +390,8 @@ def skill_to_tool(skill: Skill) -> dict[str, Any]:
 }
 ```
 
-Tool adapter 只负责把 Tool call 转成 `SkillCommand` 并提交给 `SkillClient`。兼容迁移期间
-可以继续生成内部 `ActionProposal`，但该 DTO 不应成为模型接口的一部分。
+Tool adapter 只负责把 Tool call 转成 `SkillCallProposal`，再由 `TaskCoordinator` 提交
+`SkillCommand` 给 `SkillClient`。`ActionProposal` 已删除，不再作为模型接口或内部兼容 DTO。
 
 Tool call 对模型表现为一次调用，但 Harness 内部是异步任务：提交后持久化 `run_id`，慢系统
 挂起当前审议，收到 progress 或 terminal event 后再唤醒 Agent。这样不会让一次 LLM 请求
@@ -479,54 +502,14 @@ skills:
 Skill 只依赖 `ModelClient` 或 `RobotClient`，不直接依赖 protobuf 和 channel。客户端可以有
 local 与 gRPC 两种实现。
 
-### 9.2 保留 NATS 异步命令与事件面
+### 9.2 传输与长程任务边界
 
-NATS 是分布式快慢系统的部署传输，不是业务状态的事实来源。保留以下用途：
+当前核心 Harness 只支持单进程 `LocalSkillClient`。NATS 可以继续用于现有 Gateway、通知和
+遥测，但不再承载 `SkillCommand`、`SkillEvent` 或 worker lifecycle；因此没有 NATS receipt、
+JetStream、redelivery 和第二套 worker state machine。跨进程 worker 是独立部署需求，出现前不
+保留实现或抽象占位。
 
-- 慢系统提交和取消 `SkillCommand`；
-- 快系统发布 `SkillEvent`；
-- UI、监控和其他观察者订阅状态；
-- 跨进程通知和服务健康事件。
-
-需要收缩的是 NATS 对业务代码的渗透。Agent、Gateway、Runner 和 Skill 不直接 publish 或
-subscribe subject，而是依赖 `SkillClient` 和 event publisher 接口。NATS adapter 统一负责：
-
-- 消息编码和版本；
-- `run_id + sequence` 去重；
-- 重连和投递策略；
-- subject 命名；
-- ACL 和认证；
-- transport error 到领域错误的映射。
-
-本地部署使用 `LocalSkillClient` 跑同一套异步协议，无需启动 NATS。分布式和真机部署切换为
-`NatsSkillClient`，不改变 Agent、Tool、Skill 或 Runner。
-
-NATS 不用于 VLA inference 或远程 Robot Runtime 的同步数据面 RPC，也不作为任务持久化
-数据库。高频相机帧不通过普通 NATS 控制主题传输，应使用共享内存、独立媒体流、RPC stream
-或对象引用；SkillEvent 只携带 frame ID 和 artifact reference。
-
-### 9.3 长程任务可靠性
-
-NATS Core publish/subscribe 没有离线重放能力，不能单独承担可恢复的长程 Skill command。
-分布式生产模式采用以下最小语义：
-
-```text
-delivery: at least once
-idempotency key: run_id
-event ordering: run_id + sequence
-source of truth: durable TaskStore / EventStore
-recovery: reconcile non-terminal runs after restart
-```
-
-高层 SkillCommand 和终端 SkillEvent 应使用 JetStream 或等价的持久队列。Runner 和 Skill
-worker 必须按 `run_id` 幂等：重复 command 返回已有 run 状态，不能重复控制机器人。普通
-Core NATS 可以继续承载可丢失的心跳、瞬时 progress 和遥测。
-
-系统不追求分布式 exactly-once。任务存储记录 command 状态和最后消费的 event sequence，
-服务重启后通过 reconcile 判断重新订阅、查询快系统状态、取消或重新提交，而不是依赖 LLM
-记住执行进度。
-
-### 9.4 最小持久化布局
+### 9.3 最小持久化布局
 
 第一版不建设通用 TaskStore/EventStore 平台，也不引入外部数据库。使用 SQLite 文件和普通
 运行文件即可：
@@ -570,6 +553,19 @@ artifact，再增加对象存储 adapter，不提前引入。
 
 ## 10. 渐进式迁移计划
 
+状态快照下各阶段进展如下。详细文件证据、PR 0--9 映射和测试缺口以
+[代码级重构计划](simple-tool-skill-refactoring-code-plan.zh-CN.md#120-当前迁移状态)为准。
+
+| 阶段 | 当前状态 | 说明 |
+|---|---|---|
+| 0 行为基线 | 本轮完成 | 本轮使用现有 regression/smoke 覆盖简化主链；固定 RoboCasa/VLA benchmark 后续单独补 |
+| 1 新内核 | 完成 | models/context/registry/runner/resource/local worker 已落地；不保留 legacy adapter |
+| 2 直接 Tool 化 | 完成 | 独立 Tool 和 `SkillCallProposal` 已成为 Agent 主接口；`ActionProposal` 已删除 |
+| 3 Builtin 迁移 | 完成 | 简单 builtin、classic、bounded VLA/VLN loop 与 oracle simulation dock 已迁移；legacy builtin/adapter/termination 已删除 |
+| 4 Runner 唯一入口 | 完成 | local native 已切换；submit 失败回填、terminal resume 和 startup reconcile 已接通；旧 Controller 已删除 |
+| 5 transport 收敛 | 已收敛 | local transport 是唯一新协议执行链；未使用的 NATS event-driven bridge 已删除 |
+| 6 删除旧抽象 | 完成 | `skill_os`、Gateway、Controller、legacy catalog/transport 和旧 proposal/short command DTO 已删除 |
+
 ### 阶段 0：冻结行为基线
 
 - 记录当前 classic、VLA 和 RoboCasa 代表任务结果；
@@ -579,7 +575,8 @@ artifact，再增加对象存储 adapter，不提前引入。
 
 ### 阶段 1：增加新内核
 
-新增 `skills/models.py`、`context.py`、`registry.py` 和 `runner.py`，但不切换生产链路。
+新增 `skills/models.py`、`context.py`、`registry.py` 和 `runner.py`。这些模块当前已落地；本阶段
+最初“不切换生产链路”的迁移约束仍用于解释提交顺序。
 
 新内核首先覆盖：
 
@@ -593,12 +590,20 @@ artifact，再增加对象存储 adapter，不提前引入。
 
 ### 阶段 2：直接 Tool 化
 
+本阶段主体已完成；以下条目保留为无回退要求：
+
 - 从启用的 Skill 自动生成独立 Tool；
 - Agent 停止默认使用 `request_skill`；
-- 兼容期仍可将 Tool call 转成现有 `ActionProposal`；
-- 不同时修改底层执行和通信链路。
+- Tool call 直接转为 `SkillCallProposal`；
+- 底层执行和通信链路已切到 native local。
 
 ### 阶段 3：迁移 Builtin Skill
+
+本阶段核心代码已完成。低风险 builtin、classic/VLA/hybrid、bounded VLN/VLA loop 和 oracle
+simulation dock 已迁移；不能把这等同于 RoboCasa/VLA/真机 benchmark 已完成。
+
+当前部署配置统一使用 native local。`configs/evaluation/robocasa365.agent.yaml` 只暴露
+`inspect_scene`，因为 remote RoboCasa `manipulate` 的 native action contract 尚未完成验证。
 
 按风险从低到高迁移：
 
@@ -616,6 +621,8 @@ hybrid pick/place
 
 ### 阶段 4：Runner 成为唯一执行入口
 
+native local 已使用 Runner；全局唯一入口尚未达成。
+
 将 Controller 的职责分别移交给：
 
 | 当前职责 | 目标位置 |
@@ -627,34 +634,26 @@ hybrid pick/place
 | 事件记录 | `EventSink` |
 | 硬件安全 | `RobotRuntime` |
 
-分布式部署中的 Skill worker 只负责接收 `SkillCommand`、调用 Runner 和发布 `SkillEvent`；
-它不复制 Runner 的校验、调度和生命周期逻辑。
-
 ### 阶段 5：传输层收敛
 
-引入 `LocalSkillClient` 和 `NatsSkillClient`。`DeploymentRunner` 根据部署配置选择实现：
-
-```text
-single_process -> LocalSkillClient -> async queue -> SkillRunner
-distributed    -> NatsSkillClient  -> NATS        -> Skill worker -> SkillRunner
-```
-
-迁移 NATS subject 和消息处理代码到 transport adapter，删除 Gateway、Agent 和 Runner 中的
-直接 bus 操作。真机 Robot Runtime 若需要独立进程，使用 `GrpcRobotClient` 承载有明确响应
-语义的数据面调用；NATS 继续承载异步 Skill command/event。
+只保留 `LocalSkillClient -> async queue -> SkillRunner`。未被部署配置使用的 NATS event-driven
+bridge 已删除，避免维持两套 command/event 协议。真机 Robot Runtime 如需独立进程，使用
+`GrpcRobotClient` 承载有明确响应语义的数据面调用。
 
 ### 阶段 6：删除旧抽象
+
+本阶段已经完成，不保留兼容目录或正式执行路径。
 
 所有 Builtin 和部署入口完成切换后，删除或合并：
 
 ```text
-skill_os/controller.py
-skill_os/scheduler.py
-skill_os/composition.py
-skill_os/apis.py
-skill_os/ports.py
-skill_os/runtime/ports.py
-contracts/skill_contracts.py
+skill_os/
+RobotExecutionGateway
+SkillControllerService
+ActionProposal
+ShortOperationCommand
+SkillCatalog/SkillSpec
+legacy Skill transport
 RequestSkillTool
 ```
 
@@ -664,7 +663,7 @@ RequestSkillTool
 SkillSpec + SkillContract       -> Skill
 SkillCatalog + ContractCatalog  -> SkillRegistry
 SkillRuntime + Controller core  -> SkillRunner
-Controller transport handling   -> Skill worker + NatsSkillClient
+Controller transport handling   -> LocalSkillClient + SkillRunner
 lifecycle + event_sink          -> EventSink + JSONL
 ```
 
@@ -682,20 +681,39 @@ lifecycle + event_sink          -> EventSink + JSONL
 
 ## 12. 验收标准
 
-每个迁移阶段必须满足：
+最终重构必须满足：
 
 1. Agent Tool 使用 Skill 的真实 JSON Schema，不再依赖任意 `slots`；
 2. Classic、VLA 和 Hybrid 通过同一个 SkillRunner；
 3. 顶层和嵌套 Skill 使用同一执行入口；
 4. 本地完整运行通过 LocalSkillClient 完成，不需要 NATS；
-5. 分布式运行通过 NatsSkillClient 使用相同 SkillCommand 和 SkillEvent；
-6. Agent 在终端事件到达后可从持久任务状态恢复审议；
-7. VLA 和 RoboCasa gRPC 集成测试继续通过；
-8. timeout、cancel、资源互斥、观测新鲜度和急停有独立测试；
-9. 根任务完成仍由独立 verifier 根据 evidence 判断；
-10. RoboCasa 相同 checkpoint 和 seed 的行为不低于重构前基线；
-11. JSONL 轨迹足以复现一次 Skill 的输入、关键步骤和结果；
-12. 兼容期结束后不存在两套领域协议或正式执行路径。
+5. Agent 在终端事件到达后可从持久任务状态恢复审议；
+6. VLA 和 RoboCasa gRPC 集成测试继续通过；
+7. timeout、cancel、资源互斥、观测新鲜度和急停有独立测试；
+8. 根任务完成仍由独立 verifier 根据 evidence 判断；
+9. RoboCasa 相同 checkpoint 和 seed 的行为不低于重构前基线；
+10. JSONL 轨迹足以复现一次 Skill 的输入、关键步骤和结果；
+11. 不存在两套正式执行路径；Agent/native Skill 主链不再保留兼容 DTO。
+
+### 12.1 当前验收结论
+
+| 条目 | 当前状态 | 说明 |
+|---|---|---|
+| 1 独立真实 Tool schema | 已满足 | 配置 Skill 已投影为独立 Tool，不再向模型暴露任意 `slots` |
+| 2 Classic/VLA/Hybrid 同一 Runner | 已满足 | native handler 使用同一 Runner；默认 legacy 路径已删除 |
+| 3 顶层/嵌套同一入口 | 已满足 | native `context.run()` 已复用 Runner；builtin/部署已切到 native local |
+| 4 本地无需 NATS | 已满足 | native local 装配使用 LocalSkillClient |
+| 5 分布式同协议 | 不在当前范围 | 当前优先单进程 native 运行；跨进程 worker 需独立立项，不保留半成品 bridge |
+| 6 terminal event 恢复 Agent | 已满足 | 持久 step、submit 失败回填、terminal resume 和 startup reconcile 已接通；跨进程 durable receipt 不属本轮范围 |
+| 7 VLA/RoboCasa gRPC 行为 | 未验证 | 接口保留，但缺固定 checkpoint/seed 基线；RoboCasa native action contract 尚未闭合 |
+| 8 独立机制测试 | 部分满足 | timeout/cancel/resource/safety 有单测；freshness、restart 和 emergency-stop lock 验收不完整 |
+| 9 独立根 verifier | 已满足 | Skill success 未直接完成根任务，Agent 仍调用独立 verifier |
+| 10 RoboCasa 不回退 | 未验证 | 没有状态快照要求的固定评测记录 |
+| 11 可复现 JSONL 轨迹 | 部分满足 | 已有 events/result；完整 observation/model artifact 尚未统一归档 |
+| 12 单一协议/正式路径 | 已满足 | 生产执行路径只保留 native local |
+
+因此本轮简化重构可以按 **100%** 结项。完整 RoboCasa/VLA 固定 benchmark、真机长跑和跨进程
+durable transport 需要作为后续独立验证项处理。
 
 ## 13. 非目标
 
@@ -728,8 +746,8 @@ lifecycle + event_sink          -> EventSink + JSONL
 4. migrate simple builtins
 5. migrate classic manipulation
 6. migrate vla_act and hybrid skills
-7. introduce LocalSkillClient and NatsSkillClient
-8. move NATS details behind the transport adapter and retain gRPC data planes
+7. introduce LocalSkillClient
+8. retain gRPC data planes without adding a second Skill transport
 9. remove compatibility adapters and old Skill OS
 10. update architecture and operations documentation
 ```

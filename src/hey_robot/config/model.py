@@ -185,18 +185,18 @@ class AgentSpec:
 
 @dataclass(frozen=True)
 class SkillSurfaceConfig:
-    modules: tuple[str, ...] = ("hey_robot.skill_os.builtins",)
+    modules: tuple[str, ...] = ("hey_robot.skills.builtins",)
     tools: tuple[str, ...] = ()
     implementations: dict[str, str] = field(default_factory=dict)
     enabled: tuple[str, ...] = ()
     mode: str = "production"  # 可选值："production" | "bringup"
-    execution_mode: str = "legacy"  # 可选值："legacy" | "event_driven" | "local"
+    execution_mode: str = "local"
 
     @property
     def tool_names(self) -> tuple[str, ...]:
-        """Configured Agent-facing Skill surface, with one legacy compatibility path."""
+        """配置给 Agent 使用的 native Skill surface。"""
 
-        return self.tools or self.enabled
+        return self.tools
 
 
 @dataclass(frozen=True)
@@ -481,12 +481,12 @@ class DeploymentConfig:
                 modules=tuple(
                     str(item).strip()
                     for item in skills_data.get(
-                        "modules", ("hey_robot.skill_os.builtins",)
+                        "modules", ("hey_robot.skills.builtins",)
                     )
-                    or ("hey_robot.skill_os.builtins",)
+                    or ("hey_robot.skills.builtins",)
                     if str(item).strip()
                 )
-                or ("hey_robot.skill_os.builtins",),
+                or ("hey_robot.skills.builtins",),
                 enabled=tuple(
                     str(item).strip()
                     for item in skills_data.get("enabled", ()) or ()
@@ -505,7 +505,7 @@ class DeploymentConfig:
                     if str(name).strip() and str(value).strip()
                 },
                 mode=str(skills_data.get("mode", "production")),
-                execution_mode=str(skills_data.get("execution_mode", "legacy")),
+                execution_mode=str(skills_data.get("execution_mode", "local")),
             ),
             agent_runtime=AgentRuntimeSpec(
                 enabled=bool(agent_runtime_data.get("enabled", False)),

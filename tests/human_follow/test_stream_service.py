@@ -7,13 +7,13 @@ from types import SimpleNamespace
 import numpy as np
 
 from hey_robot.config import DeploymentConfig
+from hey_robot.human_follow.perception import Detection
 from hey_robot.human_follow.service import HumanFollowService, _Session
 from hey_robot.robot_runtime.observations.frame_stream import (
     decode_frame_packet,
     encode_frame_packet,
 )
 from hey_robot.robot_runtime.service import RobotService
-from hey_robot.skill_os.perception.human_follow import Detection
 
 
 class FakeBus:
@@ -49,7 +49,7 @@ def test_human_follow_service_streams_velocity_inside_single_session(
     )
     service._frame_events["xlerobot"].set()
     monkeypatch.setattr(
-        "hey_robot.skill_os.perception.human_follow.detect_people",
+        "hey_robot.human_follow.perception.detect_people",
         lambda _image: [Detection((40, 10, 60, 70), 0.9)],
     )
     session = _Session(
@@ -83,7 +83,7 @@ def test_service_progress_serializes_target_to_json_safe_dict(monkeypatch) -> No
     )
     service._frame_events["xlerobot"].set()
     monkeypatch.setattr(
-        "hey_robot.skill_os.perception.human_follow.detect_people",
+        "hey_robot.human_follow.perception.detect_people",
         lambda _image: [Detection((40, 10, 60, 70), 0.9)],
     )
     session = _Session(

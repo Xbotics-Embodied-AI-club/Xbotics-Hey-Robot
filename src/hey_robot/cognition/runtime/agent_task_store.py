@@ -536,6 +536,27 @@ class AgentTaskStore:
         ).fetchall()
         return tuple(str(row[0]) for row in rows if row[0] is not None)
 
+    def active_skill_steps(self) -> tuple[AgentTaskStep, ...]:
+        """返回 active sustained task 的 non-terminal Skill step。
+
+        使用 Store query 而非 in-memory service map，确保服务重启、原始 Agent turn
+        已结束后仍可进行 startup reconciliation。调用方负责 transport-specific status
+        lookup，并通过 ``apply_skill_event`` 写入返回的 event。
+        """
+        rows = self._db.execute(
+            """
+            SELECT s.step_id, s.task_id, s.sequence, s.proposal_json, s.outcome_json,
+                   s.started_at, s.completed_at, s.evidence_json, s.status, s.run_id,
+                   s.tool_call_id, s.last_event_sequence
+            FROM task_steps AS s
+            JOIN sustained_tasks AS t ON t.task_id = s.task_id
+            WHERE t.status='active' AND s.run_id IS NOT NULL
+              AND s.status IN ('pending', 'running')
+            ORDER BY s.started_at ASC, s.sequence ASC
+            """
+        ).fetchall()
+        return tuple(_step_from_row(row) for row in rows)
+
     def continue_task(self, task_id: str) -> int:
         task = self.task(task_id)
         if task is None or task.status != "active":

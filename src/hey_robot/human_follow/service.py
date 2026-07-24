@@ -7,13 +7,13 @@ from typing import Any
 
 from hey_robot.bus.factory import create_bus_client
 from hey_robot.config import DeploymentConfig
-from hey_robot.logging import HeyRobotLogger
-from hey_robot.protocol import Topics
-from hey_robot.robot_runtime.observations.frame_stream import decode_frame_packet
-from hey_robot.skill_os.perception.human_follow import (
+from hey_robot.human_follow.perception import (
     HumanFollowRunner,
     load_detector,
 )
+from hey_robot.logging import HeyRobotLogger
+from hey_robot.protocol import Topics
+from hey_robot.robot_runtime.observations.frame_stream import decode_frame_packet
 
 logger = HeyRobotLogger(name="human_follow_service")
 

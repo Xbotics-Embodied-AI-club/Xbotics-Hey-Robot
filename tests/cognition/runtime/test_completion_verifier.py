@@ -4,7 +4,8 @@ import pytest
 
 from hey_robot.cognition.runtime.agent_task_store import AgentTask, AgentTaskStep
 from hey_robot.cognition.runtime.completion_verifier import TaskCompletionVerifier
-from hey_robot.protocol import ActionProposal, ToolOutcome
+from hey_robot.cognition.tools.skill_tools import SkillCallProposal
+from hey_robot.protocol import ToolOutcome
 from hey_robot.providers import ReasoningResponse, ReasoningToolCall
 
 
@@ -47,7 +48,7 @@ def _step() -> AgentTaskStep:
         step_id="step-1",
         task_id="task-1",
         sequence=1,
-        proposal=ActionProposal(
+        proposal=SkillCallProposal(
             "observation", "inspect_scene", "确认是否进入", {"question": "在哪里"}
         ),
         outcome=ToolOutcome("completed", "机器人前方仍有两个门洞。"),

@@ -28,13 +28,13 @@ resources:
 
 skills:
   modules:
-    - hey_robot.skill_os.builtins
+    - hey_robot.skills.builtins
   mode: bringup
-  enabled:
+  execution_mode: local
+  tools:
     - inspect_scene
     - look_around
     - detect_marker
-    - human_follow
     - stop_motion
 
 agent_runtime:
@@ -149,5 +149,4 @@ agents:
           model: mock-planner
           api_key: test-key
           api_base: http://127.0.0.1:9/v1
-
 

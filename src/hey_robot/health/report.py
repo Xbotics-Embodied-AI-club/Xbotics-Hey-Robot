@@ -10,7 +10,7 @@ from typing import Any
 from hey_robot.cognition.runtime.agent_task_store import AgentTaskStore
 from hey_robot.config import DeploymentConfig
 from hey_robot.config.validation import validate_deployment
-from hey_robot.skill_os.registry import registry_from_config
+from hey_robot.skills import registry_from_config
 
 
 @dataclass(frozen=True)
@@ -108,14 +108,14 @@ class HealthReportService:
         return reports
 
     def _skill_readiness_reports(self, *, robot_id: str | None) -> list[HealthReport]:
-        registry = registry_from_config(self.config)
         reports: list[HealthReport] = []
-        for name in registry.names(enabled_only=True):
+        registry = registry_from_config(self.config)
+        for name in self.config.skills.tool_names:
             try:
-                spec = registry.get(name).spec
+                spec = registry.get(name)
             except KeyError:
                 continue
-            resources = tuple(spec.required_resources)
+            resources = tuple(spec.resources)
             if not resources:
                 continue
             if robot_id and not _skill_matches_robot(
@@ -135,8 +135,8 @@ class HealthReportService:
                     source="skill.catalog",
                     metadata={
                         "resources": list(resources),
-                        "driver_primitives": list(spec.driver_primitives),
-                        "safety_level": spec.safety_level,
+                        "driver_primitives": list(spec.required_actions),
+                        "safety_level": "normal",
                     },
                 )
             )

@@ -10,9 +10,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from hey_robot.app.runtime_components import SkillToolCatalog
 from hey_robot.bus.factory import create_bus_client
 from hey_robot.cognition.conversation_entities import EntityResolver
-from hey_robot.cognition.robot_execution_gateway import RobotExecutionGateway
 from hey_robot.cognition.runtime.agent_runner import (
     AgentRunner,
     AgentTurnRequest,
@@ -20,6 +20,7 @@ from hey_robot.cognition.runtime.agent_runner import (
 )
 from hey_robot.cognition.runtime.agent_task_store import (
     AgentTask,
+    AgentTaskStep,
     AgentTaskStore,
     TaskStatus,
 )
@@ -33,7 +34,6 @@ from hey_robot.cognition.tools.robot import (
 )
 from hey_robot.cognition.tools.skill_tools import (
     SkillCallProposal,
-    skill_call_from_legacy,
 )
 from hey_robot.cognition.tools.task_tools import (
     CompleteTaskProposal,
@@ -45,16 +45,14 @@ from hey_robot.protocol import (
     ConversationTurn,
     Envelope,
     RobotObservation,
-    SkillResult,
     ToolOutcome,
     Topics,
 )
 from hey_robot.protocol.messages import from_payload, to_payload
 from hey_robot.providers import ReasoningMessage, ReasoningToolCall, build_provider
-from hey_robot.skill_os.registry import registry_from_config
+from hey_robot.skills import registry_from_config
 from hey_robot.skills.client import SkillClient
 from hey_robot.skills.models import SkillEvent as HarnessSkillEvent
-from hey_robot.skills.transport import NatsSkillClient
 from hey_robot.templates.loader import TemplateStore
 
 _MAX_STEPS_PER_SLICE = 8
@@ -76,6 +74,7 @@ class AutonomousAgentService:
         agent_id: str,
         skill_client: SkillClient | None = None,
         skill_catalog: SkillCatalogView | None = None,
+        owns_skill_client: bool = False,
     ) -> None:
         self.config = config
         self.agent_id = agent_id
@@ -90,7 +89,7 @@ class AutonomousAgentService:
         catalog = (
             skill_catalog
             if skill_catalog is not None
-            else registry_from_config(config).catalog(semantic_only=False)
+            else SkillToolCatalog(registry_from_config(config).select(config.skills.tool_names))
         )
         agent_spec = config.agents.get(agent_id)
         configured_template_root = (
@@ -110,46 +109,29 @@ class AutonomousAgentService:
         provider = build_provider(config, agent_id, purpose="agent")
         self.runner = AgentRunner(provider, self.tools)
         self.completion_verifier = TaskCompletionVerifier(provider)
-        self.execution = (
-            None
-            if skill_client is not None
-            else RobotExecutionGateway(
-                self.bus,
-                self.topics,
-                catalog,
-                self.conversations,
-                timeout_sec=config.agent_runtime.skill_result_timeout_sec,
-            )
-        )
-        self.skill_client = skill_client or (
-            NatsSkillClient(self.bus)
-            if config.skills.execution_mode == "event_driven"
-            else None
-        )
-        self._owns_skill_client = skill_client is None
-        self.task_coordinator = (
-            TaskCoordinator(self.tasks, self.skill_client)
-            if self.skill_client is not None
-            else None
-        )
+        self.skill_client = skill_client
+        self._owns_skill_client = owns_skill_client
+        if self.skill_client is None:
+            raise ValueError("AutonomousAgentService requires native SkillClient")
+        self.task_coordinator = TaskCoordinator(self.tasks, self.skill_client)
         self._skill_event_consumer: asyncio.Task[object] | None = None
         self._session_locks: dict[str, asyncio.Lock] = {}
 
     async def start(self) -> None:
         await self.bus.connect()
-        if self.skill_client is not None and hasattr(self.skill_client, "start"):
+        if hasattr(self.skill_client, "start"):
             await self.skill_client.start()
         await self.bus.subscribe([self.topics.conversation_turn], self._on_turn)
-        if self.execution is not None:
-            await self.bus.subscribe([self.topics.skill_result], self._on_skill_result)
         await self.bus.subscribe(
             [self.topics.robot_observation], self._on_robot_observation
         )
-        if self.task_coordinator is not None and self.skill_client is not None:
-            self._skill_event_consumer = asyncio.create_task(
-                self._consume_skill_events(),
-                name=f"agent:{self.agent_id}:skill-events",
-            )
+        reconciled = await self.task_coordinator.reconcile_active_run_events()
+        for event, step in reconciled:
+            await self._handle_skill_event(event, reconciled_step=step)
+        self._skill_event_consumer = asyncio.create_task(
+            self._consume_skill_events(),
+            name=f"agent:{self.agent_id}:skill-events",
+        )
         await asyncio.Event().wait()
 
     async def stop(self) -> None:
@@ -290,10 +272,6 @@ class AutonomousAgentService:
         if decision.status == "failed":
             return _StepOutcome(_decision_failure_text(decision))
         proposal = decision.proposal
-        if not isinstance(proposal, SkillCallProposal) and (
-            proposal.__class__.__name__ == "ActionProposal"
-        ):
-            proposal = skill_call_from_legacy(proposal)
         if isinstance(proposal, SkillCallProposal):
             current_task = self.tasks.active_task(session_key)
             max_skills = max(1, int(self.config.agent_runtime.hard_max_skills))
@@ -320,23 +298,14 @@ class AutonomousAgentService:
                 outcome = self._reobservation_gate(current_task, proposal)
             call = decision.tool_calls[0]
             if outcome is None:
-                coordinator = getattr(self, "task_coordinator", None)
-                if coordinator is None:
-                    if self.execution is None:
-                        return _StepOutcome("这次请求没有完成：机器人执行通道未配置。")
-                    outcome = await self.execution.execute(
-                        proposal, envelope, session_key
-                    )
-                    step = self.tasks.add_step(current_task.task_id, proposal, outcome)
-                else:
-                    step = await coordinator.submit(
-                        task_id=current_task.task_id,
-                        proposal=proposal,
-                        envelope=envelope,
-                        tool_call_id=call.tool_call_id,
-                        deadline_at=current_task.deadline_at,
-                    )
-                    outcome = step.outcome
+                step = await self.task_coordinator.submit(
+                    task_id=current_task.task_id,
+                    proposal=proposal,
+                    envelope=envelope,
+                    tool_call_id=call.tool_call_id,
+                    deadline_at=current_task.deadline_at,
+                )
+                outcome = step.outcome
             else:
                 step = self.tasks.add_step(current_task.task_id, proposal, outcome)
             messages.extend(
@@ -361,16 +330,6 @@ class AutonomousAgentService:
                 )
             )
             if outcome.status in {"accepted", "waiting"}:
-                if getattr(self, "task_coordinator", None) is None:
-                    if current_task is not None:
-                        self.tasks.control_task(
-                            current_task.task_id,
-                            "blocked",
-                            "机器人执行仍处于未决状态，没有返回最终结果。",
-                        )
-                    return _StepOutcome(
-                        "这次操作没有完成：机器人还没有返回最终执行结果。"
-                    )
                 return _StepOutcome("已提交机器人操作，正在等待执行结果。")
             if not outcome.retryable and outcome.status == "failed":
                 if current_task is not None:
@@ -546,14 +505,7 @@ class AutonomousAgentService:
             )
         )
 
-    async def _on_skill_result(self, _topic: str, payload: dict) -> None:
-        if self.execution is None:
-            return
-        self.execution.accept_result(from_payload(SkillResult, payload))
-
     async def _consume_skill_events(self) -> None:
-        if self.skill_client is None:
-            return
         async for event in self.skill_client.events():
             await self._handle_skill_event(event)
 
@@ -563,11 +515,16 @@ class AutonomousAgentService:
 
         await self._handle_skill_event(from_payload(SkillEvent, payload))
 
-    async def _handle_skill_event(self, event: HarnessSkillEvent) -> None:
+    async def _handle_skill_event(
+        self,
+        event: HarnessSkillEvent,
+        *,
+        reconciled_step: AgentTaskStep | None = None,
+    ) -> None:
         coordinator = getattr(self, "task_coordinator", None)
         if coordinator is None:
             return
-        step = coordinator.apply(event)
+        step = reconciled_step or coordinator.apply(event)
         if (
             step is None
             or event.phase not in {"completed", "failed", "cancelled"}

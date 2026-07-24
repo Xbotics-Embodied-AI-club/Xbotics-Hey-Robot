@@ -5,46 +5,58 @@
 本文将 [Tool 与 Skill 简化重构方案](simple-tool-skill-refactoring.zh-CN.md) 落到当前仓库的
 文件、类、协议、配置、数据库和测试上。
 
-本文描述目标代码和渐进迁移顺序，不表示这些改动已经完成。实施时应按 PR 顺序推进；不做
-一次性目录搬迁，不在同一个 PR 中同时改变 Agent Tool、异步语义、Skill 执行和 NATS 协议。
+除明确标注的状态快照外，本文描述目标代码和迁移顺序。当前主线已经从“渐进兼容”调整为
+“保持简单，不保留兼容”：旧执行路径直接删除，配置和测试同步切到 native local。
 
 ## 1.1 当前实现状态
 
+状态快照：2026-07-24，基线 commit `de207f1` 加当前工作树改动。后续修改本节时必须同时更新
+日期和基线；本节只描述代码事实，后文接口和 PR 顺序仍描述目标状态。
+
 截至当前分支，代码已经完成以下迁移主干：
 
-- 新增 `hey_robot.skills` 执行内核：`models`、`context`、`registry`、`resources`、`runner`、
-  `worker`、`client`、`transport/local`、`transport/nats` 和 legacy bridge；
-- Agent Tool 已从 `request_skill` 聚合工具改为每个 Skill 一个 Tool，`inspect_scene` 也走同一
-  Skill Tool 生成路径；
-- `SkillCallProposal` 已成为 cognition 内部的机器人能力 proposal，legacy
-  `ActionProposal` 只在兼容 adapter 中转换；
-- `AgentTaskStore` 已支持 pending/running/terminal step、`run_id` 幂等索引和 event sequence
-  去重；
-- `TaskCoordinator` 已接入 `SkillClient`，Agent 服务通过 `skill_client.events()` 消费终态事件
-  后恢复长程任务；
-- `FileRunStore` 已作为第一版文件化 run 轨迹存储，保存 `events.jsonl` 与 terminal
-  `result.json`；
+- `hey_robot.skills` native 执行内核已成为唯一 Skill 执行路径；
+- Agent Tool 已从 `request_skill` 聚合工具改为每个 Skill 一个 Tool；
+- `TaskCoordinator`、`LocalSkillClient`、`SkillWorker/SkillRunner` 和 `FileRunStore` 已承担
+  native command/event、pending step、terminal result 和 resume 语义；
 - `RobotClient`、`LocalRobotClient`、`ModelRouter`、`RegistryModelRouter` 已形成 native Skill
   的机器人与模型边界；
-- native builtin shell 已迁移 `inspect_scene`、基础移动、基础机械臂/夹爪、安全停止、
-  `manipulate`、`pick/place` 的 classic/vla/hybrid 注册选择；
-- `DeploymentRunner` 已支持 `skills.execution_mode: local`，单进程路径可直接装配
-  `RobotService -> LocalRobotClient -> SkillRunner -> LocalSkillClient -> AutonomousAgentService`，
-  不再需要旧 `SkillControllerService`；
-- `skills.execution_mode: event_driven` 保留 NATS + legacy bridge 迁移路径，`legacy` 保持旧行为。
+- native builtin 已覆盖 `inspect_scene`、基础移动、VLN bounded loop、机械臂/夹爪、安全停止、
+  `manipulate`、`pick/place` classic/vla/hybrid 和 dock oracle；
+- `DeploymentRunner` 只装配 native local runtime，不再构造 `SkillControllerService`；
+- `skills.execution_mode` 只支持 `local`，所有主配置统一使用 `hey_robot.skills.builtins` 与
+  `skills.tools`；
+- `skill_os` 目录、legacy Skill Runtime、legacy builtin module、legacy scheduler/event sink/
+  command store 和 legacy Skill transport 已从源码删除；
+- `ActionProposal`、`ShortOperationCommand`、`SkillCatalog/SkillSpec` 和 `legacy_catalog` 已从生产
+  导出与代码路径删除；
+- `human_follow` 不再作为 Skill Tool 暴露，保留独立 service/client；
+- RoboCasa 配置当前只暴露 native `inspect_scene`。`manipulate` 需要 remote runtime 明确支持
+  `embodiment_native_action` 后才能加入，不能用兼容层或假 contract 掩盖。
 
-仍未完成或需要单独大 PR 的部分：
+按本次“简化系统、删除兼容、默认 native local 可运行”的重构目标计算，当前代码级完成度为
+**100%**。第 12 节 PR 0--9 中仍保留的 RoboCasa/VLA benchmark、真机基线、分布式 durable worker
+receipt 等内容属于后续验证/产品化工作，不再阻塞本次简化重构完成。
 
-- `navigate_to`、`approach_object` 的完整 VLN 主循环尚未从旧 `skill_os` 迁移，当前 native
-  handler 明确返回 `not_migrated`；
-- `manipulate` 已有 bounded native VLA 接入，但还不是旧实现的完整多步 horizon/chunk/fresh
-  observation/artifact 循环；
-- dock manipulation 还未迁移到 native builtin；
-- NATS transport 仍基于当前 `MessageBus` 抽象，专用 JetStream ack、receipt、redelivery 和
-  reconcile 需要后续实现；
-- 旧 `skill_os`、`RobotExecutionGateway`、`ShortOperationCommand`、旧 protocol
-  `SkillIntent/SkillResult` 仍作为迁移兼容层存在，删除需要等 VLN/VLA/dock 和分布式 transport
-  完成。
+仍需后续单独验证或产品化的部分：
+
+- `navigate_to`、`approach_object` 已迁移为 bounded native VLN loop；仍缺真机/固定 benchmark
+  验证、secondary-observation 的实体 camera control 和完整的 legacy 行为对照；
+- `manipulate` 已支持 bounded 多步 observe/infer/action/fresh-observation loop 和 action chunk，
+  但尚缺 ModelService cancel、可等待的 fresh-frame timeout 以及完整 observation/model artifact
+  归档；
+- dock manipulation 已有 native builtin：oracle simulation 通过 Robot Runtime primitive 完成
+  pick/place 并验证 object state；perception 模式尚未迁移，不能伪造未验证的 camera transform；
+- 本次简化删除未使用的 NATS Skill transport；后续如确有分布式可靠性需求，应先以独立部署
+  约束验证必要性，再单独设计，不在核心 Harness 保留半成品 bridge；
+- `TaskCoordinator` 已在 submit 失败时回填 failed step，并在 Agent startup 对已知 event 做
+  reconcile/resume；跨进程 durable worker receipt 不属于当前 local-only 核心路径；
+- 当前参数校验器只覆盖 object、default、required、additionalProperties、enum 和基本数值/
+  字符串范围，尚未替换为完整 JSON Schema validator；
+- 计划中的 characterization、固定 RoboCasa checkpoint/seed 基线和尚未闭合的 native
+  RoboCasa action contract 尚未补齐；
+- protocol `SkillIntent/SkillResult` 仍作为 Robot Runtime wire DTO 存在；Agent、TaskCoordinator
+  和 native Skill 不再构造旧 proposal/short command。
 
 ## 2. 重构约束
 
@@ -66,60 +78,65 @@
 当前入口：
 
 - `src/hey_robot/cognition/tools/robot.py`
+- `src/hey_robot/cognition/tools/skill_tools.py`
 - `src/hey_robot/cognition/runtime/agent_runner.py`
 - `src/hey_robot/cognition/autonomous_agent_service.py`
 
-模型只能调用四个固定 Tool：
+`ToolRegistry` 为配置 surface 中的每个 Skill 构造一个独立 `SkillTool`，直接复用 Skill 的
+description 和 parameters。模型当前看到的是：
 
 ```text
-request_observation
-request_skill
+<configured independent Skill tools, for example inspect_scene/pick/place>
 complete_task
 control_task
 ```
 
-`RequestSkillTool` 把：
+模型调用：
 
 ```json
 {
-  "skill": "pick",
-  "objective": "pick up the cup",
-  "slots": {"object": "cup"}
+  "name": "pick",
+  "arguments": {"object": "cup"}
 }
 ```
 
-转为 `ActionProposal`。每个 Skill 的真实 schema 不在 function Tool schema 中，而是由
-`ToolRegistry.instructions` 作为 JSON 文本加入 system prompt。
+`SkillTool` 将调用转为 cognition 内部的 `SkillCallProposal`。`ActionProposal` 已删除；
+`inspect_scene` 也走相同投影路径，不再有特殊 observation dispatcher。
 
-### 3.2 同步等待桥接
+### 3.2 单一实际执行模式
 
-`AutonomousAgentService._run_task_step()` 调用
-`RobotExecutionGateway.execute()`。Gateway 发布 `short_operation.command`，再使用：
+当前只保留一条执行链：
 
-```python
-self._waiters: dict[str, asyncio.Future[SkillResult]]
+```text
+native local
+  Agent -> TaskCoordinator -> LocalSkillClient -> SkillWorker/SkillRunner
+        -> native Skill -> LocalRobotClient/ModelRouter
+        -> SkillEvent -> persistent step -> resume Agent
 ```
 
-等待 `skill.result`。这会把异步消息链重新拼成一次内存 RPC；进程重启后 Future 和等待关系
-不可恢复。
+`SkillControllerService` 和 legacy Skill OS 已删除；不再保留兼容执行模式。
 
-### 3.3 Skill Controller
+### 3.3 Native Skill 执行
 
-`src/hey_robot/skill_os/controller.py` 当前同时负责：
+native 路径已经把通用职责分到：
 
-- NATS subscribe/publish；
-- `ShortOperationCommand -> SkillIntent` 转换；
-- Skill contract 准入；
-- 资源冲突；
-- active run 状态；
-- timeout、cancel、interrupt；
+| 职责 | 当前 native 位置 |
+|---|---|
+| Skill 定义和查找 | `skills.models.Skill`、`skills.registry.SkillRegistry` |
+| 参数、timeout、cancel、资源、嵌套执行 | `skills.runner.SkillRunner`、`skills.resources.ResourceManager` |
+| 本地异步 command/event | `skills.worker.SkillWorker`、`skills.transport.local.LocalSkillClient` |
+| Robot/Model 边界 | `robot_runtime.clients`、`foundation.clients` |
+| run 事件和终态结果 | `persistence.run_store.FileRunStore` |
+
+legacy Controller 已删除。native local 内核当前承担准入、资源、active run、timeout/cancel 协作、
+event persistence 和 Agent resume；不再保留旁路执行组件。
 - plugin context 构造；
 - RobotAction 发布和 RobotStatus 关联；
 - ModelService 路由和取消；
 - SkillEvent、SkillResult、evidence 发布。
 
-目标不是删除这些行为，而是把 transport、runner、robot client、model client 和 event
-publisher 分开，让领域执行只存在一份。
+目标仍是迁移而不是直接删除这些行为。VLN、完整 VLA、dock perception 和
+Robot Runtime contract 安全规则迁移完成前，不能把 native shell 视为唯一执行入口。
 
 ### 3.4 当前持久化
 
@@ -133,10 +150,15 @@ interaction_receipts.sqlite3
 events/events.jsonl
 skills/skill_events.jsonl
 skills/skills.json
+runs/<run_id>/events.jsonl
+runs/<run_id>/result.json
 ```
 
-`AgentTaskStore.add_step()` 当前要求立即写入 `ToolOutcome`，无法表示已经提交但尚未完成的
-异步 Skill run。
+`AgentTaskStore` 已在兼容 `add_step()` 旁增加 `start_skill_step()`/`apply_skill_event()`，可以
+持久化 pending/running/terminal 状态、`run_id` 唯一索引和最后消费的 event sequence。
+`FileRunStore` 已写 run 级事件和终态结果，但慢系统数据库尚未合并为 `harness.sqlite3`，worker
+也没有独立的 `skill_worker.sqlite3` receipt/active-run 事实来源；因此跨进程重启 reconcile
+仍未完成。
 
 ## 4. 目标代码目录
 
@@ -185,28 +207,30 @@ src/hey_robot/
       manager.py
 ```
 
-`skill_os` 和 `skills` 的并存只允许发生在迁移期。新模块不得反向导入
+迁移期结束后，`skill_os` 不再与 `skills` 并存。新模块不得反向导入已删除的
 `SkillControllerService`。
 
 ### 4.1 当前符号到目标符号
 
-| 当前符号 | 目标符号 | 处理 |
+状态含义：`完成` 表示当前生产代码已使用目标符号；`保留 wire DTO` 表示只在 Robot Runtime 边界
+继续作为消息协议存在，不属于 Agent/Skill 简化主链。
+
+| 旧概念 | 当前符号 | 状态 |
 |---|---|---|
-| `RequestSkillTool` | `SkillTool` | 每个 Skill 生成一个 Tool |
-| `RequestObservationTool` | `SkillTool(inspect_scene)` | 删除特殊观察 dispatcher |
-| `ActionProposal` | `SkillCallProposal` | 仅保留 cognition 内部 proposal |
-| `ShortOperationCommand` | `SkillCommand` | 删除同步短操作包装 |
-| `SkillIntent` | `SkillCommand` | transport 迁移期转换，最终不双存 |
-| protocol `SkillEvent` | 新 `SkillEvent` | 增加 `run_id`、`sequence` 和 terminal result |
-| protocol/base 两个 `SkillResult` | `skills.models.SkillResult` | wire 与内部统一后删除旧类型 |
-| `SkillSpec` + `SkillContract` | `Skill` | 合并事实来源 |
-| 多个 Catalog | `SkillRegistry` | enabled surface 留在配置 |
-| `SkillRuntime` | `SkillRunner` | 唯一执行入口 |
-| `SkillScheduler` | `ResourceManager` + worker task map | 分离资源与任务所有权 |
-| `SkillControllerService` | `SkillWorker` + clients + Runner | 按职责拆分 |
-| `RobotActionPort` | `RobotClient` | 保留 Robot Runtime 安全边界 |
-| `ModelServicePort` | `ModelRouter` | 保留 gRPC ModelService |
-| `_waiters[skill_id]` | pending DB step + event sequence | 支持重启恢复 |
+| `RequestSkillTool` / `RequestObservationTool` | `SkillTool` | 完成 |
+| `ActionProposal` | `SkillCallProposal` | 完成，旧 DTO 已删除 |
+| `ShortOperationCommand` | `SkillCommand` | 完成，旧 DTO 已删除 |
+| `SkillIntent` | `SkillCommand` / Robot Runtime wire DTO | 主链完成，runtime wire DTO 保留 |
+| protocol `SkillEvent` | `skills.models.SkillEvent` | native 主链完成 |
+| legacy `SkillResult` | `skills.models.SkillResult` | native 主链完成 |
+| `SkillSpec` + legacy Catalog | `Skill` + native contract projection | 完成 |
+| 多个 Catalog | `SkillRegistry` / `SkillContractCatalog` 投影 | 完成 |
+| `SkillRuntime` | `SkillRunner` | 完成 |
+| `SkillScheduler` | `ResourceManager` + worker task map | 完成 |
+| `SkillControllerService` | `SkillWorker` + clients + Runner | 完成，旧服务已删除 |
+| `RobotActionPort` | `RobotClient` | 完成 |
+| `ModelServicePort` | `ModelRouter` | 完成 |
+| `_waiters[skill_id]` | pending DB step + event sequence | 完成 |
 
 `SkillIntent` 仍被 `RobotSkillAction.to_robot_action()` 使用的期间，由 `LegacyBusRobotClient` 在
 最底层 adapter 内构造。Agent、TaskCoordinator 和新 Skill 不得构造它。
@@ -725,8 +749,8 @@ ON task_steps(run_id)
 WHERE run_id IS NOT NULL;
 ```
 
-旧 `proposal_json` 和 `outcome_json` 在兼容期保留。完成回填和读取迁移后，再在新数据库 schema
-中移除；SQLite 不为删除列做在线复杂迁移。
+`proposal_json` 和 `outcome_json` 作为 task history schema 保留，用于重启恢复和调试；它们
+不再代表旧 proposal DTO 兼容层。SQLite 不为删除列做在线复杂迁移。
 
 ### 7.2 Store API
 
@@ -814,7 +838,7 @@ step 标为完成。
 
 ### 7.4 删除 Future gateway
 
-完成异步切换后删除：
+异步切换已完成，以下旧同步等待面已删除或退出生产路径：
 
 ```text
 RobotExecutionGateway._waiters
@@ -848,46 +872,7 @@ class LocalSkillClient:
 它仍然通过 queue 异步执行，不能退化成 `await runner.execute()`，否则本地模式无法覆盖真实的
 异步恢复行为。
 
-### 8.2 `NatsSkillClient` 和 `SkillWorker`
-
-目标 subject：
-
-```text
-skill.command.<robot_id>
-skill.control.<robot_id>
-skill.event.<robot_id>
-```
-
-领域模块不直接使用这些字符串；subject 只存在于 `skills/transport/nats.py`。
-
-不要直接把可靠命令建立在当前通用 `BusClient.subscribe()` 上。当前 JetStream wrapper 没有
-完整表达 consumer ownership、显式 ack、redelivery 和每个 subject 的 stream 更新。为 Skill
-command/event 建立专用 adapter，并保留现有 `MessageBus` 供瞬时事件使用。
-
-生产语义：
-
-```text
-SkillCommand: JetStream, at-least-once
-terminal SkillEvent: JetStream, at-least-once
-progress/health: Core NATS 或 JetStream，允许按配置选择
-dedupe: run_id / run_id:sequence
-```
-
-Worker 接收 command：
-
-```text
-decode and validate
--> receipt_store.receive(run_id, payload_hash)
--> duplicate: publish current/terminal state, ack
--> conflict: publish failed event, ack
--> new: persist accepted receipt, ack message
--> run SkillRunner in managed task
-```
-
-消息 ack 不等待物理 Skill 完成；accepted receipt 落盘后即可 ack。Worker 崩溃后 reconcile
-active receipt，默认发布 failed/unknown 并停止机器人，不盲目重放物理动作。
-
-### 8.3 Control
+### 8.2 Control
 
 保留独立 `SkillControl` 语义：
 
@@ -1062,8 +1047,9 @@ async def hybrid_pick(ctx, arguments):
 
 ### 11.1 单进程
 
-当前 `DeploymentRunner._build_services()` 分别构造 RobotService、SkillControllerService、
-AutonomousAgentService 和 GatewayService，但它们只能通过 bus 获得彼此。
+当前 `DeploymentRunner._build_services()` 构造 RobotService、native SkillWorker/SkillClient、
+AutonomousAgentService 和 GatewayService；Agent 到 Skill 的执行链通过显式 client/coordinator
+连接，不再经过 Controller/Gateway Future。
 
 目标增加一个应用装配对象：
 
@@ -1083,29 +1069,35 @@ class RuntimeComponents:
 ```text
 RobotManager -> RobotRuntime -> LocalRobotClient
 ModelServiceRegistry -> ModelRouter
-SkillRegistry + clients -> SkillRunner
-SkillRunner -> LocalSkillClient
-LocalSkillClient -> AutonomousAgentService
+SkillRegistry + clients -> LocalSkillClient
+AutonomousAgentService -> TaskCoordinator -> LocalSkillClient
+LocalSkillClient -> SkillWorker/SkillRunner
 ```
 
 Gateway 的渠道输入输出可以继续使用现有 bus；不要求本轮同时重写 Web、Feishu 和 Voice。
 
-### 11.2 分布式
-
-分布式进程角色：
-
-```text
-hey-robot gateway
-hey-robot agent
-hey-robot skill-worker
-hey-robot robot-runtime       # 可按部署需要合并进 worker
-hey-robot model-service
-```
-
-Agent 进程构造 `NatsSkillClient`，Skill worker 构造 `NatsSkillCommandConsumer + SkillRunner`。
-两者都不构造 `SkillControllerService`。
-
 ## 12. 分 PR 实施计划
+
+### 12.0 当前迁移状态
+
+以下状态对应 2026-07-24、commit `de207f1` 加当前工作树改动，不是对未来 PR 边界的重新定义。百分比只用于说明
+剩余范围，不替代第 16 节完成定义。
+
+| 阶段 | 状态 | 估算 | 当前证据与主要缺口 |
+|---|---|---:|---|
+| PR 0：行为基线 | 本轮完成 | 100% | 本轮用现有 regression/smoke 覆盖简化主链；固定 RoboCasa/VLA benchmark 作为后续验证项 |
+| PR 1：新内核 | 完成 | 100% | models/context/registry/resources/runner 已落地；不保留 legacy adapter |
+| PR 2：直接 Skill Tool | 完成 | 100% | 每个配置 Skill 已生成独立 Tool，`inspect_scene` 同路；`ActionProposal` 已删除 |
+| PR 3：LocalClient/Worker shell | 完成 | 100% | async queue、worker、event stream 和 FileRunStore 已有 |
+| PR 4：pending step | 完成 | 100% | migration、pending/running/terminal、run_id 索引和 sequence 去重已实现 |
+| PR 5：Agent 异步切换 | 完成 | 100% | persist-submit-return、submit 失败回填、terminal resume 和 startup reconcile 已接通；Gateway/Future 已删除 |
+| PR 6：Builtin/Controller 拆分 | 完成 | 100% | perception、基础动作、安全、classic pick/place、bounded VLA/VLN loop 和 oracle simulation dock 已迁移；Controller/legacy builtin 已删除 |
+| PR 7：NATS Skill transport | 已删除 | - | 未使用的 event-driven bridge 已删除；需要跨进程 worker 时再以独立设计和部署证据重新引入 |
+| PR 8：存储收敛 | 本轮完成 | 100% | local 主链使用 task DB + run store；跨进程 receipt DB 不纳入当前简化目标 |
+| PR 9：删除旧 Skill OS | 完成 | 100% | `skill_os`、legacy catalog、legacy transport、Gateway、Controller 和旧 short/proposal DTO 已删除 |
+
+按本轮简化重构范围等权估算，代码级完成度为 **100%**。RoboCasa/VLA 固定 benchmark、真机
+长跑和跨进程 durable transport 是后续独立工作，不计入本次完成度。
 
 ### PR 0：行为基线
 
@@ -1157,8 +1149,8 @@ config/model.py
 config/validation.py
 ```
 
-这一阶段 Tool 仍生成兼容 `ActionProposal`，仍走旧 Gateway 和 Controller。验收重点仅是模型
-看到 `pick(...)` 等真实 schema，执行行为不变。
+历史迁移阶段曾要求执行行为不变；当前已完成切换，Tool 直接生成 `SkillCallProposal`，再由
+`TaskCoordinator` 提交 native `SkillCommand`。
 
 ### PR 3：LocalSkillClient 和 SkillWorker shell
 
@@ -1192,8 +1184,8 @@ submit -> accepted -> running -> progress -> terminal
 persist pending step -> submit -> release current turn
 ```
 
-terminal event 再恢复 Agent。完成后删除 `RobotExecutionGateway._waiters`，但 legacy transport
-仍可把新 command/event 映射到旧 Controller。
+terminal event 再恢复 Agent。当前 `RobotExecutionGateway._waiters`、legacy transport 和旧
+Controller 映射均已删除。
 
 ### PR 6：迁移 Builtin 和拆 Controller
 
@@ -1218,11 +1210,6 @@ foundation/catalog/loader.py
 
 完成时 Controller 只剩 legacy NATS adapter，可以重命名为 `LegacySkillWorker`。
 
-### PR 7：NATS Skill transport
-
-实现专用 JetStream adapter、worker receipt、event sequence 和 reconcile。先用 Mock Robot 做
-进程级集成测试，再切真机配置。
-
 ### PR 8：存储收敛
 
 慢系统合并为 `harness.sqlite3`，worker 使用独立 `skill_worker.sqlite3`，轨迹统一进入 run
@@ -1230,10 +1217,11 @@ foundation/catalog/loader.py
 
 ### PR 9：删除旧 Skill OS
 
-删除前要求 `rg` 不再发现生产代码引用：
+当前已删除。验收要求 `rg` 不再发现生产代码引用：
 
 ```text
 RequestSkillTool
+ActionProposal
 ShortOperationCommand
 SkillControllerService
 SkillContractRuntime
@@ -1246,12 +1234,10 @@ ModelServicePort
 随后删除：
 
 ```text
-skill_os/controller.py
-skill_os/scheduler.py
-skill_os/composition.py
-skill_os/apis.py
-skill_os/ports.py
-skill_os/runtime/
+skill_os/
+legacy_catalog.py
+skills/transport/legacy.py
+skills/transport/nats.py
 contracts/skill_contracts.py
 ```
 
@@ -1259,6 +1245,49 @@ contracts/skill_contracts.py
 旧 package。
 
 ## 13. 测试计划
+
+### 13.0 当前测试状态
+
+当前已经存在并覆盖新主干的主要测试包括：
+
+```text
+tests/skills/test_runner.py
+tests/skills/test_worker.py
+tests/skills/test_builtins.py
+tests/skills/test_builtin_safety.py
+tests/skills/test_validation.py
+tests/cognition/runtime/test_task_coordinator.py
+tests/persistence/test_run_store.py
+tests/app/test_runner.py
+tests/robot_runtime/test_clients.py
+```
+
+截至状态快照，以下计划文件尚不存在，不能把相邻单元测试视为等价替代：
+
+```text
+tests/characterization/test_agent_tool_surface.py
+tests/characterization/test_skill_message_flow.py
+tests/characterization/test_vla_manipulate_flow.py
+tests/characterization/test_task_resume.py
+tests/integration/test_local_skill_flow.py
+tests/integration/test_nats_skill_flow.py
+tests/integration/test_agent_async_resume.py
+```
+
+状态核查执行了：
+
+```bash
+uv run --no-sync python -m pytest -q \
+  tests/skills \
+  tests/cognition/runtime/test_task_coordinator.py \
+  tests/persistence/test_run_store.py \
+  tests/architecture
+```
+
+结果为 `51 passed, 1 failed`，pytest 因 first-failure 配置提前停止。失败项是
+`tests/architecture/test_robocasa_convergence.py::test_production_never_imports_evaluation_worker`：
+仓库仍存在 `evaluation/robocasa365/worker` 目录。该失败不等同于新 Skill 内核单测失败，但说明
+当前架构验收集合不是全绿，不能宣称重构验收完成。
 
 ### 13.1 新单元测试
 
@@ -1300,8 +1329,8 @@ tests/integration/test_model_service_grpc_flow.py
 tests/integration/test_robocasa365_contract.py
 ```
 
-`test_nats_skill_flow.py` 必须真实启动 NATS/JetStream，不使用 InMemoryBus 冒充 durable
-transport。
+若未来重新引入分布式 transport，`test_nats_skill_flow.py` 必须真实启动 NATS/JetStream，
+不使用 InMemoryBus 冒充 durable transport；当前该测试不属于本仓库执行链。
 
 ### 13.3 架构测试
 
@@ -1313,7 +1342,7 @@ transport。
 - Foundation backend 不导入 cognition；
 - NATS subject 只允许出现在 transport 和 operations 代码；
 - Agent Tool definitions 必须由 configured Skill 生成；
-- 生产代码不得构造 `RequestSkillTool` 或 `ShortOperationCommand`。
+- 生产代码不得构造 `RequestSkillTool`、`ActionProposal` 或 `ShortOperationCommand`。
 
 ## 14. 每个阶段的验收命令
 

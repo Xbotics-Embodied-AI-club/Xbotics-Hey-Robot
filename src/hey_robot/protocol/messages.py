@@ -126,16 +126,6 @@ class ToolOutcome:
 
 
 @dataclass(frozen=True)
-class ShortOperationCommand:
-    """一项由 Agent 提出的受限操作请求，由 Skill OS 准入并执行。"""
-
-    envelope: Envelope
-    operation_id: str
-    proposal: ActionProposal
-    timeout_sec: float = 45.0
-
-
-@dataclass(frozen=True)
 class AgentReply:
     envelope: Envelope
     text: str
@@ -249,14 +239,6 @@ class EvidenceFact:
     predicate: CriterionPredicate
     object_id: str
     artifacts: tuple[ArtifactRef | ImageRef, ...] = ()
-
-
-@dataclass(frozen=True)
-class ActionProposal:
-    intent_kind: Literal["skill", "observation"]
-    skill_name: str
-    objective: str
-    arguments: dict[str, Any]
 
 
 @dataclass(frozen=True)

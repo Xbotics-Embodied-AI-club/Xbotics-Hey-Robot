@@ -48,7 +48,7 @@ from hey_robot.protocol.messages import (
     from_payload,
     to_payload,
 )
-from hey_robot.skill_os import SkillStore
+from hey_robot.skills.lifecycle import SkillStore
 
 logger = HeyRobotLogger(name="gateway")
 _BINDING_COMMAND = re.compile(

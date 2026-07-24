@@ -6,17 +6,28 @@ from dataclasses import dataclass, field
 from hey_robot.cognition.runtime.agent_task_store import AgentTaskStore
 from hey_robot.cognition.runtime.harness_store import HarnessStore
 from hey_robot.cognition.runtime.task_coordinator import TaskCoordinator
-from hey_robot.protocol import ActionProposal, Envelope, ToolOutcome
+from hey_robot.cognition.tools.skill_tools import SkillCallProposal
+from hey_robot.protocol import Envelope, ToolOutcome
 from hey_robot.skills.models import SkillCommand, SkillEvent, SkillResult
 
 
 @dataclass
 class Client:
     commands: list[SkillCommand] = field(default_factory=list)
+    statuses: dict[str, SkillEvent] = field(default_factory=dict)
 
     async def submit(self, command: SkillCommand) -> str:
         self.commands.append(command)
         return command.run_id
+
+    async def status(self, run_id: str) -> SkillEvent | None:
+        return self.statuses.get(run_id)
+
+
+class FailingClient(Client):
+    async def submit(self, command: SkillCommand) -> str:
+        self.commands.append(command)
+        raise ConnectionError("skill worker unavailable")
 
 
 async def test_coordinator_persists_before_submit_and_applies_terminal_event(
@@ -30,7 +41,7 @@ async def test_coordinator_persists_before_submit_and_applies_terminal_event(
     coordinator = TaskCoordinator(store, client)  # type: ignore[arg-type]
     step = await coordinator.submit(
         task_id=task.task_id,
-        proposal=ActionProposal("observation", "inspect_scene", "inspect", {}),
+        proposal=SkillCallProposal("observation", "inspect_scene", "inspect", {}),
         envelope=Envelope(robot_id="robot"),
         tool_call_id="call-1",
     )
@@ -121,7 +132,7 @@ def test_task_store_lists_only_active_run_ids(tmp_path) -> None:
     )
     pending = store.add_pending_step(
         task.task_id,
-        ActionProposal("skill", "move_base", "move", {}),
+        SkillCallProposal("skill", "move_base", "move", {}),
         run_id="run-pending",
         tool_call_id="call-1",
     )
@@ -134,7 +145,7 @@ def test_task_store_lists_only_active_run_ids(tmp_path) -> None:
 
     next_pending = store.add_pending_step(
         task.task_id,
-        ActionProposal("skill", "turn_base", "turn", {}),
+        SkillCallProposal("skill", "turn_base", "turn", {}),
         run_id="run-active",
         tool_call_id="call-2",
     )
@@ -186,4 +197,61 @@ def test_harness_store_alias_uses_agent_task_store(tmp_path) -> None:
     )
 
     assert task.task_id.startswith("task_")
+    store.close()
+
+
+async def test_coordinator_marks_step_failed_when_submit_is_rejected(tmp_path) -> None:
+    store = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    task = store.create_task(
+        session_key="session", envelope=Envelope(robot_id="robot"), objective="inspect"
+    )
+    client = FailingClient()
+    coordinator = TaskCoordinator(store, client)  # type: ignore[arg-type]
+
+    step = await coordinator.submit(
+        task_id=task.task_id,
+        proposal=SkillCallProposal("observation", "inspect_scene", "inspect", {}),
+        envelope=Envelope(robot_id="robot"),
+        tool_call_id="call-1",
+    )
+
+    assert step.status == "failed"
+    assert step.outcome.data["failure_mode"] == "transport_submit_failed"
+    assert step.outcome.retryable is True
+    assert store.active_run_ids(task.task_id) == ()
+    store.close()
+
+
+async def test_coordinator_reconciles_transport_known_terminal_event(tmp_path) -> None:
+    store = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    task = store.create_task(
+        session_key="session", envelope=Envelope(robot_id="robot"), objective="inspect"
+    )
+    pending = store.start_skill_step(
+        task.task_id,
+        run_id="run-reconcile",
+        tool_call_id="call-1",
+        tool_name="inspect_scene",
+        arguments={},
+    )
+    client = Client(
+        statuses={
+            "run-reconcile": SkillEvent(
+                envelope=Envelope(robot_id="robot"),
+                run_id="run-reconcile",
+                sequence=2,
+                name="inspect_scene",
+                phase="completed",
+                timestamp=0.0,
+                result=SkillResult(True, "desk observed", "completed"),
+            )
+        }
+    )
+    coordinator = TaskCoordinator(store, client)  # type: ignore[arg-type]
+
+    reconciled = await coordinator.reconcile_active_runs()
+
+    assert [step.run_id for step in reconciled] == [pending.run_id]
+    assert reconciled[0].status == "completed"
+    assert store.active_run_ids(task.task_id) == ()
     store.close()

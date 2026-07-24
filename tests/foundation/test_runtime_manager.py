@@ -15,7 +15,7 @@ from hey_robot.foundation.clients import (
 from hey_robot.foundation.contract.v1 import model_service_pb2
 from hey_robot.foundation.transport.grpc.client import GrpcModelServiceClient
 from hey_robot.protocol import Envelope, SkillIntent
-from hey_robot.skill_os import load_skill_registry
+from hey_robot.skills import load_skill_registry, skill_contract_from_native
 
 
 def _config() -> DeploymentConfig:
@@ -46,6 +46,12 @@ def _config() -> DeploymentConfig:
                 },
             }
         }
+    )
+
+
+def _builtin_contract(name: str):
+    return skill_contract_from_native(
+        load_skill_registry(("hey_robot.skills.builtins",)).get(name)
     )
 
 
@@ -199,7 +205,7 @@ def test_mock_capability_client_records_execution_and_cancel() -> None:
     request = ServiceInvocationRequest(
         service_id="arm_vla",
         intent=intent,
-        contract=load_skill_registry().robot_skill_catalog().get("set_gripper"),
+        contract=_builtin_contract("set_gripper"),
         timeout_sec=10.0,
     )
 
@@ -289,7 +295,7 @@ def test_grpc_capability_client_maps_health_execute_and_cancel(
             ServiceInvocationRequest(
                 service_id="arm_vla",
                 intent=intent,
-                contract=load_skill_registry().robot_skill_catalog().get("set_gripper"),
+                contract=_builtin_contract("set_gripper"),
                 timeout_sec=2.0,
                 arguments={"action": "open", "camera": "front"},
             )
@@ -409,7 +415,7 @@ def test_grpc_capability_client_execute_reports_rpc_errors(
             ServiceInvocationRequest(
                 service_id="arm_vla",
                 intent=intent,
-                contract=load_skill_registry().robot_skill_catalog().get("set_gripper"),
+                contract=_builtin_contract("set_gripper"),
                 timeout_sec=2.0,
             )
         )

@@ -14,7 +14,7 @@ from hey_robot.foundation.transport.grpc.server import (
     ModelServiceState,
 )
 from hey_robot.protocol import Envelope, SkillIntent
-from hey_robot.skill_os import load_skill_registry
+from hey_robot.skills import load_skill_registry, skill_contract_from_native
 
 
 def test_deployment_style_model_service_grpc_flow(tmp_path) -> None:
@@ -103,9 +103,11 @@ def test_deployment_style_model_service_grpc_flow(tmp_path) -> None:
                 ServiceInvocationRequest(
                     service_id="arm_vla",
                     intent=intent,
-                    contract=load_skill_registry()
-                    .robot_skill_catalog()
-                    .get("set_gripper"),
+                    contract=skill_contract_from_native(
+                        load_skill_registry(("hey_robot.skills.builtins",)).get(
+                            "set_gripper"
+                        )
+                    ),
                     timeout_sec=20.0,
                 )
             )

@@ -73,6 +73,115 @@ class Models:
         return ModelInferenceResult(True, "policy action", data=self.data)
 
 
+class SequencedModels(Models):
+    def __init__(self, outputs: list[dict[str, Any]]) -> None:
+        super().__init__({})
+        self._outputs = iter(outputs)
+
+    async def infer(
+        self,
+        capability: str,
+        request: dict[str, Any],
+        *,
+        run_id: str,
+        robot_id: str,
+        timeout_sec: float | None = None,
+    ):
+        result = await super().infer(
+            capability,
+            request,
+            run_id=run_id,
+            robot_id=robot_id,
+            timeout_sec=timeout_sec,
+        )
+        return type(result)(
+            success=result.success,
+            summary=result.summary,
+            data=next(self._outputs),
+            failure_mode=result.failure_mode,
+            error=result.error,
+        )
+
+
+class FreshRobot(Robot):
+    def __init__(self) -> None:
+        super().__init__()
+        self.frame_id = 12
+
+    async def observe(self, robot_id: str) -> RobotObservation:
+        return RobotObservation(
+            Envelope(robot_id=robot_id), frame_id=self.frame_id, task="desk"
+        )
+
+    async def execute(
+        self,
+        robot_id: str,
+        action: str,
+        arguments: dict[str, Any],
+        *,
+        run_id: str,
+        expected_frame_id: int | None = None,
+    ):
+        self.frame_id += 1
+        result = await super().execute(
+            robot_id,
+            action,
+            arguments,
+            run_id=run_id,
+            expected_frame_id=expected_frame_id,
+        )
+        return RobotActionResult(
+            result.success,
+            result.summary,
+            frame_id=self.frame_id,
+            data=result.data,
+        )
+
+
+class DockRobot(Robot):
+    def __init__(self) -> None:
+        super().__init__()
+        self.held_object: str | None = None
+
+    async def execute(
+        self,
+        robot_id: str,
+        action: str,
+        arguments: dict[str, Any],
+        *,
+        run_id: str,
+        expected_frame_id: int | None = None,
+    ):
+        del expected_frame_id
+        self.calls.append((robot_id, action, arguments, run_id))
+        if action == "sim_locate_object":
+            data = {
+                "operation_success": True,
+                "samples": [[0.2, 0.1, 0.2]],
+                "grasp_axis": [0.0, 0.0, 1.0],
+            }
+        elif action == "arm_solve_position_ik":
+            data = {"operation_success": True, "joint_positions": [0.0] * 5}
+        elif action == "set_gripper":
+            if arguments.get("action") == "close":
+                self.held_object = "wand"
+            elif arguments.get("action") == "open":
+                self.held_object = None
+            data = {
+                "held_object": self.held_object,
+                "welds": {"wand": self.held_object == "wand"},
+            }
+        elif action == "sim_get_object_state":
+            data = {
+                "held_object": self.held_object,
+                "welds": {"wand": self.held_object == "wand"},
+                "dock_target": [0.04, 0.133, 0.72],
+            }
+        else:
+            data = {}
+        return RobotActionResult(True, f"{action} done", data=data)
+
+
 def _command(name: str, arguments: dict[str, Any]) -> SkillCommand:
     return SkillCommand(
         envelope=Envelope(robot_id="mock0"),
@@ -179,6 +288,94 @@ async def test_native_vla_manipulate_uses_model_router_and_robot_client() -> Non
     assert models.requests[0]["capability"] == "manipulate"
     assert models.requests[0]["request"]["observation"]["frame_id"] == 12
     assert robot.calls == [("mock0", "set_gripper", {"action": "close"}, "run-1")]
+
+
+async def test_native_vla_manipulate_reobserves_between_bounded_steps() -> None:
+    robot = FreshRobot()
+    models = SequencedModels(
+        [
+            {"action": {"name": "set_gripper", "arguments": {"action": "close"}}},
+            {
+                "action": {"name": "set_gripper", "arguments": {"action": "open"}},
+                "done": True,
+            },
+        ]
+    )
+    sink = Sink()
+
+    result = await _runner(robot, sink, models=models).execute(
+        _command("manipulate", {"task_prompt": "exercise gripper", "max_steps": 2})
+    )
+
+    assert result.success is True
+    assert result.data["termination_reason"] == "vla_done"
+    assert len(result.data["steps"]) == 2
+    assert [
+        request["request"]["observation"]["frame_id"] for request in models.requests
+    ] == [
+        12,
+        13,
+    ]
+    assert [event.phase for event in sink.events] == [
+        "accepted",
+        "running",
+        "progress",
+        "progress",
+        "completed",
+    ]
+
+
+async def test_native_vln_navigation_runs_bounded_observe_plan_act_loop() -> None:
+    robot = FreshRobot()
+    models = SequencedModels(
+        [
+            {"vln": {"mode": "pixel_goal", "pixel_goal": [240, 320]}},
+            {"vln": {"mode": "stop", "stop": True}},
+        ]
+    )
+    sink = Sink()
+
+    result = await _runner(robot, sink, models=models).execute(
+        _command("navigate_to", {"target": "desk", "max_steps": 2})
+    )
+
+    assert result.success is True
+    assert result.data["termination_reason"] == "model_stop"
+    assert [call[1] for call in robot.calls] == ["move_base", "stop_motion"]
+    assert [request["request"]["reset_policy"] for request in models.requests] == [
+        True,
+        False,
+    ]
+    assert [
+        request["request"]["observation"]["frame_id"] for request in models.requests
+    ] == [
+        12,
+        13,
+    ]
+
+
+async def test_native_dock_skills_use_robot_client_primitives() -> None:
+    robot = DockRobot()
+    sink = Sink()
+    runner = _runner(robot, sink)
+
+    picked = await runner.execute(_command("pick_wand_from_dock", {}))
+    placed = await runner.execute(
+        SkillCommand(
+            envelope=Envelope(robot_id="mock0"),
+            run_id="run-dock-place",
+            task_id="task-1",
+            robot_id="mock0",
+            name="place_wand_to_dock",
+            arguments={},
+        )
+    )
+
+    assert picked.success is True
+    assert placed.success is True
+    assert robot.held_object is None
+    assert "sim_locate_object" in [call[1] for call in robot.calls]
+    assert "sim_get_object_state" in [call[1] for call in robot.calls]
 
 
 async def test_native_tabletop_implementation_selection() -> None:

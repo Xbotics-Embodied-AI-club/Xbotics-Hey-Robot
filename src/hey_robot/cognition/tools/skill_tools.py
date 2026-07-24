@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from hey_robot.protocol import ActionProposal
 from hey_robot.skills.runner import validate_arguments
 
 
@@ -51,36 +50,13 @@ class SkillTool:
         return SkillCallProposal(intent_kind, self.name, objective, normalized)
 
 
-def skill_call_from_legacy(proposal: ActionProposal) -> SkillCallProposal:
-    return SkillCallProposal(
-        proposal.intent_kind,
-        proposal.skill_name,
-        proposal.objective,
-        dict(proposal.arguments),
-    )
-
-
-def legacy_action_proposal(proposal: SkillCallProposal) -> ActionProposal:
-    return ActionProposal(
-        proposal.intent_kind,
-        proposal.name,
-        proposal.objective,
-        dict(proposal.arguments),
-    )
-
-
-def skill_call_payload(proposal: SkillCallProposal | ActionProposal) -> dict[str, Any]:
-    call = (
-        skill_call_from_legacy(proposal)
-        if isinstance(proposal, ActionProposal)
-        else proposal
-    )
+def skill_call_payload(proposal: SkillCallProposal) -> dict[str, Any]:
     return {
-        "intent_kind": call.intent_kind,
-        "name": call.name,
-        "skill_name": call.name,
-        "objective": call.objective,
-        "arguments": dict(call.arguments),
+        "intent_kind": proposal.intent_kind,
+        "name": proposal.name,
+        "skill_name": proposal.name,
+        "objective": proposal.objective,
+        "arguments": dict(proposal.arguments),
     }
 
 

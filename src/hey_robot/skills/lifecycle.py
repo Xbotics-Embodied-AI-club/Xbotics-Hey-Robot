@@ -65,7 +65,7 @@ class SkillRecord:
 
 
 class SkillStore:
-    """仅追加的 Skill 事件存储及其物化记录。"""
+    """仅追加的 Skill event 存储及其物化记录。"""
 
     def __init__(
         self, root: str | Path = "runtime/skills", *, max_items: int = 1000

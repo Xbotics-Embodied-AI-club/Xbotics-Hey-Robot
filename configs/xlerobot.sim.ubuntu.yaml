@@ -1,40 +1,22 @@
-# XLeRobot MuJoCo simulation deployment for Ubuntu local development and testing.
-# Usage: hey-robot run --config configs/xlerobot.sim.ubuntu.yaml
-
 deployment:
   id: xlerobot.sim.ubuntu
   bus:
-    type: nats
-    url: nats://127.0.0.1:4222
+    type: in_memory
+    url: memory://xlerobot.sim.ubuntu
     options:
-      credentials:
-        agent:
-          username: agent
-          password_env: HEY_ROBOT_NATS_AGENT_PASSWORD
-        skill_controller:
-          username: skill_controller
-          password_env: HEY_ROBOT_NATS_SKILL_CONTROLLER_PASSWORD
-        robot:
-          username: robot
-          password_env: HEY_ROBOT_NATS_ROBOT_PASSWORD
-        gateway:
-          username: gateway
-          password_env: HEY_ROBOT_NATS_GATEWAY_PASSWORD
       robot_publish_hz: 2.0
       robot_status_log_every_frames: 5
-
 agent_runtime:
   enabled: true
   robot_id: sim_robot
   entity_catalog:
-    - robot:sim_robot
-    - room:living_room
-    - room:dining_room
-    - room:kitchen
-    - object:wand
-    - fixture:dock
-    - scene
-
+  - robot:sim_robot
+  - room:living_room
+  - room:dining_room
+  - room:kitchen
+  - object:wand
+  - fixture:dock
+  - scene
 logging:
   level: INFO
   theme: dark
@@ -42,7 +24,6 @@ logging:
   file_path: logs/xlerobot.sim.ubuntu/app.log
   json_file_path: logs/xlerobot.sim.ubuntu/app.jsonl
   throttle_sec: 0.0
-
 resources:
   runtime_dir: runtime/xlerobot.sim.ubuntu
   media:
@@ -53,61 +34,60 @@ resources:
     root: runtime/xlerobot.sim.ubuntu/episodes
   events:
     retain: 2000
-
 skills:
   modules:
-    - hey_robot.skill_os.builtins
+  - hey_robot.skills.builtins
   mode: bringup
-  enabled:
-    - inspect_scene
-    - look_around
-    - detect_marker
-    - move_base
-    - turn_base
-    - base_velocity_step
-    - human_follow
-    - stop_motion
-    - reset_posture
-    - set_arm_pose
-    - move_arm_joints
-    - set_gripper
-    - pick_wand_from_dock
-    - place_wand_to_dock
-
+  tools:
+  - inspect_scene
+  - look_around
+  - detect_marker
+  - move_base
+  - turn_base
+  - base_velocity_step
+  - stop_motion
+  - reset_posture
+  - set_arm_pose
+  - move_arm_joints
+  - set_gripper
+  - pick_wand_from_dock
+  - place_wand_to_dock
+  execution_mode: local
 notifications:
   defaults:
-    channels: [web]
+    channels:
+    - web
   channels:
     web: {}
     voice:
       chat_id: sim-voice
       sender_id: voice-user
     feishu:
-      chat_id: ""
+      chat_id: ''
   kinds:
     task_watchdog:
       severity: critical
-      channels: [web, feishu]
+      channels:
+      - web
+      - feishu
     proactive_message:
       severity: info
-      channels: [web]
-
+      channels:
+      - web
 identity:
   enabled: true
   unified_user_episodes: true
   bindings:
-    "cli:sender:local-user": owner
-    "web:sender:web-user": owner
-    "voice:sender:voice-user": owner
-    # Replace the Feishu open_id with your actual account after binding/inspection.
-    "feishu:sender:ou_160f4368eb2ada4edda22bd33ce435af": owner
-
+    cli:sender:local-user: owner
+    web:sender:web-user: owner
+    voice:sender:voice-user: owner
+    feishu:sender:ou_160f4368eb2ada4edda22bd33ce435af: owner
 channels:
   cli:
     type: cli
     enabled: false
     account_id: sim-dev
-    prompt: "sim-dev> "
+    prompt: 'sim-dev> '
     sender_id: local-user
     chat_id: sim-dev-local
   web:
@@ -121,23 +101,23 @@ channels:
     uvicorn_log_level: warning
   voice:
     type: voice
-    enabled: true
+    enabled: false
     account_id: sim-voice
     sender_id: voice-user
     chat_id: sim-voice
     activation:
       enabled: true
       wake_words:
-        - 小白
-        - 机器人
-        - robot
+      - 小白
+      - 机器人
+      - robot
       strip_wake_word: true
       session_timeout_sec: 60.0
       min_route_chars: 4
     tts_echo_guard_sec: 1.0
     reply_tts: true
     recorder:
-      input_device: null  # 使用系统默认输入设备（PulseAudio）。
+      input_device: null
       sample_rate: 16000
       channels: 1
       block_ms: 100
@@ -165,10 +145,10 @@ channels:
       endpoint: wss://openspeech.bytedance.com/api/v3/tts/bidirection
       encoding: pcm
       sample_rate: 16000
-      output_device: null  # 使用系统默认输出设备。
+      output_device: null
   feishu:
     type: feishu
-    enabled: true
+    enabled: false
     account_id: sim-feishu
     app_id_env: FEISHU_APP_ID
     app_secret_env: FEISHU_APP_SECRET
@@ -178,9 +158,8 @@ channels:
     reply_to_message: true
     domain: feishu
     allow_from:
-      - "*"
+    - '*'
     media_root: runtime/xlerobot.sim.ubuntu/media/feishu
-
 robots:
   sim_robot:
     type: xlerobot_sim
@@ -198,15 +177,12 @@ robots:
       angular_speed: 0.45
       viewer:
         enabled: true
-
 model_services: {}
-
 policies:
   embodied_skills:
     enabled: true
     robot_id: sim_robot
     freq_hz: 1.0
-
 agents:
   main:
     enabled: true
@@ -228,6 +204,3 @@ agents:
           api_key_env: DASHSCOPE_API_KEY
           temperature: 0.0
           max_tokens: 512
-
-
-

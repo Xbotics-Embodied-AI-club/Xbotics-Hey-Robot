@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -12,7 +13,8 @@ from hey_robot.cognition.runtime.agent_runner import (
 from hey_robot.cognition.runtime.agent_task_store import AgentTaskStore
 from hey_robot.cognition.runtime.conversation_store import ConversationStore
 from hey_robot.cognition.tools.robot import CompleteTaskProposal, ControlTaskProposal
-from hey_robot.protocol import ActionProposal, Envelope, ToolOutcome
+from hey_robot.cognition.tools.skill_tools import SkillCallProposal
+from hey_robot.protocol import Envelope, ToolOutcome
 from hey_robot.protocol.messages import to_payload
 from hey_robot.providers import ReasoningMessage
 from hey_robot.skills.models import SkillEvent, SkillResult
@@ -78,7 +80,7 @@ class _Tasks:
 
 
 def test_duplicate_observation_gate_stops_third_caption_on_same_frame() -> None:
-    observe = ActionProposal(
+    observe = SkillCallProposal(
         "observation", "inspect_scene", "find kettle", {"question": "find kettle"}
     )
     steps = [
@@ -136,10 +138,20 @@ class _Execution:
     def __init__(self, outcomes: list[ToolOutcome]) -> None:
         self.outcomes = iter(outcomes)
         self.proposals = []
+        self.tasks = None
 
-    async def execute(self, proposal, _envelope, _session_key):
+    async def submit(
+        self,
+        *,
+        task_id: str,
+        proposal: SkillCallProposal,
+        envelope: Envelope,
+        tool_call_id: str,
+        deadline_at: float | None,
+    ) -> Any:
         self.proposals.append(proposal)
-        return next(self.outcomes)
+        del envelope, tool_call_id, deadline_at
+        return self.tasks.add_step(task_id, proposal, next(self.outcomes))
 
 
 class _Templates:
@@ -184,10 +196,10 @@ class _Coordinator:
 
 @pytest.mark.asyncio
 async def test_conversation_loop_continues_after_observation_failure() -> None:
-    observe = ActionProposal(
+    observe = SkillCallProposal(
         "observation", "inspect_scene", "check ahead", {"question": "check ahead"}
     )
-    move = ActionProposal(
+    move = SkillCallProposal(
         "skill", "move_base", "move forward", {"direction": "forward"}
     )
     service = object.__new__(AutonomousAgentService)
@@ -232,6 +244,8 @@ async def test_conversation_loop_continues_after_observation_failure() -> None:
     )
     service.config = _Config()
     service.tasks = _Tasks()
+    service.execution.tasks = service.tasks
+    service.task_coordinator = service.execution
     service.completion_verifier = _CompletionVerifier()
 
     text = await service._run_conversation_loop(
@@ -260,7 +274,7 @@ async def test_conversation_loop_continues_after_observation_failure() -> None:
 
 @pytest.mark.asyncio
 async def test_conversation_loop_never_finalizes_pending_robot_outcome() -> None:
-    move = ActionProposal(
+    move = SkillCallProposal(
         "skill", "move_base", "move forward", {"direction": "forward"}
     )
     service = object.__new__(AutonomousAgentService)
@@ -287,6 +301,8 @@ async def test_conversation_loop_never_finalizes_pending_robot_outcome() -> None
     )
     service.config = _Config()
     service.tasks = _Tasks()
+    service.execution.tasks = service.tasks
+    service.task_coordinator = service.execution
     service.completion_verifier = _CompletionVerifier()
 
     text = await service._run_conversation_loop(
@@ -297,16 +313,16 @@ async def test_conversation_loop_never_finalizes_pending_robot_outcome() -> None
         "往前走走",
     )
 
-    assert text == "这次操作没有完成：机器人还没有返回最终执行结果。"
+    assert text == "已提交机器人操作，正在等待执行结果。"
     assert "等待机器人返回结果" not in text
 
 
 @pytest.mark.asyncio
 async def test_conversation_loop_tracks_every_robot_step_in_one_task() -> None:
-    move = ActionProposal(
+    move = SkillCallProposal(
         "skill", "move_base", "move forward", {"direction": "forward"}
     )
-    observe = ActionProposal(
+    observe = SkillCallProposal(
         "observation", "inspect_scene", "check result", {"question": "check result"}
     )
     service = object.__new__(AutonomousAgentService)
@@ -354,6 +370,8 @@ async def test_conversation_loop_tracks_every_robot_step_in_one_task() -> None:
     service.config = _Config()
     tasks = _Tasks()
     service.tasks = tasks
+    service.execution.tasks = tasks
+    service.task_coordinator = service.execution
     service.completion_verifier = _CompletionVerifier()
 
     text = await service._run_conversation_loop(
@@ -375,10 +393,10 @@ async def test_conversation_loop_tracks_every_robot_step_in_one_task() -> None:
 
 @pytest.mark.asyncio
 async def test_rejected_completion_keeps_driving_the_same_task() -> None:
-    move = ActionProposal(
+    move = SkillCallProposal(
         "skill", "move_base", "继续进入门内", {"direction": "forward"}
     )
-    observe = ActionProposal(
+    observe = SkillCallProposal(
         "observation", "inspect_scene", "确认是否进入", {"question": "在哪里"}
     )
     complete = CompleteTaskProposal("已经进入门内。", ("step:step-2",))
@@ -441,6 +459,8 @@ async def test_rejected_completion_keeps_driving_the_same_task() -> None:
     service.config = _Config()
     tasks = _Tasks()
     service.tasks = tasks
+    service.execution.tasks = tasks
+    service.task_coordinator = service.execution
     verifier = _CompletionVerifier([False, True])
     service.completion_verifier = verifier
 
@@ -476,7 +496,7 @@ async def test_terminal_skill_event_resumes_active_task_and_publishes_result(
         ),
         objective="检查桌面",
     )
-    proposal = ActionProposal(
+    proposal = SkillCallProposal(
         "observation", "inspect_scene", "检查桌面", {"question": "桌面上有什么"}
     )
     pending = store.add_pending_step(
@@ -556,7 +576,7 @@ async def test_control_task_cancels_active_skill_runs(tmp_path) -> None:
     )
     store.add_pending_step(
         task.task_id,
-        ActionProposal("skill", "move_base", "移动到桌边", {}),
+        SkillCallProposal("skill", "move_base", "移动到桌边", {}),
         run_id="run-active",
         tool_call_id="move-1",
     )

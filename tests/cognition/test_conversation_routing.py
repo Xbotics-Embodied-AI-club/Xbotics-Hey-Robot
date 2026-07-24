@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from hey_robot.cognition.autonomous_agent_service import _tool_outcome_context
 from hey_robot.cognition.runtime.agent_task_store import AgentTaskStore
 from hey_robot.cognition.tools.robot import (
@@ -7,22 +9,34 @@ from hey_robot.cognition.tools.robot import (
     ToolDependencies,
     ToolRegistry,
 )
-from hey_robot.protocol import (
-    ActionProposal,
-    Envelope,
-    ToolOutcome,
-)
-from hey_robot.skill_os.base import SkillCatalog, SkillSpec
+from hey_robot.cognition.tools.skill_tools import SkillCallProposal
+from hey_robot.protocol import Envelope, ToolOutcome
+from hey_robot.skills.models import Skill, SkillResult
+
+
+class SkillList:
+    def __init__(self, skills: tuple[Skill, ...]) -> None:
+        self._skills = {skill.name: skill for skill in skills}
+
+    def get(self, name: str) -> Skill:
+        return self._skills[name]
+
+    def list(self) -> tuple[Skill, ...]:
+        return tuple(self._skills.values())
+
+
+async def _noop(*_args: Any, **_kwargs: Any) -> SkillResult:
+    return SkillResult(True, "ok", "completed")
 
 
 def test_conversation_skill_does_not_upgrade_by_category() -> None:
-    catalog = SkillCatalog(
+    catalog = SkillList(
         (
-            SkillSpec(
+            Skill(
                 name="navigate_once",
                 description="bounded navigation skill",
-                category="navigation",
-                input_schema={"type": "object", "properties": {}},
+                parameters={"type": "object", "properties": {}},
+                handler=_noop,
             ),
         )
     )
@@ -35,7 +49,7 @@ def test_conversation_skill_does_not_upgrade_by_category() -> None:
 
 
 def test_complete_task_requires_evidence_ids() -> None:
-    tools = ToolRegistry(ToolDependencies(SkillCatalog(())))
+    tools = ToolRegistry(ToolDependencies(SkillList(())))
 
     proposal = tools.proposal(
         "complete_task",
@@ -47,7 +61,7 @@ def test_complete_task_requires_evidence_ids() -> None:
 
 
 def test_bounded_option_result_requires_reobservation_in_next_turn() -> None:
-    proposal = ActionProposal("skill", "manipulate", "pick up cup", {})
+    proposal = SkillCallProposal("skill", "manipulate", "pick up cup", {})
     outcome = ToolOutcome(
         "completed",
         "bounded option ended",
@@ -71,7 +85,7 @@ def test_sustained_task_completion_requires_post_motion_observation(
     )
     move = store.add_step(
         task.task_id,
-        ActionProposal("skill", "move_base", "move", {"direction": "forward"}),
+        SkillCallProposal("skill", "move_base", "move", {"direction": "forward"}),
         ToolOutcome("completed", "Base motion completed.", operation_id="move1"),
     )
 
@@ -84,7 +98,7 @@ def test_sustained_task_completion_requires_post_motion_observation(
     assert not check.accepted
     observation = store.add_step(
         task.task_id,
-        ActionProposal(
+        SkillCallProposal(
             "observation", "inspect_scene", "inspect", {"question": "inside"}
         ),
         ToolOutcome("completed", "里面有桌椅。", operation_id="obs1"),
@@ -107,7 +121,7 @@ def test_task_store_persists_pending_run_and_ignores_replayed_events(tmp_path) -
         envelope=Envelope(robot_id="sim_robot"),
         objective="inspect the desk",
     )
-    proposal = ActionProposal("observation", "inspect_scene", "inspect", {})
+    proposal = SkillCallProposal("observation", "inspect_scene", "inspect", {})
     pending = store.add_pending_step(
         task.task_id,
         proposal,

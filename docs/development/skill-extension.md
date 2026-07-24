@@ -50,7 +50,8 @@ deployment skills.modules
 ## 3. 最小 Skill
 
 ```python
-from hey_robot.skill_os import BaseSkill, SkillResult, SkillSpec
+from hey_robot.skills import BaseSkill, SkillSpec
+from hey_robot.skills.legacy_models import SkillResult
 
 
 class InspectTargetSkill(BaseSkill):
@@ -157,10 +158,10 @@ ctx.invoke         其他已注册 Skill
 模块必须暴露统一注册函数：
 
 ```python
-from hey_robot.skill_os import SkillRegistry
+from typing import Any
 
 
-def register_skills(registry: SkillRegistry) -> None:
+def register_skills(registry: Any) -> None:
     registry.register(InspectTargetSkill())
 ```
 
@@ -170,7 +171,7 @@ def register_skills(registry: SkillRegistry) -> None:
 skills:
   mode: production
   modules:
-    - hey_robot.skill_os.builtins
+    - hey_robot.skills.legacy_builtins
     - my_robot_skills
   enabled:
     - inspect_scene

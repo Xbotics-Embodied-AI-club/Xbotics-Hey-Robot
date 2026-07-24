@@ -2,9 +2,9 @@
 
 from hey_robot.skills.client import SkillClient
 from hey_robot.skills.context import SkillContext
-from hey_robot.skills.legacy_catalog import (
-    legacy_registry_from_native_config,
-    skill_spec_from_native,
+from hey_robot.skills.contracts import (
+    skill_contract_catalog_from_config,
+    skill_contract_from_native,
 )
 from hey_robot.skills.loader import load_skill_registry, registry_from_config
 from hey_robot.skills.models import (
@@ -33,9 +33,9 @@ __all__ = [
     "SkillRunner",
     "SkillSurfaceIssue",
     "SkillWorker",
-    "legacy_registry_from_native_config",
     "load_skill_registry",
     "registry_from_config",
-    "skill_spec_from_native",
+    "skill_contract_catalog_from_config",
+    "skill_contract_from_native",
     "validate_skill_surface",
 ]

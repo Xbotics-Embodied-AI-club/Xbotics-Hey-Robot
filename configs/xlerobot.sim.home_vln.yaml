@@ -59,9 +59,10 @@ resources:
 
 skills:
   modules:
-    - hey_robot.skill_os.builtins
+    - hey_robot.skills.builtins
   mode: bringup
-  enabled:
+  execution_mode: local
+  tools:
     - inspect_scene
     - look_around
     - detect_marker
@@ -188,5 +189,4 @@ agents:
           api_key_env: DASHSCOPE_API_KEY
           temperature: 0.0
           max_tokens: 512
-
 

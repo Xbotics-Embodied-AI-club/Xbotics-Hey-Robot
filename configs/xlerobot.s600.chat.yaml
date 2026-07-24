@@ -1,19 +1,17 @@
-# Main mock development deployment for autonomous runtime and channel integration.
 deployment:
   id: mock-dev
   bus:
     type: nats
     url: nats://127.0.0.1:4222
-
     options:
       robot_publish_hz: 10.0
       robot_status_log_every_frames: 5
-
 agent_runtime:
   enabled: true
   robot_id: mock0
-  entity_catalog: [robot:mock0, scene]
-
+  entity_catalog:
+  - robot:mock0
+  - scene
 logging:
   level: INFO
   theme: dark
@@ -21,7 +19,6 @@ logging:
   file_path: logs/mock-dev/app.log
   json_file_path: logs/mock-dev/app.jsonl
   throttle_sec: 0.0
-
 resources:
   runtime_dir: runtime/mock.dev
   media:
@@ -32,49 +29,48 @@ resources:
     root: runtime/mock.dev/episodes
   events:
     retain: 2000
-
 skills:
   modules:
-    - hey_robot.skill_os.builtins
+  - hey_robot.skills.builtins
   mode: bringup
-  enabled:
-    - inspect_scene
-    - look_around
-    - detect_marker
-    - human_follow
-    - stop_motion
-
+  tools:
+  - inspect_scene
+  - look_around
+  - detect_marker
+  - stop_motion
+  execution_mode: local
 notifications:
   defaults:
-    channels: [web]
+    channels:
+    - web
   channels:
     web: {}
     voice:
       chat_id: mock-voice
       sender_id: voice-user
     feishu:
-      chat_id: ""
+      chat_id: ''
   kinds:
     task_watchdog:
       severity: critical
-      channels: [web]
+      channels:
+      - web
     proactive_message:
       severity: info
-      channels: [web]
-
+      channels:
+      - web
 identity:
   enabled: true
   unified_user_episodes: true
   bindings:
-    "cli:sender:local-user": owner
-    "web:sender:eval-user": owner
-
+    cli:sender:local-user: owner
+    web:sender:eval-user: owner
 channels:
   cli:
     type: cli
     enabled: true
     account_id: mock-dev
-    prompt: "mock-dev> "
+    prompt: 'mock-dev> '
     sender_id: local-user
     chat_id: mock-dev-local
   web:
@@ -109,9 +105,8 @@ channels:
     reply_to_message: true
     domain: feishu
     allow_from:
-      - "*"
+    - '*'
     media_root: runtime/mock.dev/media/feishu
-
 robots:
   mock0:
     type: mock
@@ -144,15 +139,12 @@ robots:
     visible_after_scans:
       cup: 1
       block: 1
-
 model_services: {}
-
 policies:
   embodied_skills:
     enabled: true
     robot_id: mock0
     freq_hz: 10.0
-
 agents:
   main:
     enabled: true
@@ -161,8 +153,6 @@ agents:
     settings:
       mode: autonomous
       providers:
-        # Planner 使用 OpenAI 兼容端点；端点、模型和 key 都由环境变量提供。
-        # 配置里不写死具体网关和模型，保持和云端 profile 一致。
         planner:
           type: openai_compat
           model_env: PLANNER_LLM_MODEL
@@ -171,5 +161,3 @@ agents:
           temperature: 0.0
           max_tokens: 1024
         media_root: runtime/mock.dev/media
-
-

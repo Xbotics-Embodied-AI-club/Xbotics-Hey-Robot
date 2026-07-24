@@ -5,6 +5,11 @@ import types
 
 from hey_robot.config import DeploymentConfig
 from hey_robot.config.validation import validate_deployment
+from hey_robot.skills import Skill, SkillResult
+
+
+async def _noop_skill(_ctx, _arguments) -> SkillResult:
+    return SkillResult(True, "done", "completed")
 
 
 def test_validate_deployment_reports_missing_robot_and_policy(tmp_path) -> None:
@@ -47,7 +52,7 @@ def test_validate_deployment_creates_resource_paths(tmp_path) -> None:
                 "episodes": {"root": str(episodes_root)},
             },
             "robots": {"mock0": {"type": "mock"}},
-            "skills": {"enabled": ["inspect_scene"]},
+            "skills": {"tools": ["inspect_scene"]},
         }
     )
 
@@ -59,7 +64,7 @@ def test_validate_deployment_creates_resource_paths(tmp_path) -> None:
     assert episodes_root.exists()
 
 
-def test_validate_deployment_rejects_implementation_skill_in_production(
+def test_validate_deployment_rejects_removed_enabled_surface(
     tmp_path,
 ) -> None:
     config = DeploymentConfig.from_dict(
@@ -79,94 +84,27 @@ def test_validate_deployment_rejects_implementation_skill_in_production(
 
     issues = validate_deployment(config)
 
-    assert any("implementation-level" in issue.message for issue in issues)
-
-
-def test_validate_deployment_reports_transitive_unknown_skill_dependency(
-    tmp_path, monkeypatch
-) -> None:
-    from hey_robot.skill_os.base import BaseSkill, SkillResult, SkillSpec
-
-    module_name = "tests.fake_validation_plugin"
-    module = types.ModuleType(module_name)
-
-    class RootSkill(BaseSkill):
-        spec = SkillSpec(
-            name="root_skill",
-            description="Root skill.",
-            dependencies=("child_skill",),
-        )
-
-        async def execute(self, ctx, arguments):
-            del ctx, arguments
-            return SkillResult(success=True, summary="root")
-
-    class ChildSkill(BaseSkill):
-        spec = SkillSpec(
-            name="child_skill",
-            description="Child skill.",
-            dependencies=("missing_leaf_skill",),
-            agent_visible=False,
-        )
-
-        async def execute(self, ctx, arguments):
-            del ctx, arguments
-            return SkillResult(success=True, summary="child")
-
-    def register_skills(registry) -> None:
-        registry.register(RootSkill())
-        registry.register(ChildSkill())
-
-    setattr(module, "register_skills", register_skills)
-    monkeypatch.setitem(sys.modules, module_name, module)
-
-    config = DeploymentConfig.from_dict(
-        {
-            "resources": {
-                "runtime_dir": str(tmp_path / "runtime"),
-                "media": {"root": str(tmp_path / "media")},
-                "episodes": {"root": str(tmp_path / "episodes")},
-            },
-            "robots": {"mock0": {"type": "mock"}},
-            "skills": {
-                "modules": [module_name],
-                "enabled": ["root_skill"],
-            },
-        }
-    )
-
-    issues = validate_deployment(config)
-
-    assert any(
-        issue.message
-        == "skill root_skill references unknown dependency missing_leaf_skill"
-        for issue in issues
-    )
+    assert any("skills.enabled 已移除" in issue.message for issue in issues)
 
 
 def test_validate_deployment_rejects_unsupported_robot_family(
     tmp_path, monkeypatch
 ) -> None:
-    from hey_robot.skill_os.base import BaseSkill, SkillResult, SkillSpec
-
     module_name = "tests.fake_robot_specific_skill"
     module = types.ModuleType(module_name)
 
-    class RobotSpecificSkill(BaseSkill):
-        spec = SkillSpec(
-            name="robot_specific_skill",
-            description="Only supports another robot family.",
-            supported_robots=("other_robot",),
+    def register(registry) -> None:
+        registry.register(
+            Skill(
+                name="robot_specific_skill",
+                description="Only supports another robot family.",
+                parameters={"type": "object", "additionalProperties": True},
+                handler=_noop_skill,
+                supported_robots=("other_robot",),
+            )
         )
 
-        async def execute(self, ctx, arguments):
-            del ctx, arguments
-            return SkillResult(success=True, summary="done")
-
-    def register_skills(registry) -> None:
-        registry.register(RobotSpecificSkill())
-
-    setattr(module, "register_skills", register_skills)
+    setattr(module, "register", register)
     monkeypatch.setitem(sys.modules, module_name, module)
     config = DeploymentConfig.from_dict(
         {
@@ -178,7 +116,7 @@ def test_validate_deployment_rejects_unsupported_robot_family(
             "robots": {"robot0": {"type": "xlerobot"}},
             "skills": {
                 "modules": [module_name],
-                "enabled": ["robot_specific_skill"],
+                "tools": ["robot_specific_skill"],
             },
         }
     )
@@ -191,26 +129,21 @@ def test_validate_deployment_rejects_unsupported_robot_family(
 def test_validate_deployment_rejects_unavailable_required_model_service(
     tmp_path, monkeypatch
 ) -> None:
-    from hey_robot.skill_os.base import BaseSkill, SkillResult, SkillSpec
-
     module_name = "tests.fake_required_model_service_skill"
     module = types.ModuleType(module_name)
 
-    class ExternalCapabilitySkill(BaseSkill):
-        spec = SkillSpec(
-            name="required_model_service_skill",
-            description="Requires an external service.",
-            required_model_service="special_service",
+    def register(registry) -> None:
+        registry.register(
+            Skill(
+                name="required_model_service_skill",
+                description="Requires an external service.",
+                parameters={"type": "object", "additionalProperties": True},
+                handler=_noop_skill,
+                required_models=("special_service",),
+            )
         )
 
-        async def execute(self, ctx, arguments):
-            del ctx, arguments
-            return SkillResult(success=True, summary="done")
-
-    def register_skills(registry) -> None:
-        registry.register(ExternalCapabilitySkill())
-
-    setattr(module, "register_skills", register_skills)
+    setattr(module, "register", register)
     monkeypatch.setitem(sys.modules, module_name, module)
     config = DeploymentConfig.from_dict(
         {
@@ -222,7 +155,7 @@ def test_validate_deployment_rejects_unavailable_required_model_service(
             "robots": {"robot0": {"type": "xlerobot"}},
             "skills": {
                 "modules": [module_name],
-                "enabled": ["required_model_service_skill"],
+                "tools": ["required_model_service_skill"],
             },
         }
     )
@@ -240,41 +173,22 @@ def test_validate_deployment_rejects_unavailable_required_model_service(
 def test_validate_deployment_rejects_missing_driver_primitive(
     tmp_path, monkeypatch
 ) -> None:
-    from hey_robot.skill_os.base import BaseSkill, SkillResult, SkillSpec
-
     module_name = "tests.fake_driver_primitive_skill"
     module = types.ModuleType(module_name)
 
-    class RootSkill(BaseSkill):
-        spec = SkillSpec(
-            name="so101_root_skill",
-            description="Root skill for SO101.",
-            dependencies=("canonical_arm_primitive",),
-            supported_robots=("so101",),
+    def register(registry) -> None:
+        registry.register(
+            Skill(
+                name="so101_root_skill",
+                description="Root skill for SO101.",
+                parameters={"type": "object", "additionalProperties": True},
+                handler=_noop_skill,
+                required_actions=("set_arm_pose",),
+                supported_robots=("so101",),
+            )
         )
 
-        async def execute(self, ctx, arguments):
-            del ctx, arguments
-            return SkillResult(success=True, summary="root")
-
-    class CanonicalArmPrimitive(BaseSkill):
-        spec = SkillSpec(
-            name="canonical_arm_primitive",
-            description="Requires a canonical arm primitive.",
-            driver_primitives=("set_arm_pose",),
-            supported_robots=("so101",),
-            agent_visible=False,
-        )
-
-        async def execute(self, ctx, arguments):
-            del ctx, arguments
-            return SkillResult(success=True, summary="primitive")
-
-    def register_skills(registry) -> None:
-        registry.register(RootSkill())
-        registry.register(CanonicalArmPrimitive())
-
-    setattr(module, "register_skills", register_skills)
+    setattr(module, "register", register)
     monkeypatch.setitem(sys.modules, module_name, module)
     config = DeploymentConfig.from_dict(
         {
@@ -286,7 +200,7 @@ def test_validate_deployment_rejects_missing_driver_primitive(
             "robots": {"robot0": {"type": "so101"}},
             "skills": {
                 "modules": [module_name],
-                "enabled": ["so101_root_skill"],
+                "tools": ["so101_root_skill"],
             },
         }
     )
@@ -294,8 +208,7 @@ def test_validate_deployment_rejects_missing_driver_primitive(
     issues = validate_deployment(config)
 
     assert any(
-        "requires driver primitives set_arm_pose via canonical_arm_primitive"
-        in issue.message
+        "requires driver primitives set_arm_pose via so101_root_skill" in issue.message
         for issue in issues
     )
 
@@ -303,27 +216,22 @@ def test_validate_deployment_rejects_missing_driver_primitive(
 def test_validate_deployment_allows_configured_driver_primitive(
     tmp_path, monkeypatch
 ) -> None:
-    from hey_robot.skill_os.base import BaseSkill, SkillResult, SkillSpec
-
     module_name = "tests.fake_configured_driver_primitive_skill"
     module = types.ModuleType(module_name)
 
-    class ConfiguredPrimitiveSkill(BaseSkill):
-        spec = SkillSpec(
-            name="configured_primitive_skill",
-            description="Uses a deployment-declared primitive.",
-            driver_primitives=("custom_drive",),
-            supported_robots=("custombot",),
+    def register(registry) -> None:
+        registry.register(
+            Skill(
+                name="configured_primitive_skill",
+                description="Uses a deployment-declared primitive.",
+                parameters={"type": "object", "additionalProperties": True},
+                handler=_noop_skill,
+                required_actions=("custom_drive",),
+                supported_robots=("custombot",),
+            )
         )
 
-        async def execute(self, ctx, arguments):
-            del ctx, arguments
-            return SkillResult(success=True, summary="done")
-
-    def register_skills(registry) -> None:
-        registry.register(ConfiguredPrimitiveSkill())
-
-    setattr(module, "register_skills", register_skills)
+    setattr(module, "register", register)
     monkeypatch.setitem(sys.modules, module_name, module)
     config = DeploymentConfig.from_dict(
         {
@@ -340,7 +248,7 @@ def test_validate_deployment_allows_configured_driver_primitive(
             },
             "skills": {
                 "modules": [module_name],
-                "enabled": ["configured_primitive_skill"],
+                "tools": ["configured_primitive_skill"],
             },
         }
     )

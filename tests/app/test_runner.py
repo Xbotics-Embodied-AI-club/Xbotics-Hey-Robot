@@ -16,7 +16,7 @@ def test_deployment_runner_inspect(tmp_path: Path) -> None:
                 "media": {"root": str(tmp_path / "media")},
                 "episodes": {"root": str(tmp_path / "episodes")},
             },
-            "skills": {"enabled": ["inspect_scene", "stop_motion"]},
+            "skills": {"tools": ["inspect_scene", "stop_motion"]},
             "robots": {"mock0": {"type": "mock"}},
             "agents": {
                 "main": {
@@ -46,7 +46,9 @@ def test_deployment_runner_inspect(tmp_path: Path) -> None:
     assert "agent:main" in info["services"]
 
 
-def test_deployment_runner_composes_native_local_skill_worker(tmp_path: Path) -> None:
+def test_deployment_runner_composes_native_local_agent_without_controller(
+    tmp_path: Path,
+) -> None:
     config = DeploymentConfig.from_dict(
         {
             "deployment": {"id": "native-local"},
@@ -84,6 +86,6 @@ def test_deployment_runner_composes_native_local_skill_worker(tmp_path: Path) ->
 
     assert info["issues"] == []
     assert "robot" in info["services"]
-    assert "skill-worker:local" in info["services"]
     assert "agent:main" in info["services"]
+    assert "skill-worker:local" not in info["services"]
     assert "skill-controller" not in info["services"]

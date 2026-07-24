@@ -7,7 +7,7 @@ import sys
 from hey_robot.config import DeploymentConfig
 from hey_robot.config.validation import validate_deployment
 from hey_robot.foundation.catalog import SkillSurfaceLoader
-from hey_robot.skill_os.registry import registry_from_config
+from hey_robot.skills import skill_contract_catalog_from_config
 
 
 def _display_width(text: str) -> int:
@@ -46,7 +46,9 @@ def main() -> None:
 
     config = DeploymentConfig.from_yaml(args.config)
     if args.section == "skill-surface":
-        manifest = SkillSurfaceLoader(robot_skills=registry_from_config(config)).build()
+        manifest = SkillSurfaceLoader(
+            robot_skills=skill_contract_catalog_from_config(config, selected_only=True)
+        ).build()
         sys.stdout.write(
             json.dumps(manifest.to_dict(), ensure_ascii=False, indent=2) + "\n"
         )

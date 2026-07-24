@@ -18,10 +18,6 @@ class RuntimeSkillCatalogLike(Protocol):
     def list(self) -> tuple[Any, ...] | list[Any]: ...
 
 
-class RobotSkillRegistryLike(Protocol):
-    def robot_skill_catalog(self) -> SkillContractCatalog: ...
-
-
 class SkillSurfaceLoader:
     """根据运行时组件构建当前 Agent 的工具和 Skill 接口。"""
 
@@ -29,12 +25,7 @@ class SkillSurfaceLoader:
         self,
         *,
         tools: ToolRegistryLike | None = None,
-        robot_skills: (
-            RobotSkillRegistryLike
-            | RuntimeSkillCatalogLike
-            | SkillContractCatalog
-            | None
-        ) = None,
+        robot_skills: RuntimeSkillCatalogLike | SkillContractCatalog | None = None,
     ) -> None:
         self.tools = tools
         self.robot_skills = robot_skills
@@ -90,34 +81,6 @@ class SkillSurfaceLoader:
                     refresh_observation=_refresh_observation(item),
                 )
                 for item in self.robot_skills.list(robot_type=robot_type)
-            )
-        runtime_catalog = getattr(self.robot_skills, "catalog", None)
-        if callable(runtime_catalog):
-            try:
-                catalog = runtime_catalog(enabled_only=True)
-            except TypeError:
-                catalog = runtime_catalog()
-            return self._runtime_catalog_skills(catalog)
-        robot_skill_catalog = getattr(self.robot_skills, "robot_skill_catalog", None)
-        if callable(robot_skill_catalog):
-            catalog = robot_skill_catalog()
-            return tuple(
-                RobotSkillSurface(
-                    name=item.name,
-                    description=item.description,
-                    input_schema=item.input_schema,
-                    safety_level=item.safety_level,
-                    required_resources=item.required_resources,
-                    preconditions=item.preconditions,
-                    success_criteria=item.success_criteria,
-                    failure_modes=item.failure_modes,
-                    recovery_hints=item.recovery_hints,
-                    timeout_sec=item.timeout_sec,
-                    interruptible=item.interruptible,
-                    feedback_mode=item.feedback_mode,
-                    refresh_observation=_refresh_observation(item),
-                )
-                for item in catalog.list(robot_type=robot_type)
             )
         return self._runtime_catalog_skills(
             cast(RuntimeSkillCatalogLike, self.robot_skills)

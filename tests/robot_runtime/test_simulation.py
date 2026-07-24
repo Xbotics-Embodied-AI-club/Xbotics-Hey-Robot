@@ -128,12 +128,12 @@ class TestXLeRobotSimSkillAdapter:
             )
 
     def test_manipulate_uses_required_model_service(self) -> None:
-        from hey_robot.skill_os.builtins.manipulation import ManipulateSkill
+        from hey_robot.skills.builtins.vla import MANIPULATE
 
-        assert ManipulateSkill.spec.required_model_service == "manipulate"
+        assert MANIPULATE.required_models == ("manipulate",)
         # A native VLA action can drive base, both arms, and grippers together.
         # The semantic skill therefore owns the whole actuator boundary.
-        assert ManipulateSkill.spec.required_resources == ("robot_control", "camera")
+        assert MANIPULATE.resources == ("robot_control", "camera")
 
     def test_decode_gripper_open_close(self) -> None:
         adapter = self._adapter()

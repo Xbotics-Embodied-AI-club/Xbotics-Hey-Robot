@@ -51,7 +51,6 @@ def test_runner_builds_local_services() -> None:
 
     assert [service.name for service in runner.services] == [
         "robot",
-        "skill-controller",
         "agent:main",
         "gateway",
     ]

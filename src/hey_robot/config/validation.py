@@ -6,9 +6,7 @@ from pathlib import Path
 
 from hey_robot.config.model import DeploymentConfig, RobotSpec
 from hey_robot.robot_runtime.primitive_inventory import supported_driver_primitives
-from hey_robot.skill_os.base import SkillSpec
-from hey_robot.skill_os.registry import SkillRegistry, registry_from_config
-from hey_robot.skills import legacy_registry_from_native_config
+from hey_robot.skills import Skill, registry_from_config
 
 
 @dataclass(frozen=True)
@@ -61,18 +59,25 @@ def validate_deployment(config: DeploymentConfig) -> list[ValidationIssue]:
                 f"skills.mode must be 'production' or 'bringup', got {config.skills.mode!r}",
             )
         )
-    if config.skills.execution_mode not in {"legacy", "event_driven", "local"}:
+    if config.skills.execution_mode != "local":
         issues.append(
             ValidationIssue(
                 "error",
-                "skills.execution_mode must be 'legacy', 'event_driven', or 'local'",
+                "skills.execution_mode 只支持 'local'；legacy Skill OS 已移除",
             )
         )
-    if config.skills.tools and config.skills.enabled:
+    if not _uses_native_skill_modules(config):
         issues.append(
             ValidationIssue(
                 "error",
-                "skills.tools and legacy skills.enabled cannot both be configured",
+                "skills.modules 必须使用 native hey_robot.skills.* modules",
+            )
+        )
+    if config.skills.enabled:
+        issues.append(
+            ValidationIssue(
+                "error",
+                "skills.enabled 已移除，请使用 skills.tools",
             )
         )
     tool_names = config.skills.tool_names
@@ -94,18 +99,13 @@ def validate_deployment(config: DeploymentConfig) -> list[ValidationIssue]:
             )
         )
     try:
-        registry = (
-            legacy_registry_from_native_config(config)
-            if _uses_native_skill_modules(config)
-            else registry_from_config(config)
-        )
+        registry = registry_from_config(config)
     except Exception as exc:
         issues.append(ValidationIssue("error", f"failed to load skill modules: {exc}"))
         return issues
-    catalog = registry.catalog(enabled_only=False)
     for skill_name in tool_names:
         try:
-            contract = catalog.get(skill_name)
+            skill = registry.get(skill_name)
         except KeyError:
             issues.append(
                 ValidationIssue(
@@ -114,63 +114,30 @@ def validate_deployment(config: DeploymentConfig) -> list[ValidationIssue]:
                 )
             )
             continue
-        if config.skills.mode == "production" and not contract.agent_visible:
-            issues.append(
-                ValidationIssue(
-                    "error",
-                    f"skills.tools must list only semantic skills in production; "
-                    f"{skill_name} is implementation-level",
-                )
-            )
         skill_robots = _skill_robots(config)
-        unsupported = _unsupported_robot_families(contract, skill_robots.values())
+        unsupported = _unsupported_robot_families(skill, skill_robots.values())
         if unsupported:
             issues.append(
                 ValidationIssue(
                     "error",
                     f"skill {skill_name} supports robots "
-                    f"{','.join(contract.supported_robots)}, but deployment has "
+                    f"{','.join(skill.supported_robots)}, but deployment has "
                     f"{','.join(unsupported)}",
                 )
             )
-        if contract.required_model_service and not _has_model_service_for_skill(
-            config, contract.required_model_service
-        ):
-            issues.append(
-                ValidationIssue(
-                    "error",
-                    f"skill {skill_name} requires unavailable model service "
-                    f"{contract.required_model_service}",
-                )
+        issues.extend(
+            ValidationIssue(
+                "error",
+                f"skill {skill_name} requires unavailable model service "
+                f"{required_model}",
             )
-        for dependency in _skill_dependencies(contract, registry=registry):
-            try:
-                dependency_contract = catalog.get(dependency)
-            except KeyError:
-                issues.append(
-                    ValidationIssue(
-                        "error",
-                        f"skill {skill_name} references unknown dependency {dependency}",
-                    )
-                )
-                continue
-            if (
-                dependency_contract.required_model_service
-                and not _has_model_service_for_skill(
-                    config, dependency_contract.required_model_service
-                )
-            ):
-                issues.append(
-                    ValidationIssue(
-                        "error",
-                        f"skill {skill_name} requires unavailable model service "
-                        f"{dependency_contract.required_model_service}",
-                    )
-                )
+            for required_model in skill.required_models
+            if not _has_model_service_for_skill(config, required_model)
+        )
         issues.extend(
             _driver_primitive_issues(
                 skill_name,
-                (contract, *tuple(_dependency_contracts(contract, registry=registry))),
+                (skill,),
                 robots=skill_robots,
             )
         )
@@ -246,28 +213,13 @@ def _has_model_service_for_skill(config: DeploymentConfig, name: str) -> bool:
 
 
 def _uses_native_skill_modules(config: DeploymentConfig) -> bool:
-    return any(
-        str(module).startswith("hey_robot.skills") for module in config.skills.modules
+    return bool(config.skills.modules) and all(
+        _is_native_skill_module(str(module)) for module in config.skills.modules
     )
 
 
-def _skill_dependencies(
-    contract: SkillSpec, *, registry: SkillRegistry
-) -> tuple[str, ...]:
-    return tuple(_iter_skill_dependencies(contract, seen=set(), registry=registry))
-
-
-def _dependency_contracts(
-    contract: SkillSpec, *, registry: SkillRegistry
-) -> tuple[SkillSpec, ...]:
-    catalog = registry.catalog(enabled_only=False)
-    contracts: list[SkillSpec] = []
-    for dependency in _skill_dependencies(contract, registry=registry):
-        try:
-            contracts.append(catalog.get(dependency))
-        except KeyError:
-            continue
-    return tuple(contracts)
+def _is_native_skill_module(module: str) -> bool:
+    return not module.startswith("hey_robot.skills.legacy_builtins")
 
 
 def _skill_robots(config: DeploymentConfig) -> dict[str, RobotSpec]:
@@ -288,12 +240,12 @@ def _skill_robots(config: DeploymentConfig) -> dict[str, RobotSpec]:
 
 
 def _unsupported_robot_families(
-    contract: SkillSpec,
+    skill: Skill,
     robots: Iterable[RobotSpec],
 ) -> list[str]:
-    if not contract.supported_robots:
+    if not skill.supported_robots:
         return []
-    supported = set(contract.supported_robots)
+    supported = set(skill.supported_robots)
     return sorted(
         {robot.robot_family for robot in robots if robot.robot_family not in supported}
     )
@@ -301,23 +253,23 @@ def _unsupported_robot_families(
 
 def _driver_primitive_issues(
     skill_name: str,
-    contracts: tuple[SkillSpec, ...],
+    skills: tuple[Skill, ...],
     *,
     robots: dict[str, RobotSpec],
 ) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
-    for contract in contracts:
-        if not contract.driver_primitives:
+    for skill in skills:
+        if not skill.required_actions:
             continue
         for robot_id, robot in robots.items():
-            if contract.supported_robots and (
-                robot.robot_family not in contract.supported_robots
+            if skill.supported_robots and (
+                robot.robot_family not in skill.supported_robots
             ):
                 continue
             supported = set(supported_driver_primitives(robot))
             missing = sorted(
                 primitive
-                for primitive in contract.driver_primitives
+                for primitive in skill.required_actions
                 if primitive not in supported
             )
             if not missing:
@@ -326,28 +278,8 @@ def _driver_primitive_issues(
                 ValidationIssue(
                     "error",
                     f"skill {skill_name} requires driver primitives "
-                    f"{','.join(missing)} via {contract.name}, but robot {robot_id} "
+                    f"{','.join(missing)} via {skill.name}, but robot {robot_id} "
                     f"({robot.robot_family}/{robot.driver_kind}) does not support them",
                 )
             )
     return issues
-
-
-def _iter_skill_dependencies(
-    contract: SkillSpec, *, seen: set[str], registry: SkillRegistry
-) -> list[str]:
-    dependencies: list[str] = []
-    for dependency in contract.dependencies:
-        dependency = str(dependency).strip()
-        if not dependency or dependency in seen:
-            continue
-        seen.add(dependency)
-        dependencies.append(dependency)
-        try:
-            child = registry.catalog(enabled_only=False).get(dependency)
-        except KeyError:
-            continue
-        dependencies.extend(
-            _iter_skill_dependencies(child, seen=seen, registry=registry)
-        )
-    return dependencies

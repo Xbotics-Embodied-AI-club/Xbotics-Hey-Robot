@@ -1,16 +1,14 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
-from hey_robot.config import DeploymentConfig, validation
+from hey_robot.config import DeploymentConfig
 from hey_robot.config.validation import validate_deployment
-from hey_robot.contracts import SkillContract
 from hey_robot.episode import JsonlEpisodeStore, allocate_episode
 from hey_robot.episode.scope import DEFAULT_EPISODE_DIMENSIONS
 from hey_robot.protocol import AgentReply, Envelope, UserTurn
 from hey_robot.protocol.messages import from_payload, to_payload
-from hey_robot.skill_os.base import SkillCatalog, SkillSpec
-from hey_robot.skill_os.registry import SkillRegistry
 
 XLEROBOT_DEV_CONFIGS = (
     "configs/xlerobot.real.s600.yaml",
@@ -90,7 +88,7 @@ def test_xlerobot_runtime_configs_use_bringup_skill_surface_for_development() ->
     offenders: dict[str, list[str]] = {}
     for path in XLEROBOT_DEV_CONFIGS:
         config = DeploymentConfig.from_yaml(path)
-        missing_low_level = sorted(DEV_LOW_LEVEL_SKILLS - set(config.skills.enabled))
+        missing_low_level = sorted(DEV_LOW_LEVEL_SKILLS - set(config.skills.tools))
         if config.skills.mode != "bringup" or missing_low_level:
             offenders[path] = [
                 f"mode={config.skills.mode}",
@@ -163,6 +161,21 @@ def test_robot_runtime_does_not_depend_on_skill_os() -> None:
     assert offenders == []
 
 
+def test_production_code_does_not_import_skill_os() -> None:
+    offenders: list[str] = []
+    for path in Path("src/hey_robot").rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        imports_skill_os = (
+            re.search(r"\bfrom\s+hey_robot\.skill_os(?:\s+|\.|$)", text)
+            or re.search(r"\bimport\s+hey_robot\.skill_os(?:\s+|\.|$)", text)
+        )
+        if imports_skill_os:
+            offenders.append(str(path))
+
+    assert offenders == []
+    assert not Path("src/hey_robot/skill_os").exists()
+
+
 def test_deployment_config_loads_new_topology() -> None:
     config = DeploymentConfig.from_yaml("configs/mock.test.yaml")
 
@@ -177,16 +190,52 @@ def test_deployment_config_loads_new_topology() -> None:
     assert config.agents["main"].robot_id == "mock0"
 
 
-def test_skill_controller_settings_load_from_current_mock_config() -> None:
+def test_mock_config_uses_native_local_skill_surface() -> None:
     config = DeploymentConfig.from_yaml("configs/mock.test.yaml")
 
     policy = config.policies["embodied_skills"]
     assert policy.robot_id == "mock0"
     assert policy.freq_hz == 10.0
     assert config.skills.mode == "bringup"
-    assert config.skills.enabled[0] == "inspect_scene"
-    assert "human_follow" in config.skills.enabled
-    assert "set_gripper" not in config.skills.enabled
+    assert config.skills.execution_mode == "local"
+    assert config.skills.tools[0] == "inspect_scene"
+    assert "human_follow" not in config.skills.tools
+    assert "set_gripper" not in config.skills.tools
+
+
+def test_runtime_configs_use_native_local_surface() -> None:
+    migrated_configs = (
+        "configs/mock.test.yaml",
+        "configs/mock.dev.yaml",
+        "configs/xlerobot.sim.home_vln.yaml",
+        "configs/xlerobot.sim.ubuntu.yaml",
+        "configs/xlerobot.sim.windows.yaml",
+        "configs/xlerobot.sim.vla_vln.yaml",
+        "configs/xlerobot.real.ubuntu.yaml",
+        "configs/xlerobot.real.windows.yaml",
+        "configs/xlerobot.real.s600.yaml",
+        "configs/xlerobot.s600.chat.yaml",
+        "configs/evaluation/robocasa365.agent.yaml",
+    )
+
+    for path in migrated_configs:
+        config = DeploymentConfig.from_yaml(path)
+        assert config.skills.modules == ("hey_robot.skills.builtins",), path
+        assert config.skills.execution_mode == "local", path
+        assert config.skills.tools, path
+        assert config.skills.enabled == (), path
+        assert "human_follow" not in config.skills.tools, path
+        assert not [
+            issue for issue in validate_deployment(config) if issue.level == "error"
+        ], path
+
+
+def test_robocasa365_uses_native_inspection_only_until_vla_contract_closes() -> None:
+    config = DeploymentConfig.from_yaml("configs/evaluation/robocasa365.agent.yaml")
+
+    assert config.skills.modules == ("hey_robot.skills.builtins",)
+    assert config.skills.execution_mode == "local"
+    assert config.skills.tools == ("inspect_scene",)
 
 
 def test_deployment_validation_requires_explicit_skill_surface() -> None:
@@ -202,10 +251,10 @@ def test_deployment_validation_rejects_unknown_enabled_skill() -> None:
 
     issues = validate_deployment(config)
 
-    assert any("unknown skill missing_skill" in item.message for item in issues)
+    assert any("skills.enabled 已移除" in item.message for item in issues)
 
 
-def test_deployment_config_accepts_tools_and_rejects_ambiguous_legacy_surface() -> None:
+def test_deployment_config_accepts_tools_and_rejects_removed_enabled_surface() -> None:
     config = DeploymentConfig.from_dict({"skills": {"tools": ["inspect_scene"]}})
 
     assert config.skills.tool_names == ("inspect_scene",)
@@ -218,20 +267,22 @@ def test_deployment_config_accepts_tools_and_rejects_ambiguous_legacy_surface() 
     )
 
     assert any(
-        "cannot both be configured" in issue.message
+        "skills.enabled 已移除" in issue.message
         for issue in validate_deployment(ambiguous)
     )
 
 
-def test_deployment_config_exposes_event_driven_skill_mode() -> None:
+def test_deployment_config_rejects_removed_event_driven_skill_mode() -> None:
     config = DeploymentConfig.from_dict(
         {"skills": {"tools": ["inspect_scene"], "execution_mode": "event_driven"}}
     )
 
     assert config.skills.execution_mode == "event_driven"
-    assert not [
-        issue for issue in validate_deployment(config) if issue.level == "error"
-    ]
+    assert any(
+        "只支持 'local'" in issue.message
+        for issue in validate_deployment(config)
+        if issue.level == "error"
+    )
 
 
 def test_deployment_config_exposes_local_native_skill_mode() -> None:
@@ -249,6 +300,24 @@ def test_deployment_config_exposes_local_native_skill_mode() -> None:
     assert not [
         issue for issue in validate_deployment(config) if issue.level == "error"
     ]
+
+
+def test_deployment_validation_rejects_local_mode_with_legacy_modules() -> None:
+    config = DeploymentConfig.from_dict(
+        {
+            "skills": {
+                "modules": ["hey_robot.skills.legacy_builtins"],
+                "tools": ["inspect_scene"],
+                "execution_mode": "local",
+            }
+        }
+    )
+
+    assert any(
+        "native hey_robot.skills.* modules" in issue.message
+        for issue in validate_deployment(config)
+        if issue.level == "error"
+    )
 
 
 def test_deployment_config_exposes_skill_implementations() -> None:
@@ -311,113 +380,6 @@ def test_deployment_validation_checks_native_skill_model_dependencies() -> None:
         "requires unavailable model service manipulate" in issue.message
         for issue in validate_deployment(config)
     )
-
-
-def test_deployment_validation_rejects_implementation_skill_in_production() -> None:
-    config = DeploymentConfig.from_dict(
-        {"skills": {"mode": "production", "enabled": ["move_base"]}}
-    )
-
-    issues = validate_deployment(config)
-
-    assert any("implementation-level" in item.message for item in issues)
-
-
-def test_deployment_validation_checks_transitive_skill_dependencies(
-    monkeypatch,
-) -> None:
-    catalog = SkillCatalog(
-        (
-            SkillSpec(
-                name="public_nav",
-                description="public navigation skill",
-                category="navigation",
-                agent_visible=True,
-                dependencies=("mid_nav",),
-            ),
-            SkillSpec(
-                name="mid_nav",
-                description="intermediate implementation",
-                category="navigation",
-                agent_visible=False,
-                dependencies=("missing_leaf",),
-            ),
-        )
-    )
-    registry = SkillRegistry()
-    for contract in catalog.list():
-        registry.register_spec(contract)
-    registry = registry.configure(enabled=("public_nav",))
-    monkeypatch.setattr(validation, "registry_from_config", lambda _config: registry)
-    config = DeploymentConfig.from_dict(
-        {"skills": {"mode": "production", "enabled": ["public_nav"]}}
-    )
-
-    issues = validate_deployment(config)
-
-    assert any(
-        "skill public_nav references unknown dependency missing_leaf" in item.message
-        for item in issues
-    )
-
-
-def test_skill_spec_is_the_runtime_skill_contract() -> None:
-    spec = SkillSpec(
-        name="contract_skill",
-        description="Canonical skill contract.",
-        category="navigation",
-        input_schema={"type": "object", "required": ["target"]},
-        required_resources=("camera", "base"),
-        preconditions=("robot_online",),
-        success_criteria=("target_reached",),
-        failure_modes=("blocked",),
-        recovery_hints=("inspect_scene",),
-        driver_primitives=("move_base",),
-        required_model_service="navigate_to",
-        supported_robots=("xlerobot",),
-        safety_level="motion",
-        timeout_sec=12.5,
-        interruptible=False,
-        agent_visible=False,
-        feedback_mode="vision",
-        refresh_observation=False,
-        goal_effects=("moves_robot",),
-        evidence_outputs=("vln_result",),
-        cannot_satisfy=("weak_scene_observation",),
-    )
-    registry = SkillRegistry()
-    registry.register_spec(spec)
-
-    contract = registry.robot_skill_catalog().get("contract_skill")
-
-    assert isinstance(spec, SkillContract)
-    assert contract is spec
-    assert contract.to_dict() == {
-        "name": "contract_skill",
-        "description": "Canonical skill contract.",
-        "level": "primitive",
-        "agent_visible": False,
-        "category": "navigation",
-        "input_schema": {"type": "object", "required": ["target"]},
-        "safety_level": "motion",
-        "supported_robots": ["xlerobot"],
-        "required_model_service": "navigate_to",
-        "driver_primitives": ["move_base"],
-        "required_resources": ["camera", "base"],
-        "preconditions": ["robot_online"],
-        "success_criteria": ["target_reached"],
-        "failure_modes": ["blocked"],
-        "recovery_hints": ["inspect_scene"],
-        "timeout_sec": 12.5,
-        "interruptible": False,
-        "feedback_mode": "vision",
-        "refresh_observation": False,
-        "goal_effects": ["moves_robot"],
-        "evidence_outputs": ["vln_result"],
-        "cannot_satisfy": ["weak_scene_observation"],
-        "output_schema": {},
-        "dependencies": [],
-    }
 
 
 def test_identity_settings_load_from_mock_test_config() -> None:

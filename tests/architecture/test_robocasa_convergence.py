@@ -45,7 +45,7 @@ def test_agent_surface_has_only_generic_manipulate() -> None:
     config = DeploymentConfig.from_yaml(
         ROOT / "configs" / "evaluation" / "robocasa365.agent.yaml"
     )
-    assert config.skills.enabled == ("inspect_scene", "manipulate")
+    assert config.skills.tools == ("inspect_scene",)
     assert all(
         "robocasa_option" not in spec.provides
         for spec in config.model_services.values()

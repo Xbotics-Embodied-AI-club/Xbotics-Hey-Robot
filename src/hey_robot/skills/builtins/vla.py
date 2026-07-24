@@ -19,74 +19,148 @@ async def manipulate(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResul
             failure_mode="model_service_unavailable",
             error="model router is unavailable",
         )
-    observation = await ctx.observe()
     task_prompt = str(
         arguments.get("task_prompt") or arguments.get("objective") or "manipulate"
     )
-    result = await ctx.models.infer(
-        "manipulate",
-        {
-            **dict(arguments),
-            "task_prompt": task_prompt,
-            "observation": {
-                "frame_id": observation.frame_id,
-                "timestamp": observation.envelope.timestamp,
-                "images": [asdict(image) for image in observation.images],
-                "proprioception": list(observation.proprioception),
-                "raw": dict(observation.raw),
-            },
-            "policy_session_id": ctx.run_id,
-        },
-        run_id=ctx.run_id,
-        robot_id=ctx.robot_id,
-        timeout_sec=arguments.get("model_timeout_sec"),
-    )
-    if not result.success:
-        return SkillResult(
-            False,
-            result.summary,
-            "failed",
-            data=dict(result.data),
-            failure_mode=result.failure_mode or "vla_inference_failed",
-            error=result.error,
-        )
-    action = _action_from_model_data(result.data)
-    if action is None:
-        return SkillResult(
-            True,
-            result.summary,
-            "completed",
-            data={**dict(result.data), "requires_reobservation": True},
-        )
     if ctx.robot is None:
         return SkillResult(
             False,
             "robot client is unavailable for VLA action execution",
             "failed",
-            data=dict(result.data),
+            data={},
             failure_mode="robot_client_unavailable",
             error="robot client is unavailable",
         )
-    action_result = await ctx.robot.execute(
-        ctx.robot_id,
-        action["name"],
-        action["arguments"],
-        run_id=ctx.run_id,
-        expected_frame_id=observation.frame_id,
-    )
-    success = bool(action_result.success)
+
+    max_steps = max(1, int(arguments.get("max_steps", 1)))
+    observation = await ctx.observe()
+    before_frame_id = observation.frame_id
+    after_frame_id: int | None = None
+    executed_actions: list[dict[str, Any]] = []
+    model_outputs: list[dict[str, Any]] = []
+
+    for step_index in range(max_steps):
+        ctx.raise_if_cancelled()
+        result = await ctx.models.infer(
+            "manipulate",
+            {
+                **dict(arguments),
+                "task_prompt": task_prompt,
+                "observation": _observation_payload(observation),
+                "policy_session_id": ctx.run_id,
+                "step_index": step_index,
+                "max_steps": max_steps,
+            },
+            run_id=ctx.run_id,
+            robot_id=ctx.robot_id,
+            timeout_sec=arguments.get("model_timeout_sec"),
+        )
+        if not result.success:
+            return SkillResult(
+                False,
+                result.summary,
+                "failed",
+                data={
+                    "vla": dict(result.data),
+                    "steps": executed_actions,
+                    "before_frame_id": before_frame_id,
+                    "after_frame_id": after_frame_id,
+                },
+                failure_mode=result.failure_mode or "vla_inference_failed",
+                error=result.error,
+            )
+
+        model_data = dict(result.data)
+        model_outputs.append(model_data)
+        actions = _actions_from_model_data(model_data)
+        if not actions:
+            return _vla_result(
+                success=True,
+                summary=result.summary,
+                model_outputs=model_outputs,
+                executed_actions=executed_actions,
+                before_frame_id=before_frame_id,
+                after_frame_id=after_frame_id,
+                termination_reason="vla_done"
+                if _vla_task_done(model_data)
+                else "no_action",
+            )
+
+        for action in actions:
+            ctx.raise_if_cancelled()
+            action_result = await ctx.robot.execute(
+                ctx.robot_id,
+                action["name"],
+                action["arguments"],
+                run_id=ctx.run_id,
+                expected_frame_id=observation.frame_id,
+            )
+            executed_actions.append(
+                {
+                    "step_index": step_index,
+                    "action": action,
+                    "success": action_result.success,
+                    "summary": action_result.summary,
+                    "data": dict(action_result.data),
+                    "frame_id": action_result.frame_id,
+                }
+            )
+            if not action_result.success:
+                return _vla_result(
+                    success=False,
+                    summary=action_result.summary,
+                    model_outputs=model_outputs,
+                    executed_actions=executed_actions,
+                    before_frame_id=before_frame_id,
+                    after_frame_id=after_frame_id,
+                    termination_reason="action_failed",
+                    failure_mode=action_result.failure_mode,
+                    error=action_result.error,
+                )
+            after_frame_id = action_result.frame_id
+
+        await ctx.progress(
+            (step_index + 1) / max_steps,
+            f"VLA 已完成 bounded step {step_index + 1}/{max_steps}",
+        )
+        if _vla_task_done(model_data):
+            return _vla_result(
+                success=True,
+                summary=result.summary,
+                model_outputs=model_outputs,
+                executed_actions=executed_actions,
+                before_frame_id=before_frame_id,
+                after_frame_id=after_frame_id,
+                termination_reason="vla_done",
+            )
+
+        if step_index + 1 < max_steps:
+            observation = await _fresh_observation(ctx, observation.frame_id)
+            if observation is None:
+                return _vla_result(
+                    success=False,
+                    summary="VLA action 后未获得 fresh observation。",
+                    model_outputs=model_outputs,
+                    executed_actions=executed_actions,
+                    before_frame_id=before_frame_id,
+                    after_frame_id=after_frame_id,
+                    termination_reason="observation_stale",
+                    failure_mode="observation_stale",
+                )
+
     return SkillResult(
-        success,
-        action_result.summary,
-        "completed" if success else "failed",
+        True,
+        f"VLA reached bounded limit ({max_steps} steps).",
+        "completed",
         data={
-            **dict(result.data),
-            "action": action,
-            "action_result": dict(action_result.data),
-            "requires_reobservation": True,
+            "vla": model_outputs[-1] if model_outputs else {},
+            "vla_history": model_outputs,
+            "steps": executed_actions,
+            "termination_reason": "max_steps",
+            "before_frame_id": before_frame_id,
+            "after_frame_id": after_frame_id,
+            "requires_reobservation": bool(executed_actions),
         },
-        failure_mode=action_result.failure_mode,
-        error=action_result.error,
     )
 
 
@@ -116,22 +190,95 @@ def register(registry: SkillRegistry) -> None:
     registry.register(MANIPULATE)
 
 
-def _action_from_model_data(data: dict[str, Any]) -> dict[str, Any] | None:
-    primitive = data.get("primitive")
-    if isinstance(primitive, dict):
-        name = primitive.get("name") or primitive.get("action")
-        arguments = primitive.get("arguments", {})
-        if isinstance(name, str) and isinstance(arguments, dict):
-            return {"name": name, "arguments": dict(arguments)}
-    action = data.get("action") or data.get("native_action")
-    if isinstance(action, dict):
-        name = action.get("name") or action.get("action") or "embodiment_native_action"
-        arguments = action.get("arguments")
-        if not isinstance(arguments, dict):
-            arguments = {key: value for key, value in action.items() if key != "name"}
-        if isinstance(name, str):
-            return {"name": name, "arguments": dict(arguments)}
+def _actions_from_model_data(data: dict[str, Any]) -> list[dict[str, Any]]:
+    chunk = data.get("action_chunk")
+    if isinstance(chunk, dict):
+        actions = chunk.get("actions")
+        if isinstance(actions, list):
+            normalized = [_normalize_action(action) for action in actions]
+            return [action for action in normalized if action is not None]
+
+    action = _normalize_action(data.get("primitive"))
+    if action is not None:
+        return [action]
+    action = _normalize_action(data.get("action") or data.get("native_action"))
+    if action is not None:
+        return [action]
     values = data.get("values")
     if isinstance(values, list):
-        return {"name": "embodiment_native_action", "arguments": {"values": values}}
+        return [{"name": "embodiment_native_action", "arguments": {"values": values}}]
+    return []
+
+
+def _normalize_action(candidate: Any) -> dict[str, Any] | None:
+    if not isinstance(candidate, dict):
+        return None
+    name = candidate.get("name") or candidate.get("action")
+    arguments = candidate.get("arguments")
+    if not isinstance(arguments, dict):
+        arguments = {
+            key: value
+            for key, value in candidate.items()
+            if key not in {"name", "action", "done"}
+        }
+    if isinstance(name, str):
+        return {"name": name, "arguments": dict(arguments)}
     return None
+
+
+def _vla_task_done(data: dict[str, Any]) -> bool:
+    if bool(data.get("done")):
+        return True
+    for key in ("policy_result", "action_chunk"):
+        value = data.get(key)
+        if isinstance(value, dict) and bool(value.get("done")):
+            return True
+    return False
+
+
+def _observation_payload(observation: Any) -> dict[str, Any]:
+    return {
+        "frame_id": observation.frame_id,
+        "timestamp": observation.envelope.timestamp,
+        "images": [asdict(image) for image in observation.images],
+        "proprioception": list(observation.proprioception),
+        "raw": dict(observation.raw),
+    }
+
+
+async def _fresh_observation(ctx: SkillContext, frame_id: int):
+    """等待 fresh observation；当前 RobotClient 只保证一次新的 observe 调用。"""
+    observation = await ctx.observe()
+    if observation.frame_id <= frame_id:
+        return None
+    return observation
+
+
+def _vla_result(
+    *,
+    success: bool,
+    summary: str,
+    model_outputs: list[dict[str, Any]],
+    executed_actions: list[dict[str, Any]],
+    before_frame_id: int,
+    after_frame_id: int | None,
+    termination_reason: str,
+    failure_mode: str | None = None,
+    error: str | None = None,
+) -> SkillResult:
+    return SkillResult(
+        success,
+        summary,
+        "completed" if success else "failed",
+        data={
+            "vla": model_outputs[-1] if model_outputs else {},
+            "vla_history": model_outputs,
+            "steps": executed_actions,
+            "termination_reason": termination_reason,
+            "before_frame_id": before_frame_id,
+            "after_frame_id": after_frame_id,
+            "requires_reobservation": bool(executed_actions),
+        },
+        failure_mode=failure_mode,
+        error=error,
+    )

@@ -2,12 +2,28 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
 from hey_robot.cognition.tools.robot import ToolDependencies, ToolRegistry
-from hey_robot.skill_os.base import SkillCatalog
+from hey_robot.skills.models import Skill, SkillResult
 
 ROOT = Path(__file__).resolve().parents[2]
 COGNITION_ROOT = ROOT / "src" / "hey_robot" / "cognition"
+
+
+class SkillList:
+    def __init__(self, skills: tuple[Skill, ...]) -> None:
+        self._skills = {skill.name: skill for skill in skills}
+
+    def get(self, name: str) -> Skill:
+        return self._skills[name]
+
+    def list(self) -> tuple[Skill, ...]:
+        return tuple(self._skills.values())
+
+
+async def _noop(*_args: Any, **_kwargs: Any) -> SkillResult:
+    return SkillResult(True, "ok", "completed")
 
 
 def _cognition_source_files() -> list[Path]:
@@ -15,7 +31,7 @@ def _cognition_source_files() -> list[Path]:
 
 
 def test_robot_agent_has_one_canonical_tool_registry() -> None:
-    registry = ToolRegistry(ToolDependencies(SkillCatalog(())))
+    registry = ToolRegistry(ToolDependencies(SkillList(())))
     names = {definition["function"]["name"] for definition in registry.definitions}
     assert names == {
         "complete_task",

@@ -12,7 +12,7 @@ from hey_robot.config import DeploymentConfig
 from hey_robot.foundation.backends.vln.internvla_n1_system2 import (
     InternVLAN1System2Executor,
 )
-from hey_robot.skill_os.builtins.navigation_adapter import planner_output_to_primitive
+from hey_robot.skills.navigation_adapter import planner_output_to_primitive
 
 
 def _spec(settings: dict | None = None):

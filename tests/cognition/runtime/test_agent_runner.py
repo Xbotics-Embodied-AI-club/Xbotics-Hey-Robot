@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Any
 
 import pytest
 
@@ -11,7 +12,22 @@ from hey_robot.cognition.runtime.agent_runner import (
 )
 from hey_robot.cognition.tools.robot import ToolDependencies, ToolRegistry
 from hey_robot.providers import ReasoningMessage, ReasoningResponse, ReasoningToolCall
-from hey_robot.skill_os.base import SkillCatalog, SkillSpec
+from hey_robot.skills.models import Skill, SkillResult
+
+
+class SkillList:
+    def __init__(self, skills: tuple[Skill, ...]) -> None:
+        self._skills = {skill.name: skill for skill in skills}
+
+    def get(self, name: str) -> Skill:
+        return self._skills[name]
+
+    def list(self) -> tuple[Skill, ...]:
+        return tuple(self._skills.values())
+
+
+async def _noop(*_args: Any, **_kwargs: Any) -> SkillResult:
+    return SkillResult(True, "ok", "completed")
 
 
 class Provider:
@@ -39,14 +55,18 @@ class Provider:
 def _tools():
     return ToolRegistry(
         ToolDependencies(
-            SkillCatalog(
+            SkillList(
                 (
-                    SkillSpec(name="move", description="move"),
-                    SkillSpec(
+                    Skill(
+                        name="move",
+                        description="move",
+                        parameters={"type": "object", "properties": {}},
+                        handler=_noop,
+                    ),
+                    Skill(
                         name="inspect_scene",
                         description="inspect",
-                        category="perception",
-                        input_schema={
+                        parameters={
                             "type": "object",
                             "properties": {
                                 "question": {"type": "string", "minLength": 1}
@@ -54,6 +74,7 @@ def _tools():
                             "required": ["question"],
                             "additionalProperties": False,
                         },
+                        handler=_noop,
                     ),
                 )
             ),
