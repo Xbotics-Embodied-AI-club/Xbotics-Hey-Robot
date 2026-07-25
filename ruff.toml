@@ -131,8 +131,9 @@ ignore = [
 "src/hey_robot/robot_runtime/robocasa_remote/rpc/v1/*_pb2.pyi" = ["ALL"]
 "src/hey_robot/robot_runtime/robocasa_remote/rpc/v1/*_pb2_grpc.py" = ["ALL"]
 
-# 这是第三方协议/硬件语义映射层，字段命名需要贴近设备协议。
+# 这些文件的命名需要贴近硬件 / Feetech 协议，不适用 Python 命名规则。
 "src/hey_robot/robot_runtime/components/servo_bus.py" = ["N815"]
+"src/hey_robot/robot_runtime/components/sms_sts.py" = ["N802"]
 
 # pytest 入口需要先注入 src 路径，再导入项目模块。
 "tests/conftest.py" = ["E402"]

@@ -6,13 +6,13 @@ from typing import ClassVar
 # API so tests verify the exact hardware-adapter boundary.
 # ruff: noqa: N802, ARG005
 import pytest
+from scservo_sdk import COMM_SUCCESS
 
 from hey_robot.robot_runtime.components import servo_bus as servo_bus_module
 from hey_robot.robot_runtime.components.battery import (
     ServoBusBattery,
     ServoBusBatteryConfig,
 )
-from hey_robot.robot_runtime.components.scservo_sdk import COMM_SUCCESS
 from hey_robot.robot_runtime.components.servo_bus import ServoBus, ServoState
 
 
@@ -98,7 +98,7 @@ def fake_servo_sdk(monkeypatch):
     FakePortHandler.open_result = True
     FakePortHandler.baud_result = True
     monkeypatch.setattr(servo_bus_module, "PortHandler", FakePortHandler)
-    monkeypatch.setattr(servo_bus_module, "sms_sts", FakePacketHandler)
+    monkeypatch.setattr(servo_bus_module, "SmsSts", FakePacketHandler)
 
 
 def _connected_bus() -> tuple[ServoBus, FakePacketHandler, FakePortHandler]:

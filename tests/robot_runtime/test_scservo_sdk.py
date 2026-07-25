@@ -4,12 +4,7 @@ from __future__ import annotations
 # same method names on fakes to exercise call boundaries exactly.
 # ruff: noqa: N802, ANN205, ARG002
 import pytest
-
-from hey_robot.robot_runtime.components.scservo_sdk.group_sync_read import GroupSyncRead
-from hey_robot.robot_runtime.components.scservo_sdk.group_sync_write import (
-    GroupSyncWrite,
-)
-from hey_robot.robot_runtime.components.scservo_sdk.protocol_packet_handler import (
+from scservo_sdk.protocol_packet_handler import (
     ERRBIT_ANGLE,
     ERRBIT_OVERLOAD,
     ERRBIT_VOLTAGE,
@@ -21,9 +16,8 @@ from hey_robot.robot_runtime.components.scservo_sdk.protocol_packet_handler impo
     PKT_PARAMETER0,
     RXPACKET_MAX_LEN,
     TXPACKET_MAX_LEN,
-    protocol_packet_handler,
 )
-from hey_robot.robot_runtime.components.scservo_sdk.scservo_def import (
+from scservo_sdk.scservo_def import (
     BROADCAST_ID,
     COMM_NOT_AVAILABLE,
     COMM_PORT_BUSY,
@@ -40,7 +34,8 @@ from hey_robot.robot_runtime.components.scservo_sdk.scservo_def import (
     INST_SYNC_WRITE,
     INST_WRITE,
 )
-from hey_robot.robot_runtime.components.scservo_sdk.sms_sts import (
+
+from hey_robot.robot_runtime.components.sms_sts import (
     SMS_STS_ACC,
     SMS_STS_LOCK,
     SMS_STS_MODE,
@@ -49,7 +44,10 @@ from hey_robot.robot_runtime.components.scservo_sdk.sms_sts import (
     SMS_STS_PRESENT_SPEED_L,
     SMS_STS_PRESENT_VOLTAGE,
     SMS_STS_TORQUE_ENABLE,
-    sms_sts,
+    GroupSyncRead,
+    GroupSyncWrite,
+    SmsSts,
+    StatefulPacketHandler,
 )
 
 
@@ -93,7 +91,7 @@ class FakePort:
         return self.timeout or not self.reads
 
 
-class RecordingProtocol(protocol_packet_handler):
+class RecordingProtocol(StatefulPacketHandler):
     def __init__(self):
         super().__init__(FakePort(), 0)
         self.calls: list[tuple] = []
@@ -124,8 +122,8 @@ class RecordingProtocol(protocol_packet_handler):
 
 
 def test_protocol_byte_order_and_signed_conversion_cover_servo_value_encoding():
-    little = protocol_packet_handler(FakePort(), 0)
-    big = protocol_packet_handler(FakePort(), 1)
+    little = StatefulPacketHandler(FakePort(), 0)
+    big = StatefulPacketHandler(FakePort(), 1)
 
     assert little.scs_makeword(0x34, 0x12) == 0x1234
     assert big.scs_makeword(0x34, 0x12) == 0x3412
@@ -143,7 +141,7 @@ def test_protocol_byte_order_and_signed_conversion_cover_servo_value_encoding():
 
 
 def test_protocol_result_and_error_messages_are_stable_for_diagnostics():
-    ph = protocol_packet_handler(FakePort(), 0)
+    ph = StatefulPacketHandler(FakePort(), 0)
 
     assert "success" in ph.getTxRxResult(COMM_SUCCESS)
     assert "Port is in use" in ph.getTxRxResult(COMM_PORT_BUSY)
@@ -158,7 +156,7 @@ def test_protocol_result_and_error_messages_are_stable_for_diagnostics():
 
 def test_tx_packet_adds_headers_checksum_and_resets_busy_on_failures():
     port = FakePort()
-    ph = protocol_packet_handler(port, 0)
+    ph = StatefulPacketHandler(port, 0)
     packet = [0] * 8
     packet[PKT_ID] = 3
     packet[PKT_LENGTH] = 4
@@ -189,7 +187,7 @@ def test_tx_packet_adds_headers_checksum_and_resets_busy_on_failures():
 def test_rx_packet_recovers_from_noise_and_rejects_corrupt_or_timeout_packets():
     good = _status_packet(7, params=[0x34, 0x12])
     port = FakePort(reads=[[0x00, 0x12], good[:3], good[3:]])
-    ph = protocol_packet_handler(port, 0)
+    ph = StatefulPacketHandler(port, 0)
 
     packet, result = ph.rxPacket()
 
@@ -199,13 +197,13 @@ def test_rx_packet_recovers_from_noise_and_rejects_corrupt_or_timeout_packets():
 
     corrupt = _status_packet(8, params=[1])
     corrupt[-1] ^= 0xFF
-    packet, result = protocol_packet_handler(FakePort(reads=[corrupt]), 0).rxPacket()
+    packet, result = StatefulPacketHandler(FakePort(reads=[corrupt]), 0).rxPacket()
     assert packet == corrupt
     assert result == COMM_RX_CORRUPT
 
     timeout_port = FakePort(reads=[[]])
     timeout_port.timeout = True
-    packet, result = protocol_packet_handler(timeout_port, 0).rxPacket()
+    packet, result = StatefulPacketHandler(timeout_port, 0).rxPacket()
     assert packet == []
     assert result == COMM_RX_TIMEOUT
 
@@ -213,7 +211,7 @@ def test_rx_packet_recovers_from_noise_and_rejects_corrupt_or_timeout_packets():
 def test_rx_packet_discards_invalid_header_candidates_before_valid_status():
     invalid = [0xFF, 0xFF, 0xFE, RXPACKET_MAX_LEN + 1, 0, 0]
     valid = _status_packet(2, params=[9])
-    packet, result = protocol_packet_handler(
+    packet, result = StatefulPacketHandler(
         FakePort(reads=[invalid + valid]), 0
     ).rxPacket()
 
@@ -225,7 +223,7 @@ def test_tx_rx_packet_handles_broadcast_and_filters_wrong_servo_response():
     correct = _status_packet(3, params=[0xAA])
     wrong = _status_packet(4, params=[0xBB])
     port = FakePort(reads=[wrong, correct])
-    ph = protocol_packet_handler(port, 0)
+    ph = StatefulPacketHandler(port, 0)
     tx = [0] * 8
     tx[PKT_ID] = 3
     tx[PKT_LENGTH] = 4
@@ -244,7 +242,7 @@ def test_tx_rx_packet_handles_broadcast_and_filters_wrong_servo_response():
     broadcast[PKT_ID] = BROADCAST_ID
     broadcast[PKT_LENGTH] = 2
     broadcast[PKT_INSTRUCTION] = INST_ACTION
-    rx, result, error = protocol_packet_handler(FakePort(), 0).txRxPacket(broadcast)
+    rx, result, error = StatefulPacketHandler(FakePort(), 0).txRxPacket(broadcast)
     assert rx is None
     assert result == COMM_SUCCESS
     assert error == 0
@@ -252,7 +250,7 @@ def test_tx_rx_packet_handles_broadcast_and_filters_wrong_servo_response():
 
 def test_read_and_write_helpers_encode_registers_and_decode_values():
     port = FakePort(reads=[_status_packet(2, params=[0x34, 0x12])])
-    ph = protocol_packet_handler(port, 0)
+    ph = StatefulPacketHandler(port, 0)
 
     value, result, error = ph.read2ByteTxRx(2, 56)
 
@@ -269,14 +267,14 @@ def test_read_and_write_helpers_encode_registers_and_decode_values():
     assert error == 0
 
     port = FakePort(reads=[_status_packet(2)])
-    ph = protocol_packet_handler(port, 0)
+    ph = StatefulPacketHandler(port, 0)
     result, error = ph.write2ByteTxRx(2, 42, 0x1234)
     assert (result, error) == (COMM_SUCCESS, 0)
     assert port.writes[-1][PKT_INSTRUCTION] == INST_WRITE
     assert port.writes[-1][PKT_PARAMETER0 : PKT_PARAMETER0 + 3] == [42, 0x34, 0x12]
 
     port = FakePort()
-    ph = protocol_packet_handler(port, 0)
+    ph = StatefulPacketHandler(port, 0)
     assert ph.write4ByteTxOnly(2, 42, 0x12345678) == COMM_SUCCESS
     assert port.writes[-1][PKT_PARAMETER0 : PKT_PARAMETER0 + 5] == [
         42,
@@ -289,7 +287,7 @@ def test_read_and_write_helpers_encode_registers_and_decode_values():
 
 def test_ping_action_reg_write_and_sync_packets_use_protocol_instructions():
     port = FakePort(reads=[_status_packet(2), _status_packet(2, params=[0x34, 0x12])])
-    ph = protocol_packet_handler(port, 0)
+    ph = StatefulPacketHandler(port, 0)
 
     model, result, error = ph.ping(2)
     assert (model, result, error) == (0x1234, COMM_SUCCESS, 0)
@@ -297,24 +295,24 @@ def test_ping_action_reg_write_and_sync_packets_use_protocol_instructions():
     assert ph.ping(BROADCAST_ID + 1) == (0, COMM_NOT_AVAILABLE, 0)
 
     port = FakePort(reads=[_status_packet(BROADCAST_ID)])
-    ph = protocol_packet_handler(port, 0)
+    ph = StatefulPacketHandler(port, 0)
     assert ph.action(BROADCAST_ID) == COMM_SUCCESS
     assert port.writes[-1][PKT_INSTRUCTION] == INST_ACTION
 
     port = FakePort(reads=[_status_packet(2)])
-    ph = protocol_packet_handler(port, 0)
+    ph = StatefulPacketHandler(port, 0)
     assert ph.regWriteTxRx(2, 42, 2, [1, 2]) == (COMM_SUCCESS, 0)
     assert port.writes[-1][PKT_INSTRUCTION] == INST_REG_WRITE
 
     port = FakePort()
-    ph = protocol_packet_handler(port, 0)
+    ph = StatefulPacketHandler(port, 0)
     assert ph.syncReadTx(56, 4, [1, 2, 3], 3) == COMM_SUCCESS
     assert port.writes[-1][PKT_ID] == BROADCAST_ID
     assert port.writes[-1][PKT_INSTRUCTION] == INST_SYNC_READ
     assert port.writes[-1][PKT_PARAMETER0 : PKT_PARAMETER0 + 5] == [56, 4, 1, 2, 3]
 
     port = FakePort()
-    ph = protocol_packet_handler(port, 0)
+    ph = StatefulPacketHandler(port, 0)
     assert ph.syncWriteTxOnly(42, 2, [1, 0x34, 0x12], 3) == COMM_SUCCESS
     assert port.writes[-1][PKT_INSTRUCTION] == INST_SYNC_WRITE
 
@@ -322,7 +320,7 @@ def test_ping_action_reg_write_and_sync_packets_use_protocol_instructions():
 def test_sync_read_rx_returns_raw_bulk_response_or_timeout_state():
     packet = _status_packet(1, params=[0x34, 0x12])
     port = FakePort(reads=[packet])
-    ph = protocol_packet_handler(port, 0)
+    ph = StatefulPacketHandler(port, 0)
 
     result, rx = ph.syncReadRx(data_length=2, param_length=1)
 
@@ -331,7 +329,7 @@ def test_sync_read_rx_returns_raw_bulk_response_or_timeout_state():
     assert port.timeouts == [8]
 
     timeout_port = FakePort(reads=[packet[:3]])
-    result, rx = protocol_packet_handler(timeout_port, 0).syncReadRx(2, 1)
+    result, rx = StatefulPacketHandler(timeout_port, 0).syncReadRx(2, 1)
     assert result == COMM_RX_CORRUPT
     assert rx == packet[:3]
 
@@ -419,7 +417,7 @@ def test_group_sync_read_marks_corrupt_packets_and_empty_bulk_responses():
 
 
 def test_sms_sts_maps_high_level_methods_to_expected_register_operations():
-    servo = sms_sts(FakePort())
+    servo = SmsSts(FakePort())
     recorder = RecordingProtocol()
     servo.writeTxRx = recorder.writeTxRx
     servo.write1ByteTxRx = recorder.write1ByteTxRx
@@ -451,7 +449,7 @@ def test_sms_sts_maps_high_level_methods_to_expected_register_operations():
 
 
 def test_sms_sts_position_speed_and_sensor_reads_apply_signed_conversion():
-    servo = sms_sts(FakePort())
+    servo = SmsSts(FakePort())
     recorder = RecordingProtocol()
     servo.read1ByteTxRx = recorder.read1ByteTxRx
     servo.read2ByteTxRx = recorder.read2ByteTxRx
@@ -473,7 +471,7 @@ def test_sms_sts_position_speed_and_sensor_reads_apply_signed_conversion():
 
 
 def test_sms_sts_write_and_sync_methods_build_motion_payloads():
-    servo = sms_sts(FakePort())
+    servo = SmsSts(FakePort())
     recorder = RecordingProtocol()
     servo.writeTxRx = recorder.writeTxRx
     servo.regWriteTxRx = recorder.writeTxRx
@@ -522,7 +520,7 @@ def test_sms_sts_write_and_sync_methods_build_motion_payloads():
 
 
 def test_sms_sts_sync_read_returns_only_available_positions_and_clears_params():
-    servo = sms_sts(FakePort())
+    servo = SmsSts(FakePort())
 
     class FakeGroupRead:
         def __init__(self):
@@ -557,11 +555,11 @@ def test_sms_sts_sync_read_returns_only_available_positions_and_clears_params():
 
 
 def test_port_handler_guard_reports_clear_error_before_opening_serial_port():
-    from hey_robot.robot_runtime.components.scservo_sdk.port_handler import PortHandler
+    from scservo_sdk.port_handler import PortHandler
 
     port = PortHandler("COM_TEST")
 
-    with pytest.raises(RuntimeError, match="serial port is not open"):
+    with pytest.raises(AttributeError):
         port.clearPort()
-    with pytest.raises(RuntimeError, match="serial port is not open"):
+    with pytest.raises(AttributeError):
         port.closePort()

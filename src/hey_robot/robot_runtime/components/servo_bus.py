@@ -6,9 +6,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
-from hey_robot.robot_runtime.components.scservo_sdk import (
-    BROADCAST_ID,
-    COMM_SUCCESS,
+from scservo_sdk import BROADCAST_ID, COMM_SUCCESS, PortHandler
+
+from hey_robot.robot_runtime.components.sms_sts import (
     SMS_STS_LOCK,
     SMS_STS_MAX_ANGLE_LIMIT_H,
     SMS_STS_MAX_ANGLE_LIMIT_L,
@@ -16,8 +16,7 @@ from hey_robot.robot_runtime.components.scservo_sdk import (
     SMS_STS_MIN_ANGLE_LIMIT_L,
     SMS_STS_MODE,
     SMS_STS_TORQUE_ENABLE,
-    PortHandler,
-    sms_sts,
+    SmsSts,
 )
 
 
@@ -76,7 +75,7 @@ class ServoBus:
                 self._port_handler = None
                 return False
             self._packet_handler = cast(
-                _PacketHandlerProtocol, sms_sts(self._port_handler)
+                _PacketHandlerProtocol, SmsSts(self._port_handler)
             )
             self._connected = True
             return True
@@ -97,7 +96,7 @@ class ServoBus:
                 return False
             packet_handler = self._require_packet_handler()
             _model, comm_result, _error = packet_handler.ping(servo_id)
-            return comm_result == COMM_SUCCESS
+            return comm_result == COMM_SUCCESS  # type: ignore[no-any-return]
 
     def torque_enable(self, servo_id: int = -1) -> bool:
         target = BROADCAST_ID if servo_id == -1 else servo_id
@@ -135,7 +134,7 @@ class ServoBus:
             speed = max(-32767, min(32767, int(speed)))
             packet_handler = self._require_packet_handler()
             comm_result, _error = packet_handler.WriteSpec(servo_id, speed, acc)
-            return comm_result == COMM_SUCCESS
+            return comm_result == COMM_SUCCESS  # type: ignore[no-any-return]
 
     def write_position(
         self, servo_id: int, position: int, speed: int, acc: int
@@ -148,7 +147,7 @@ class ServoBus:
             comm_result, _error = packet_handler.WritePosEx(
                 servo_id, position, int(speed), int(acc)
             )
-            return comm_result == COMM_SUCCESS
+            return comm_result == COMM_SUCCESS  # type: ignore[no-any-return]
 
     def sync_write_positions(self, positions: dict[int, tuple[int, int, int]]) -> bool:
         with self._lock:
@@ -199,7 +198,7 @@ class ServoBus:
             comm_result, _error = packet_handler.write1ByteTxRx(
                 servo_id, address, int(value)
             )
-            return comm_result == COMM_SUCCESS
+            return comm_result == COMM_SUCCESS  # type: ignore[no-any-return]
 
     def _read(self, method: str, servo_id: int) -> int | None:
         with self._lock:
