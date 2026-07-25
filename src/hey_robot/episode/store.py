@@ -4,7 +4,6 @@ import json
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Protocol
 
 from hey_robot.episode.scope import EpisodeScope, scope_to_dict
 from hey_robot.protocol.messages import AgentReply, UserTurn, to_payload
@@ -16,18 +15,6 @@ class EpisodeRecord:
     content: str
     timestamp: float
     payload: dict
-
-
-class EpisodeStore(Protocol):
-    def ensure(
-        self, episode_id: str, scope: EpisodeScope, aliases: list[str]
-    ) -> None: ...
-
-    def append_user_turn(self, episode_id: str, turn: UserTurn) -> None: ...
-
-    def append_agent_reply(self, episode_id: str, reply: AgentReply) -> None: ...
-
-    def history(self, episode_id: str, *, limit: int = 50) -> list[EpisodeRecord]: ...
 
 
 @dataclass

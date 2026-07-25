@@ -18,8 +18,3 @@ class BusEventPublisher:
 
     async def publish(self, event: RuntimeEvent) -> None:
         await self.bus.publish(self.topics.runtime_event, event.to_dict())
-
-
-class NullEventPublisher:
-    async def publish(self, _event: RuntimeEvent) -> None:
-        return None

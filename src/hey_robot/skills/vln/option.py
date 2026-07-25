@@ -35,7 +35,6 @@ class VLNOptionResult:
                 "steps": list(self.steps),
                 "termination_reason": self.termination_reason,
                 "command": self.command,
-                "requires_reobservation": bool(self.steps),
             },
             failure_mode=self.failure_mode,
             error=self.error,

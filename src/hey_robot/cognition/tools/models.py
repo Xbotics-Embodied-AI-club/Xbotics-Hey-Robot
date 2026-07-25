@@ -48,7 +48,6 @@ class SkillCallProposal:
 @dataclass(frozen=True)
 class CompleteTaskProposal:
     recap: str
-    evidence_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -119,7 +118,3 @@ class HarnessTool:
     def prepare(self, arguments: dict[str, Any]) -> HarnessToolCall:
         normalized = validate_arguments(self.spec.parameters, arguments)
         return HarnessToolCall(self.name, normalized, self._handler)
-
-    def proposal(self, arguments: dict[str, Any]) -> HarnessToolCall:
-        """Compatibility alias while callers migrate to ``prepare``."""
-        return self.prepare(arguments)

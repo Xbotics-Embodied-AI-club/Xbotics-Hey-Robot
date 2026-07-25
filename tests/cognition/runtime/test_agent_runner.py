@@ -10,7 +10,7 @@ from hey_robot.cognition.runtime.agent_runner import (
     AgentRunner,
     AgentTurnRequest,
 )
-from hey_robot.cognition.tools.robot import ToolDependencies, ToolRegistry
+from hey_robot.cognition.tools.registry import ToolDependencies, ToolRegistry
 from hey_robot.model import ModelMessage, ModelResponse, ModelToolCall
 from hey_robot.skills.models import Skill, SkillResult
 

@@ -105,6 +105,16 @@ class ConversationTurn:
     session_key: str
     interaction_id: str
     text: str
+    kind: Literal["prompt", "steer"] = "prompt"
+
+
+@dataclass(frozen=True)
+class AgentControl:
+    envelope: Envelope
+    session_key: str
+    interaction_id: str
+    action: Literal["pause", "resume", "cancel", "emergency_stop"]
+    reason: str = ""
 
 
 @dataclass(frozen=True)

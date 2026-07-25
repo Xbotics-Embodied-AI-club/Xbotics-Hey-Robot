@@ -4,50 +4,12 @@ import json
 import re
 from typing import Any
 
-from hey_robot.notifications import (
-    is_notification,
-    notification_kind,
-    notification_severity,
-)
 from hey_robot.protocol import AgentReply
 
 
 def format_outbound_reply(reply: AgentReply) -> tuple[str, str]:
     text = (reply.text or "").strip()
-    if not is_notification(reply):
-        return format_outbound_message(text)
-    severity = notification_severity(reply)
-    kind = notification_kind(reply).replace("_", " ")
-    strategy = str(reply.metadata.get("recovery_strategy") or "").strip()
-    next_step = str(reply.metadata.get("recovery_next_step") or "").strip()
-    active_task = str(reply.metadata.get("active_task") or "").strip()
-    continuation_goal = str(reply.metadata.get("continuation_goal") or "").strip()
-    elements = [
-        {"tag": "markdown", "content": f"**{kind}**"},
-        {"tag": "markdown", "content": text or kind},
-    ]
-    if active_task:
-        elements.append({"tag": "markdown", "content": f"**当前任务：** {active_task}"})
-    if strategy:
-        elements.append({"tag": "markdown", "content": f"**恢复策略：** `{strategy}`"})
-    if next_step:
-        elements.append({"tag": "markdown", "content": f"**下一步：** {next_step}"})
-    if continuation_goal and continuation_goal != active_task:
-        elements.append(
-            {"tag": "markdown", "content": f"**恢复后继续：** {continuation_goal}"}
-        )
-    card = {
-        "config": {"wide_screen_mode": True},
-        "header": {
-            "template": notification_template(severity),
-            "title": {
-                "tag": "plain_text",
-                "content": f"{severity.upper()} notification",
-            },
-        },
-        "elements": elements,
-    }
-    return "interactive", json.dumps(card, ensure_ascii=False)
+    return format_outbound_message(text)
 
 
 def format_outbound_message(text: str) -> tuple[str, str]:
@@ -77,14 +39,6 @@ def detect_msg_format(content: str) -> str:
     if len(stripped) <= 4000 and "```" not in stripped and stripped.count("\n") <= 20:
         return "post"
     return "card"
-
-
-def notification_template(severity: str) -> str:
-    return {
-        "critical": "red",
-        "warning": "yellow",
-        "info": "blue",
-    }.get(severity, "blue")
 
 
 def markdown_to_post(content: str) -> str:

@@ -9,14 +9,6 @@ deployment:
 agent_runtime:
   enabled: true
   robot_id: sim_robot
-  entity_catalog:
-  - robot:sim_robot
-  - room:living_room
-  - room:dining_room
-  - room:kitchen
-  - object:wand
-  - fixture:dock
-  - scene
 logging:
   level: INFO
   theme: dark
@@ -53,27 +45,6 @@ skills:
   - pick_wand_from_dock
   - place_wand_to_dock
   execution_mode: local
-notifications:
-  defaults:
-    channels:
-    - web
-  channels:
-    web: {}
-    voice:
-      chat_id: sim-voice
-      sender_id: voice-user
-    feishu:
-      chat_id: ''
-  kinds:
-    task_watchdog:
-      severity: critical
-      channels:
-      - web
-      - feishu
-    proactive_message:
-      severity: info
-      channels:
-      - web
 identity:
   enabled: true
   unified_user_episodes: true

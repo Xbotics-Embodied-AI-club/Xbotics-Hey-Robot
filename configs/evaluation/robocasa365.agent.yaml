@@ -22,9 +22,7 @@ agent_runtime:
   enabled: true
   robot_id: robocasa365
   hard_max_wall_time_sec: 7200
-  hard_max_continuations: 40
   hard_max_skills: 220
-  skill_result_timeout_sec: 1800
 channels:
   web:
     type: web

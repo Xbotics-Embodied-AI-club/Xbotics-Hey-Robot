@@ -301,7 +301,6 @@ async def test_native_vla_manipulate_uses_model_router_and_robot_client() -> Non
     )
 
     assert result.success is True
-    assert result.data["requires_reobservation"] is True
     assert result.data["option_completed"] is True
     assert result.data["subgoal_succeeded"] is None
     assert models.requests[0]["capability"] == "manipulate"

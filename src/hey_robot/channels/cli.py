@@ -7,7 +7,6 @@ import time
 from hey_robot.channels.base import ChannelContext, InboundHandler
 from hey_robot.events import RuntimeEvent
 from hey_robot.logging import HeyRobotLogger
-from hey_robot.notifications import format_notification_text
 from hey_robot.protocol import AgentReply, Envelope, UserTurn
 
 logger = HeyRobotLogger(name="cli")
@@ -47,12 +46,12 @@ class CLIChannel:
             if reply.text.startswith(streamed):
                 sys.stdout.write(f"{reply.text[len(streamed) :]}\n")
             elif reply.text != streamed:
-                sys.stdout.write(f"\n{prefix}> {format_notification_text(reply)}\n")
+                sys.stdout.write(f"\n{prefix}> {reply.text}\n")
             else:
                 sys.stdout.write("\n")
             sys.stdout.flush()
             return
-        sys.stdout.write(f"{prefix}> {format_notification_text(reply)}\n")
+        sys.stdout.write(f"{prefix}> {reply.text}\n")
 
     async def on_event(self, _event: RuntimeEvent) -> None:
         return None

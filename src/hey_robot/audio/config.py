@@ -137,8 +137,6 @@ def voice_config_from_settings(settings: dict[str, Any]) -> VoiceAudioConfig:
     recorder_data = dict(settings.get("recorder", {}) or {})
     asr_data = dict(settings.get("asr", {}) or {})
     tts_data = dict(settings.get("tts", {}) or {})
-    _apply_alias(tts_data, source="access_token_env", target="api_key_env")
-    _apply_alias(tts_data, source="appid_env", target="api_key_env")
     return VoiceAudioConfig(
         sender_id=str(settings.get("sender_id", "voice-user")),
         chat_id=str(settings.get("chat_id", "xlerobot-voice")),
@@ -156,11 +154,6 @@ def voice_config_from_settings(settings: dict[str, Any]) -> VoiceAudioConfig:
         asr=ASRConfig(**_known_fields(ASRConfig, asr_data)),
         tts=TTSConfig(**_known_fields(TTSConfig, tts_data)),
     )
-
-
-def _apply_alias(data: dict[str, Any], *, source: str, target: str) -> None:
-    if source in data and target not in data:
-        data[target] = data[source]
 
 
 def _known_fields(cls: type, data: dict[str, Any]) -> dict[str, Any]:

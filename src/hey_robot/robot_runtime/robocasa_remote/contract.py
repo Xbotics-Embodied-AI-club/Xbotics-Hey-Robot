@@ -70,6 +70,3 @@ def load_manifest(path: str | Path) -> dict[str, Any]:
         "suites": {str(name): list(values) for name, values in suites.items()},
         "tasks": sorted(tasks),
     }
-
-
-from pathlib import Path

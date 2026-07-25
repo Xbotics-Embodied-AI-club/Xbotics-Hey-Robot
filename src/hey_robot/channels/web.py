@@ -91,19 +91,6 @@ class WebChannel:
         async def chat_page() -> HTMLResponse:
             return self._chat_html_response()  # type: ignore[no-any-return]
 
-        # 旧路由：重定向到新聊天入口
-        @app.get("/console", response_class=RedirectResponse)
-        async def console_page() -> RedirectResponse:
-            return RedirectResponse(url="/chat")
-
-        @app.get("/control", response_class=RedirectResponse)
-        async def control_page() -> RedirectResponse:
-            return RedirectResponse(url="/chat")
-
-        @app.get("/account", response_class=RedirectResponse)
-        async def account_page() -> RedirectResponse:
-            return RedirectResponse(url="/chat")
-
         @app.get("/admin", response_class=HTMLResponse)
         async def admin_page() -> HTMLResponse:
             return self._views_html_response("admin", "index.html")  # type: ignore[no-any-return]

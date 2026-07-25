@@ -5,6 +5,7 @@ from typing import cast
 
 import pytest
 
+from hey_robot.cognition.tools.skill_tools import SkillCallProposal
 from hey_robot.config import DeploymentConfig
 from hey_robot.episode.scope import EpisodeScope
 from hey_robot.events import EventKind, RuntimeEvent
@@ -305,12 +306,11 @@ def test_gateway_web_cockpit_exposes_sustained_task_view(tmp_path) -> None:
         envelope=Envelope(robot_id="mock0"),
         objective="follow me",
     )
-    step = gateway.task_store.start_skill_step(
+    step = gateway.task_store.add_pending_step(
         task.task_id,
+        SkillCallProposal("observation", "inspect_scene", "inspect", {}),
         run_id="run-1",
         tool_call_id="call-1",
-        tool_name="inspect_scene",
-        arguments={},
     )
     gateway.run_store.record_submission(
         HarnessSkillCommand(
@@ -737,7 +737,7 @@ def test_gateway_start_and_stop_publish_lifecycle_and_manage_channels(
     assert any(event["kind"] == "gateway.shutdown" for event in stopped)
 
 
-def test_gateway_routes_natural_confirmation_to_agent(tmp_path) -> None:
+def test_gateway_routes_natural_confirmation_to_typed_resume(tmp_path) -> None:
     gateway = _gateway(tmp_path)
     asyncio.run(
         gateway._on_user_turn(
@@ -751,6 +751,6 @@ def test_gateway_routes_natural_confirmation_to_agent(tmp_path) -> None:
     confirmations = [
         payload
         for topic, payload in fake_bus.published
-        if topic == gateway.topics.conversation_turn and payload["text"] == "confirm"
+        if topic == gateway.topics.agent_control and payload["action"] == "resume"
     ]
     assert len(confirmations) == 1

@@ -380,29 +380,6 @@ def test_identity_settings_load_from_mock_test_config() -> None:
     assert config.identity.bindings["voice:sender:voice-user"] == "owner"
 
 
-def test_notification_settings_load_from_root_section() -> None:
-    config = DeploymentConfig.from_dict(
-        {
-            "notifications": {
-                "defaults": {"channels": ["web"]},
-                "channels": {
-                    "voice": {"chat_id": "voice-room", "sender_id": "voice-user"}
-                },
-                "kinds": {
-                    "task_watchdog": {
-                        "severity": "critical",
-                        "channels": ["web", "voice"],
-                    }
-                },
-            }
-        }
-    )
-
-    assert config.notifications.defaults["channels"] == ["web"]
-    assert config.notifications.channels["voice"]["chat_id"] == "voice-room"
-    assert config.notifications.kinds["task_watchdog"]["severity"] == "critical"
-
-
 def test_default_agent_robot_and_episode_allocation_are_stable(tmp_path: Path) -> None:
     config = DeploymentConfig.from_yaml("configs/mock.test.yaml")
     turn = UserTurn(

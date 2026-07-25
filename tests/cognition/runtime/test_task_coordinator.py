@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass, field
+
+import pytest
 
 from hey_robot.cognition.runtime.agent_task_store import AgentTaskStore
 from hey_robot.cognition.runtime.task_coordinator import TaskCoordinator
@@ -68,6 +69,32 @@ async def test_coordinator_persists_before_submit_and_applies_terminal_event(
     store.close()
 
 
+async def test_coordinator_rejects_second_concurrent_skill_run(tmp_path) -> None:
+    store = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    task = store.create_task(
+        session_key="session", envelope=Envelope(robot_id="robot"), objective="move"
+    )
+    store.add_pending_step(
+        task.task_id,
+        SkillCallProposal("skill", "move_base", "move", {}),
+        run_id="run-active",
+        tool_call_id="call-1",
+    )
+    client = Client()
+    coordinator = TaskCoordinator(store, client)  # type: ignore[arg-type]
+
+    with pytest.raises(RuntimeError, match="already has an active skill run"):
+        await coordinator.submit(
+            task_id=task.task_id,
+            proposal=SkillCallProposal("skill", "turn_base", "turn", {}),
+            envelope=Envelope(robot_id="robot"),
+            tool_call_id="call-2",
+        )
+
+    assert client.commands == []
+    store.close()
+
+
 async def test_environment_done_converges_step_and_task_terminal_state(
     tmp_path,
 ) -> None:
@@ -109,64 +136,6 @@ async def test_environment_done_converges_step_and_task_terminal_state(
     store.close()
 
 
-def test_task_store_migrates_legacy_task_route_columns(tmp_path) -> None:
-    path = tmp_path / "legacy.sqlite3"
-    db = sqlite3.connect(path)
-    db.execute(
-        """
-        CREATE TABLE sustained_tasks (
-            task_id TEXT PRIMARY KEY,
-            session_key TEXT NOT NULL,
-            robot_id TEXT NOT NULL,
-            objective TEXT NOT NULL,
-            ui_summary TEXT NOT NULL DEFAULT '',
-            status TEXT NOT NULL,
-            created_at REAL NOT NULL,
-            updated_at REAL NOT NULL,
-            step_count INTEGER NOT NULL DEFAULT 0,
-            continuation_count INTEGER NOT NULL DEFAULT 0,
-            deadline_at REAL,
-            last_error TEXT,
-            final_recap TEXT
-        )
-        """
-    )
-    db.execute(
-        """
-        CREATE TABLE task_steps (
-            step_id TEXT PRIMARY KEY,
-            task_id TEXT NOT NULL,
-            sequence INTEGER NOT NULL,
-            proposal_json TEXT NOT NULL,
-            outcome_json TEXT NOT NULL,
-            started_at REAL NOT NULL,
-            completed_at REAL,
-            evidence_json TEXT NOT NULL
-        )
-        """
-    )
-    db.execute(
-        """
-        INSERT INTO sustained_tasks (
-            task_id, session_key, robot_id, objective, ui_summary, status,
-            created_at, updated_at
-        ) VALUES ('task-1', 'session-1', 'robot', 'inspect', '', 'active', 1.0, 1.0)
-        """
-    )
-    db.commit()
-    db.close()
-
-    store = AgentTaskStore(path)
-    task = store.active_task("session-1")
-    envelope = store.task_envelope("task-1")
-
-    assert task is not None
-    assert task.channel is None
-    assert envelope is not None
-    assert envelope.robot_id == "robot"
-    store.close()
-
-
 def test_task_store_lists_only_active_run_ids(tmp_path) -> None:
     store = AgentTaskStore(tmp_path / "tasks.sqlite3")
     task = store.create_task(
@@ -197,40 +166,6 @@ def test_task_store_lists_only_active_run_ids(tmp_path) -> None:
     store.close()
 
 
-def test_task_store_start_skill_step_matches_target_api(tmp_path) -> None:
-    store = AgentTaskStore(tmp_path / "tasks.sqlite3")
-    task = store.create_task(
-        session_key="session", envelope=Envelope(robot_id="robot"), objective="inspect"
-    )
-
-    step = store.start_skill_step(
-        task.task_id,
-        run_id="run-1",
-        tool_call_id="call-1",
-        tool_name="inspect_scene",
-        arguments={"question": "desk"},
-    )
-    columns = {
-        str(row[1])
-        for row in store._db.execute("PRAGMA table_info(task_steps)").fetchall()
-    }
-
-    assert step.status == "pending"
-    assert step.proposal.skill_name == "inspect_scene"
-    assert step.proposal.objective == "desk"
-    assert "arguments_json" in columns
-    assert (
-        store.apply_skill_event(
-            "run-1",
-            outcome=ToolOutcome("completed", "desk observed"),
-            status="completed",
-            event_sequence=1,
-        ).status
-        == "completed"
-    )
-    store.close()
-
-
 async def test_coordinator_marks_step_failed_when_submit_is_rejected(tmp_path) -> None:
     store = AgentTaskStore(tmp_path / "tasks.sqlite3")
     task = store.create_task(
@@ -258,12 +193,11 @@ async def test_coordinator_reconciles_transport_known_terminal_event(tmp_path) -
     task = store.create_task(
         session_key="session", envelope=Envelope(robot_id="robot"), objective="inspect"
     )
-    pending = store.start_skill_step(
+    pending = store.add_pending_step(
         task.task_id,
+        SkillCallProposal("observation", "inspect_scene", "inspect", {}),
         run_id="run-reconcile",
         tool_call_id="call-1",
-        tool_name="inspect_scene",
-        arguments={},
     )
     client = Client(
         statuses={
@@ -280,10 +214,10 @@ async def test_coordinator_reconciles_transport_known_terminal_event(tmp_path) -
     )
     coordinator = TaskCoordinator(store, client)  # type: ignore[arg-type]
 
-    reconciled = await coordinator.reconcile_active_runs()
+    reconciled = await coordinator.reconcile_active_run_results()
 
-    assert [step.run_id for step in reconciled] == [pending.run_id]
-    assert reconciled[0].status == "completed"
+    assert [applied.step.run_id for _event, applied in reconciled] == [pending.run_id]
+    assert reconciled[0][1].step.status == "completed"
     assert store.active_run_ids(task.task_id) == ()
     store.close()
 
@@ -296,12 +230,11 @@ async def test_coordinator_reconciles_restarted_worker_without_replaying_action(
         session_key="session", envelope=Envelope(robot_id="robot"), objective="inspect"
     )
     run_id = "run-crashed"
-    tasks.start_skill_step(
+    tasks.add_pending_step(
         task.task_id,
+        SkillCallProposal("observation", "inspect_scene", "inspect", {}),
         run_id=run_id,
         tool_call_id="call-1",
-        tool_name="inspect_scene",
-        arguments={},
     )
     runs = FileRunStore(tmp_path / "runs")
     command = SkillCommand(
@@ -326,13 +259,70 @@ async def test_coordinator_reconciles_restarted_worker_without_replaying_action(
     restarted_worker = SkillWorker(SkillRegistry(), run_store=runs)
     coordinator = TaskCoordinator(tasks, restarted_worker)
 
-    reconciled = await coordinator.reconcile_active_run_events()
+    reconciled = await coordinator.reconcile_active_run_results()
 
     assert len(reconciled) == 1
-    event, step = reconciled[0]
+    event, applied = reconciled[0]
     assert event.result is not None
     assert event.result.failure_mode == "execution_lost"
-    assert step.status == "failed"
+    assert applied.step.status == "failed"
     assert tasks.active_run_ids(task.task_id) == ()
-    assert await coordinator.reconcile_active_run_events() == ()
+    assert await coordinator.reconcile_active_run_results() == ()
     tasks.close()
+
+
+def test_terminal_step_persists_wakeup_until_next_physical_receipt(tmp_path) -> None:
+    path = tmp_path / "tasks.sqlite3"
+    store = AgentTaskStore(path)
+    task = store.create_task(
+        session_key="session-1",
+        envelope=Envelope(robot_id="sim_robot"),
+        objective="inspect",
+    )
+    proposal = SkillCallProposal("observation", "inspect_scene", "inspect", {})
+    store.add_pending_step(
+        task.task_id, proposal, run_id="run-1", tool_call_id="call-1"
+    )
+    store.resolve_pending_step(
+        "run-1",
+        outcome=ToolOutcome("completed", "seen", operation_id="run-1"),
+        status="completed",
+        event_sequence=2,
+    )
+    store.close()
+
+    restarted = AgentTaskStore(path)
+    resumable = restarted.resumable_tasks()
+    assert [item.task_id for item in resumable] == [task.task_id]
+    assert restarted.resume_after_sequence(task.task_id) == 1
+    restarted.add_pending_step(
+        task.task_id, proposal, run_id="run-2", tool_call_id="call-2"
+    )
+    assert restarted.resumable_tasks() == ()
+    restarted.close()
+
+
+def test_pause_keeps_one_open_task_and_persists_ordered_amendments(tmp_path) -> None:
+    store = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    task = store.create_task(
+        session_key="session-1",
+        envelope=Envelope(robot_id="sim_robot"),
+        objective="put the cup in the kitchen",
+    )
+    store.append_amendment(task.task_id, "put it on the dining table instead")
+    store.pause_task(task.task_id, "paused")
+
+    assert store.active_task("session-1") is None
+    assert store.current_task("session-1").status == "paused"  # type: ignore[union-attr]
+    assert "dining table" in store.effective_objective(task.task_id)
+    with pytest.raises(ValueError, match="\u5df2有"):
+        store.create_task(
+            session_key="session-1",
+            envelope=Envelope(robot_id="sim_robot"),
+            objective="another task",
+        )
+
+    resumed = store.resume_task(task.task_id)
+    assert resumed.status == "active"
+    assert store.resumable_tasks()[0].task_id == task.task_id
+    store.close()

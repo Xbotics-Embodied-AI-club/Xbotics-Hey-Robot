@@ -1,126 +1,43 @@
 from __future__ import annotations
 
+import asyncio
+from contextlib import suppress
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from hey_robot.cognition.autonomous_agent_service import AutonomousAgentService
+from hey_robot.cognition.runtime.agent import Agent, AgentCommand, ResumeTrigger
+from hey_robot.cognition.runtime.agent_context import AgentContextBuilder
 from hey_robot.cognition.runtime.agent_runner import (
     AgentToolCallRecord,
     AgentTurnResult,
 )
 from hey_robot.cognition.runtime.agent_task_store import AgentTaskStore
 from hey_robot.cognition.runtime.conversation_store import ConversationStore
-from hey_robot.cognition.tools.robot import CompleteTaskProposal, ControlTaskProposal
+from hey_robot.cognition.runtime.task_coordinator import TaskCoordinator
+from hey_robot.cognition.tools.executor import AgentToolExecutor, ToolExecution
+from hey_robot.cognition.tools.models import (
+    CompleteTaskProposal,
+    HarnessToolCall,
+)
 from hey_robot.cognition.tools.skill_tools import SkillCallProposal
-from hey_robot.model import ModelMessage
-from hey_robot.protocol import Envelope, ToolOutcome
+from hey_robot.protocol import AgentControl, Envelope, ToolOutcome
 from hey_robot.skills.models import SkillEvent, SkillResult
 
 
 class _TaskRuntime:
     hard_max_skills = 24
-    hard_max_continuations = 12
     hard_max_wall_time_sec = 3600.0
 
 
 class _Config:
     agent_runtime = _TaskRuntime()
 
-
-_TOOL_NAMES = frozenset({"inspect_scene", "move_base", "complete_task", "control_task"})
-
-
-class _Tasks:
-    def __init__(self) -> None:
-        self.current = None
-        self.steps = []
-        self.completed = []
-
-    def active_task(self, _session_key):
-        return self.current
-
-    def create_task(self, **kwargs):
-        self.current = SimpleNamespace(
-            task_id="task-1",
-            objective=kwargs["objective"],
-            step_count=0,
-            continuation_count=0,
-            deadline_at=kwargs.get("deadline_at"),
-        )
-        return self.current
-
-    def add_step(self, _task_id, proposal, outcome):
-        step = SimpleNamespace(
-            step_id=f"step-{len(self.steps) + 1}",
-            proposal=proposal,
-            outcome=outcome,
-            evidence_ids=(f"step:step-{len(self.steps) + 1}",),
-        )
-        self.steps.append(step)
-        self.current.step_count = len(self.steps)
-        return step
-
-    def recent_steps(self, _task_id, limit=12):
-        return tuple(self.steps[-limit:])
-
-    def complete_task(self, task_id, *, recap, evidence_ids):
-        self.completed.append((task_id, recap, evidence_ids))
-        self.current = None
-        return SimpleNamespace(accepted=True)
-
-    def check_completion(self, _task_id, _evidence_ids):
-        return SimpleNamespace(accepted=True)
-
-    def control_task(self, *_args: object, **_kwargs: object) -> None:
-        self.completed.append(_args)
-        self.current = None
-
-
-def test_duplicate_observation_gate_stops_third_caption_on_same_frame() -> None:
-    observe = SkillCallProposal(
-        "observation", "inspect_scene", "find kettle", {"question": "find kettle"}
-    )
-    steps = [
-        SimpleNamespace(
-            proposal=observe,
-            outcome=ToolOutcome("completed", "seen", data={"frame_id": 7}),
-        ),
-        SimpleNamespace(
-            proposal=observe,
-            outcome=ToolOutcome("completed", "seen again", data={"frame_id": 7}),
-        ),
-    ]
-    service = object.__new__(AutonomousAgentService)
-    service.tasks = SimpleNamespace(recent_steps=lambda _task_id, limit: steps[-limit:])
-
-    outcome = service._duplicate_observation_gate(
-        SimpleNamespace(task_id="task-1"), observe
-    )
-
-    assert outcome is not None
-    assert outcome.status == "failed"
-    assert outcome.retryable is True
-    assert outcome.data["failure_mode"] == "duplicate_observation"
-
-    def continue_task(self, *_args: object, **_kwargs: object) -> None:
-        self.current.continuation_count += 1
-
-
-class _CompletionVerifier:
-    def __init__(self, accepted: bool | list[bool] = True) -> None:
-        values = accepted if isinstance(accepted, list) else [accepted]
-        self._accepted = iter(values)
-        self.calls = []
-
-    async def verify(self, task, recap, steps, evidence_ids):
-        self.calls.append((task, recap, steps, evidence_ids))
-        accepted = next(self._accepted)
-        return SimpleNamespace(
-            accepted=accepted,
-            reason="证据支持任务完成。" if accepted else "证据不足。",
-        )
+    @staticmethod
+    def default_robot_id(_agent_id: str | None) -> str:
+        return "sim_robot"
 
 
 class _Runner:
@@ -128,47 +45,38 @@ class _Runner:
         self.results = iter(results)
         self.requests = []
 
-    async def run(self, request):
+    async def run(self, request, *, on_text_delta=None):
+        del on_text_delta
         self.requests.append(request)
         return next(self.results)
 
 
-class _Execution:
-    def __init__(self, outcomes: list[ToolOutcome]) -> None:
-        self.outcomes = iter(outcomes)
-        self.proposals = []
-        self.tasks = None
+class _SteerRunner:
+    def __init__(self) -> None:
+        self.requests = []
+        self.started = asyncio.Event()
+        self.cancelled = False
 
-    async def submit(
-        self,
-        *,
-        task_id: str,
-        proposal: SkillCallProposal,
-        envelope: Envelope,
-        tool_call_id: str,
-        deadline_at: float | None,
-    ) -> Any:
-        self.proposals.append(proposal)
-        del envelope, tool_call_id, deadline_at
-        return self.tasks.add_step(task_id, proposal, next(self.outcomes))
+    async def run(self, request, *, on_text_delta=None):
+        del on_text_delta
+        self.requests.append(request)
+        if len(self.requests) == 1:
+            self.started.set()
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+        return AgentTurnResult("returned", "adjusted", "model_returned")
+
+
+class _Tools:
+    names = frozenset({"inspect_scene", "move_base", "complete_task", "control_task"})
 
 
 class _Templates:
     def render(self, _name, **kwargs):
         return "\n".join(str(value) for value in kwargs.values())
-
-
-class _Entities:
-    def context(self, _robot_id):
-        return "entities: none"
-
-
-class _Bus:
-    def __init__(self):
-        self.published = []
-
-    async def publish(self, topic, payload):
-        self.published.append((topic, payload))
 
 
 class _SkillClient:
@@ -183,442 +91,632 @@ class _SkillClient:
         self.emergency_stops.append((robot_id, reason))
 
 
-class _Coordinator:
-    def __init__(self, store, outcome):
-        self.store = store
-        self.outcome = outcome
+class _SubmittingCoordinator:
+    def __init__(self, tasks: AgentTaskStore) -> None:
+        self.tasks = tasks
+        self.proposals = []
 
-    def apply(self, event):
-        return self.store.resolve_pending_step(
-            event.run_id,
-            outcome=self.outcome,
-            status=event.phase,
-            event_sequence=event.sequence,
+    async def submit(
+        self,
+        *,
+        task_id,
+        proposal,
+        envelope,
+        tool_call_id,
+        deadline_at,
+    ):
+        del envelope, deadline_at
+        self.proposals.append(proposal)
+        return self.tasks.add_pending_step(
+            task_id,
+            proposal,
+            run_id="run-submitted",
+            tool_call_id=tool_call_id,
         )
 
 
+class _Bus:
+    def __init__(self):
+        self.published = []
+
+    async def publish(self, topic, payload):
+        self.published.append((topic, payload))
+
+
+class _InlineExecutor:
+    def __init__(self, tasks: AgentTaskStore, executions: list[ToolExecution]):
+        self.tasks = tasks
+        self.executions = iter(executions)
+
+    async def execute(self, **_kwargs):
+        execution = next(self.executions)
+        if isinstance(execution.proposal, SkillCallProposal):
+            task = self.tasks.active_task("session-1")
+            if task is None:
+                task = self.tasks.create_task(
+                    session_key="session-1",
+                    envelope=Envelope(robot_id="sim_robot"),
+                    objective="test objective",
+                )
+            if execution.directive != "wait":
+                step = self.tasks.add_step(
+                    task.task_id, execution.proposal, execution.outcome
+                )
+                return dataclass_replace(execution, step=step, task=task)
+            return dataclass_replace(execution, task=task)
+        if isinstance(execution.proposal, CompleteTaskProposal):
+            task = self.tasks.active_task("session-1")
+            if task is not None and execution.directive == "finish":
+                self.tasks.complete_from_environment(
+                    task.task_id, recap=execution.final_text or "done"
+                )
+            return dataclass_replace(execution, task=task)
+        return execution
+
+
+def dataclass_replace(value, **changes):
+    data = value.__dict__ | changes
+    return type(value)(**data)
+
+
+def _agent(
+    tmp_path,
+    runner: _Runner,
+    executions: list[ToolExecution],
+) -> tuple[Agent, AgentTaskStore, ConversationStore]:
+    tasks = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    conversations = ConversationStore(tmp_path / "conversations.sqlite3")
+    context = AgentContextBuilder(_Templates(), conversations, tasks)
+    agent = Agent(
+        session_key="session-1",
+        runner=runner,  # type: ignore[arg-type]
+        tools=_Tools(),  # type: ignore[arg-type]
+        executor=_InlineExecutor(tasks, executions),  # type: ignore[arg-type]
+        context=context,
+        tasks=tasks,
+        conversations=conversations,
+    )
+    return agent, tasks, conversations
+
+
+def _decision(call_id: str, proposal) -> AgentTurnResult:
+    name = (
+        proposal.skill_name
+        if isinstance(proposal, SkillCallProposal)
+        else "complete_task"
+    )
+    return AgentTurnResult(
+        "action_proposed",
+        None,
+        "stop_slice",
+        (AgentToolCallRecord(call_id, name, dict(getattr(proposal, "arguments", {}))),),
+        proposal,
+    )
+
+
 @pytest.mark.asyncio
-async def test_conversation_loop_continues_after_observation_failure() -> None:
-    observe = SkillCallProposal(
-        "observation", "inspect_scene", "check ahead", {"question": "check ahead"}
+async def test_agent_returns_waiting_after_physical_submit(tmp_path) -> None:
+    move = SkillCallProposal("skill", "move_base", "move", {})
+    runner = _Runner([_decision("move-1", move)])
+    waiting = ToolExecution(
+        "wait",
+        ToolOutcome("accepted", "submitted", operation_id="run-1"),
+        move,
     )
-    move = SkillCallProposal(
-        "skill", "move_base", "move forward", {"direction": "forward"}
-    )
-    service = object.__new__(AutonomousAgentService)
-    service.tools = SimpleNamespace(names=_TOOL_NAMES)
-    service.runner = _Runner(
-        [
-            AgentTurnResult(
-                "action_proposed",
-                None,
-                "stop_slice",
-                (AgentToolCallRecord("observe-1", "inspect_scene", observe.arguments),),
-                observe,
-            ),
-            AgentTurnResult(
-                "action_proposed",
-                None,
-                "stop_slice",
-                (AgentToolCallRecord("move-1", "move_base", move.arguments),),
-                move,
-            ),
-            AgentTurnResult("returned", "已向前移动。", "model_returned"),
-            AgentTurnResult(
-                "action_proposed",
-                None,
-                "stop_slice",
-                (
-                    AgentToolCallRecord(
-                        "complete-1",
-                        "complete_task",
-                        {"recap": "已向前移动。", "evidence_ids": ["step:step-2"]},
-                    ),
-                ),
-                CompleteTaskProposal("已向前移动。", ("step:step-2",)),
-            ),
-        ]
-    )
-    service.execution = _Execution(
-        [
-            ToolOutcome("failed", "scene recognition unavailable", retryable=True),
-            ToolOutcome("completed", "Base motion completed."),
-        ]
-    )
-    service.config = _Config()
-    service.tasks = _Tasks()
-    service.execution.tasks = service.tasks
-    service.task_coordinator = service.execution
-    service.completion_verifier = _CompletionVerifier()
+    agent, tasks, conversations = _agent(tmp_path, runner, [waiting])
 
-    text = await service._run_conversation_loop(
-        [ModelMessage("user", "往前走走")],
-        Envelope(robot_id="sim_robot"),
-        "session-1",
-        "turn-1",
-        "往前走走",
+    result = await agent.prompt(
+        AgentCommand("session-1", "turn-1", Envelope(robot_id="sim_robot"), "move")
     )
 
-    assert text == "已向前移动。"
-    assert [item.skill_name for item in service.execution.proposals] == [
-        "inspect_scene",
-        "move_base",
+    assert result.status == "waiting"
+    assert result.operation_id == "run-1"
+    assert len(runner.requests) == 1
+    conversations.close()
+    tasks.close()
+
+
+@pytest.mark.asyncio
+async def test_agent_continues_from_tool_outcome_until_complete(tmp_path) -> None:
+    observe = SkillCallProposal("observation", "inspect_scene", "inspect", {})
+    complete = CompleteTaskProposal("done")
+    runner = _Runner([_decision("observe-1", observe), _decision("done-1", complete)])
+    executions = [
+        ToolExecution("continue", ToolOutcome("completed", "seen"), observe),
+        ToolExecution(
+            "finish",
+            ToolOutcome("completed", "done"),
+            complete,
+            final_text="done",
+        ),
     ]
-    second_messages = service.runner.requests[1].messages
-    assert second_messages[-1].role == "tool"
-    assert "这次观察只更新证据" in second_messages[-1].content
-    assert "active_task id=task-1; objective=往前走走" in second_messages[-1].content
-    completion_messages = service.runner.requests[3].messages
-    assert completion_messages[-2].role == "assistant"
-    assert completion_messages[-2].content == "已向前移动。"
-    assert completion_messages[-1].role == "user"
-    assert "继续当前 active task" in completion_messages[-1].content
+    agent, tasks, conversations = _agent(tmp_path, runner, executions)
+
+    result = await agent.prompt(
+        AgentCommand("session-1", "turn-1", Envelope(robot_id="sim_robot"), "inspect")
+    )
+
+    assert result.status == "completed"
+    assert result.text == "done"
+    assert len(runner.requests) == 2
+    assert runner.requests[1].messages[-1].role == "tool"
+    conversations.close()
+    tasks.close()
 
 
 @pytest.mark.asyncio
-async def test_conversation_loop_never_finalizes_pending_robot_outcome() -> None:
-    move = SkillCallProposal(
-        "skill", "move_base", "move forward", {"direction": "forward"}
+async def test_steer_during_skill_waits_for_safe_point(tmp_path) -> None:
+    runner = _Runner([])
+    agent, tasks, conversations = _agent(tmp_path, runner, [])
+    task = tasks.create_task(
+        session_key="session-1",
+        envelope=Envelope(robot_id="sim_robot"),
+        objective="move to the desk",
     )
-    service = object.__new__(AutonomousAgentService)
-    service.tools = SimpleNamespace(names=_TOOL_NAMES)
-    service.runner = _Runner(
-        [
-            AgentTurnResult(
-                "action_proposed",
-                None,
-                "stop_slice",
-                (AgentToolCallRecord("move-1", "move_base", move.arguments),),
-                move,
-            ),
-        ]
-    )
-    service.execution = _Execution(
-        [
-            ToolOutcome(
-                "waiting",
-                "操作仍在执行，等待机器人返回结果。",
-                retryable=True,
-            ),
-        ]
-    )
-    service.config = _Config()
-    service.tasks = _Tasks()
-    service.execution.tasks = service.tasks
-    service.task_coordinator = service.execution
-    service.completion_verifier = _CompletionVerifier()
-
-    text = await service._run_conversation_loop(
-        [ModelMessage("user", "往前走走")],
-        Envelope(robot_id="sim_robot"),
-        "session-1",
-        "turn-1",
-        "往前走走",
+    tasks.add_pending_step(
+        task.task_id,
+        SkillCallProposal("skill", "move_base", "move", {}),
+        run_id="run-active",
+        tool_call_id="move-1",
     )
 
-    assert text == "已提交机器人操作，正在等待执行结果。"
-    assert "等待机器人返回结果" not in text
+    result = await agent.steer(
+        AgentCommand(
+            "session-1",
+            "steer-1",
+            Envelope(robot_id="sim_robot"),
+            "go to the dining table instead",
+        )
+    )
+
+    assert result.status == "waiting"
+    assert result.operation_id == "run-active"
+    assert runner.requests == []
+    assert tasks.amendments(task.task_id) == ("go to the dining table instead",)
+    conversations.close()
+    tasks.close()
 
 
 @pytest.mark.asyncio
-async def test_conversation_loop_tracks_every_robot_step_in_one_task() -> None:
-    move = SkillCallProposal(
-        "skill", "move_base", "move forward", {"direction": "forward"}
+async def test_steer_during_inference_rebuilds_context(tmp_path) -> None:
+    runner = _SteerRunner()
+    agent, tasks, conversations = _agent(tmp_path, runner, [])  # type: ignore[arg-type]
+    first = asyncio.create_task(
+        agent.prompt(
+            AgentCommand(
+                "session-1",
+                "turn-1",
+                Envelope(robot_id="sim_robot"),
+                "inspect the desk",
+            )
+        )
     )
-    observe = SkillCallProposal(
-        "observation", "inspect_scene", "check result", {"question": "check result"}
-    )
-    service = object.__new__(AutonomousAgentService)
-    service.tools = SimpleNamespace(names=_TOOL_NAMES)
-    service.runner = _Runner(
-        [
-            AgentTurnResult(
-                "action_proposed",
-                None,
-                "stop_slice",
-                (AgentToolCallRecord("move-1", "move_base", move.arguments),),
-                move,
-            ),
-            AgentTurnResult(
-                "action_proposed",
-                None,
-                "stop_slice",
-                (AgentToolCallRecord("observe-1", "inspect_scene", observe.arguments),),
-                observe,
-            ),
-            AgentTurnResult(
-                "action_proposed",
-                None,
-                "stop_slice",
-                (
-                    AgentToolCallRecord(
-                        "complete-1",
-                        "complete_task",
-                        {
-                            "recap": "已进入门内并完成观察。",
-                            "evidence_ids": ["step:step-2"],
-                        },
-                    ),
-                ),
-                CompleteTaskProposal("已进入门内并完成观察。", ("step:step-2",)),
-            ),
-        ]
-    )
-    service.execution = _Execution(
-        [
-            ToolOutcome("completed", "Base motion completed."),
-            ToolOutcome("completed", "已经看到门内环境。"),
-        ]
-    )
-    service.config = _Config()
-    tasks = _Tasks()
-    service.tasks = tasks
-    service.execution.tasks = tasks
-    service.task_coordinator = service.execution
-    service.completion_verifier = _CompletionVerifier()
+    await runner.started.wait()
 
-    text = await service._run_conversation_loop(
-        [ModelMessage("user", "往前走走")],
-        Envelope(robot_id="sim_robot"),
-        "session-1",
-        "turn-1",
-        "进入门里并观察里面有什么",
+    result = await agent.steer(
+        AgentCommand(
+            "session-1",
+            "steer-1",
+            Envelope(robot_id="sim_robot"),
+            "inspect the table instead",
+        )
     )
+    with suppress(asyncio.CancelledError):
+        await first
 
-    assert text == "已进入门内并完成观察。"
-    assert [item.skill_name for item in service.execution.proposals] == [
-        "move_base",
-        "inspect_scene",
-    ]
-    assert len(tasks.steps) == 2
-    assert tasks.completed == [("task-1", "已进入门内并完成观察。", ("step:step-2",))]
+    assert runner.cancelled is True
+    assert result.text == "adjusted"
+    assert runner.requests[-1].messages[-1].content == "inspect the table instead"
+    conversations.close()
+    tasks.close()
 
 
 @pytest.mark.asyncio
-async def test_rejected_completion_keeps_driving_the_same_task() -> None:
-    move = SkillCallProposal(
-        "skill", "move_base", "继续进入门内", {"direction": "forward"}
-    )
-    observe = SkillCallProposal(
-        "observation", "inspect_scene", "确认是否进入", {"question": "在哪里"}
-    )
-    complete = CompleteTaskProposal("已经进入门内。", ("step:step-2",))
-    service = object.__new__(AutonomousAgentService)
-    service.tools = SimpleNamespace(names=_TOOL_NAMES)
-    service.runner = _Runner(
-        [
-            AgentTurnResult(
-                "action_proposed",
-                None,
-                "stop_slice",
-                (AgentToolCallRecord("move-1", "move_base", {}),),
-                move,
-            ),
-            AgentTurnResult(
-                "action_proposed",
-                None,
-                "stop_slice",
-                (AgentToolCallRecord("observe-1", "inspect_scene", {}),),
-                observe,
-            ),
-            AgentTurnResult(
-                "action_proposed",
-                None,
-                "stop_slice",
-                (AgentToolCallRecord("complete-1", "complete_task", {}),),
-                complete,
-            ),
-            AgentTurnResult(
-                "action_proposed",
-                None,
-                "stop_slice",
-                (AgentToolCallRecord("move-2", "move_base", {}),),
-                move,
-            ),
-            AgentTurnResult(
-                "action_proposed",
-                None,
-                "stop_slice",
-                (AgentToolCallRecord("observe-2", "inspect_scene", {}),),
-                observe,
-            ),
-            AgentTurnResult(
-                "action_proposed",
-                None,
-                "stop_slice",
-                (AgentToolCallRecord("complete-2", "complete_task", {}),),
-                CompleteTaskProposal("已经进入门内。", ("step:step-4",)),
-            ),
-        ]
-    )
-    service.execution = _Execution(
-        [
-            ToolOutcome("completed", "前进30厘米。"),
-            ToolOutcome("completed", "门仍在前方。"),
-            ToolOutcome("completed", "再次前进30厘米。"),
-            ToolOutcome("completed", "机器人已经位于门内。"),
-        ]
-    )
-    service.config = _Config()
-    tasks = _Tasks()
-    service.tasks = tasks
-    service.execution.tasks = tasks
-    service.task_coordinator = service.execution
-    verifier = _CompletionVerifier([False, True])
-    service.completion_verifier = verifier
-
-    text = await service._run_conversation_loop(
-        [ModelMessage("user", "进入前面的门")],
-        Envelope(robot_id="sim_robot"),
-        "session-1",
-        "turn-1",
-        "进入前面的门",
+async def test_agent_pauses_at_one_wakeup_turn_bound(tmp_path) -> None:
+    returned = AgentTurnResult("returned", "still working", "model_returned")
+    runner = _Runner([returned] * 8)
+    agent, tasks, conversations = _agent(tmp_path, runner, [])
+    task = tasks.create_task(
+        session_key="session-1",
+        envelope=Envelope(robot_id="sim_robot"),
+        objective="inspect the whole room",
     )
 
-    assert text == "已经进入门内。"
-    assert len(service.execution.proposals) == 4
-    assert len(verifier.calls) == 2
-    assert tasks.completed[-1][1] == "已经进入门内。"
+    result = await agent.prompt(
+        AgentCommand(
+            "session-1",
+            "turn-1",
+            Envelope(robot_id="sim_robot"),
+            "continue inspecting",
+        )
+    )
+
+    assert result.status == "blocked"
+    assert "单次唤醒" in result.text
+    assert len(runner.requests) == 8
+    assert tasks.task(task.task_id).status == "paused"  # type: ignore[union-attr]
+    conversations.close()
+    tasks.close()
 
 
 @pytest.mark.asyncio
-async def test_terminal_skill_event_resumes_active_task_and_publishes_result(
+async def test_tool_executor_creates_task_and_persists_original_proposal(
     tmp_path,
 ) -> None:
-    store = AgentTaskStore(tmp_path / "tasks.sqlite3")
-    conversations = ConversationStore(tmp_path / "conversations.sqlite3")
-    task = store.create_task(
-        session_key="session-1",
-        envelope=Envelope(
-            channel="web",
-            chat_id="chat-1",
-            sender_id="sender-1",
-            user_id="user-1",
-            agent_id="agent-1",
-            robot_id="sim_robot",
-        ),
-        objective="检查桌面",
+    tasks = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    coordinator = _SubmittingCoordinator(tasks)
+    executor = AgentToolExecutor(
+        _Config(),  # type: ignore[arg-type]
+        tasks,
+        coordinator,  # type: ignore[arg-type]
+        _SkillClient(),  # type: ignore[arg-type]
     )
     proposal = SkillCallProposal(
-        "observation", "inspect_scene", "检查桌面", {"question": "桌面上有什么"}
+        "skill", "move_base", "move precisely to the red table", {"meters": 0.2}
     )
-    pending = store.add_pending_step(
+
+    execution = await executor.execute(
+        session_key="session-1",
+        envelope=Envelope(robot_id="sim_robot"),
+        objective="reach the table",
+        proposal=proposal,
+        tool_call_id="call-1",
+    )
+
+    assert execution.directive == "wait"
+    assert execution.outcome.operation_id == "run-submitted"
+    assert execution.step is not None
+    assert execution.step.proposal.objective == "move precisely to the red table"
+    assert coordinator.proposals == [proposal]
+    tasks.close()
+
+
+@pytest.mark.asyncio
+async def test_tool_executor_completes_evidence_grounded_task(tmp_path) -> None:
+    tasks = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    task = tasks.create_task(
+        session_key="session-1",
+        envelope=Envelope(robot_id="sim_robot"),
+        objective="inspect the desk",
+    )
+    tasks.add_step(
         task.task_id,
-        proposal,
+        SkillCallProposal("observation", "inspect_scene", "inspect", {}),
+        ToolOutcome("completed", "a cup is on the desk"),
+    )
+    executor = AgentToolExecutor(
+        _Config(),  # type: ignore[arg-type]
+        tasks,
+        SimpleNamespace(),  # type: ignore[arg-type]
+        _SkillClient(),  # type: ignore[arg-type]
+    )
+    proposal = CompleteTaskProposal("a cup is on the desk")
+
+    execution = await executor.execute(
+        session_key="session-1",
+        envelope=Envelope(robot_id="sim_robot"),
+        objective=task.objective,
+        proposal=proposal,
+        tool_call_id="complete-1",
+    )
+
+    assert execution.directive == "finish"
+    assert execution.outcome.status == "completed"
+    assert tasks.task(task.task_id).status == "completed"  # type: ignore[union-attr]
+    tasks.close()
+
+
+@pytest.mark.asyncio
+async def test_tool_executor_runs_nonphysical_harness_tool(tmp_path) -> None:
+    tasks = AgentTaskStore(tmp_path / "tasks.sqlite3")
+
+    async def handler(arguments):
+        return ToolOutcome("completed", "lookup complete", dict(arguments))
+
+    executor = AgentToolExecutor(
+        _Config(),  # type: ignore[arg-type]
+        tasks,
+        SimpleNamespace(),  # type: ignore[arg-type]
+        _SkillClient(),  # type: ignore[arg-type]
+    )
+    proposal = HarnessToolCall("lookup", {"query": "cup"}, handler)
+
+    execution = await executor.execute(
+        session_key="session-1",
+        envelope=Envelope(robot_id="sim_robot"),
+        objective="lookup",
+        proposal=proposal,
+        tool_call_id="lookup-1",
+    )
+
+    assert execution.directive == "continue"
+    assert execution.outcome.data == {"query": "cup"}
+    tasks.close()
+
+
+@pytest.mark.asyncio
+async def test_control_pause_resume_and_cancel_are_durable(tmp_path) -> None:
+    tasks = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    task = tasks.create_task(
+        session_key="session-1",
+        envelope=Envelope(robot_id="sim_robot"),
+        objective="move",
+    )
+    tasks.add_pending_step(
+        task.task_id,
+        SkillCallProposal("skill", "move_base", "move", {}),
         run_id="run-1",
-        tool_call_id="observe-1",
+        tool_call_id="call-1",
     )
-    outcome = ToolOutcome(
-        "completed",
-        "桌面上有一个杯子。",
-        data={"evidence_ids": ["scene:cup"]},
-        operation_id="run-1",
+    client = _SkillClient()
+    executor = AgentToolExecutor(
+        _Config(),  # type: ignore[arg-type]
+        tasks,
+        SimpleNamespace(),  # type: ignore[arg-type]
+        client,  # type: ignore[arg-type]
     )
-    complete = CompleteTaskProposal("桌面上有一个杯子。", ("scene:cup",))
+    envelope = Envelope(agent_id="main", robot_id="sim_robot")
+
+    await executor.control(
+        AgentControl(envelope, "session-1", "pause-1", "pause", "pause")
+    )
+    assert tasks.current_task("session-1").status == "paused"  # type: ignore[union-attr]
+    assert client.cancelled == [("run-1", "pause")]
+
+    tasks.apply_skill_event(
+        "run-1",
+        outcome=ToolOutcome("failed", "cancelled"),
+        status="cancelled",
+        event_sequence=1,
+    )
+    await executor.control(AgentControl(envelope, "session-1", "resume-1", "resume"))
+    assert tasks.active_task("session-1") is not None
+
+    await executor.control(
+        AgentControl(envelope, "session-1", "cancel-1", "cancel", "cancel")
+    )
+    assert tasks.current_task("session-1") is None
+    tasks.close()
+
+
+@pytest.mark.asyncio
+async def test_resume_waits_for_cancelled_run_terminal(tmp_path) -> None:
+    tasks = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    task = tasks.create_task(
+        session_key="session-1",
+        envelope=Envelope(robot_id="sim_robot"),
+        objective="move",
+    )
+    tasks.add_pending_step(
+        task.task_id,
+        SkillCallProposal("skill", "move_base", "move", {}),
+        run_id="run-stopping",
+        tool_call_id="call-1",
+    )
+    tasks.pause_task(task.task_id, "pause")
+    executor = AgentToolExecutor(
+        _Config(),  # type: ignore[arg-type]
+        tasks,
+        SimpleNamespace(),  # type: ignore[arg-type]
+        _SkillClient(),  # type: ignore[arg-type]
+    )
+
+    text = await executor.control(
+        AgentControl(Envelope(robot_id="sim_robot"), "session-1", "resume-1", "resume")
+    )
+
+    assert "仍在停止中" in text
+    assert tasks.current_task("session-1").status == "paused"  # type: ignore[union-attr]
+    tasks.close()
+
+
+@pytest.mark.asyncio
+async def test_user_resume_continues_without_hard_coded_observation(tmp_path) -> None:
+    tasks = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    task = tasks.create_task(
+        session_key="session-1",
+        envelope=Envelope(robot_id="sim_robot"),
+        objective="inspect the room",
+    )
+    tasks.pause_task(task.task_id, "pause")
+    executor = AgentToolExecutor(
+        _Config(),  # type: ignore[arg-type]
+        tasks,
+        SimpleNamespace(),  # type: ignore[arg-type]
+        _SkillClient(),  # type: ignore[arg-type]
+    )
+
+    class ResumeAgent:
+        trigger = None
+
+        async def resume(self, trigger):
+            self.trigger = trigger
+            return SimpleNamespace(text="已从最近结果继续。")
+
+    agent = ResumeAgent()
+
     service = object.__new__(AutonomousAgentService)
-    service.tasks = store
-    service.conversations = conversations
-    service.templates = _Templates()
-    service.entities = _Entities()
-    service.tools = SimpleNamespace(names=_TOOL_NAMES, instructions="tools")
-    service.config = _Config()
-    service.runner = _Runner(
-        [
-            AgentTurnResult(
-                "action_proposed",
-                None,
-                "stop_slice",
-                (AgentToolCallRecord("complete-1", "complete_task", {}),),
-                complete,
-            )
-        ]
+    service.tasks = tasks
+    service.tool_executor = executor
+    service._agent = lambda _session_key: agent
+    command = AgentControl(
+        Envelope(robot_id="sim_robot"), "session-1", "resume-1", "resume"
     )
-    service.completion_verifier = _CompletionVerifier()
-    service.task_coordinator = _Coordinator(store, outcome)
-    service._session_locks = {}
+
+    text = await service._resume_task_from_control(command)
+
+    assert text == "已从最近结果继续。"
+    assert tasks.active_task("session-1") is not None
+    assert agent.trigger.task_id == task.task_id
+    assert agent.trigger.source == "user_resume"
+    tasks.close()
+
+
+@pytest.mark.asyncio
+async def test_emergency_stop_bypasses_agent_runner(tmp_path) -> None:
+    tasks = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    tasks.create_task(
+        session_key="session-1",
+        envelope=Envelope(robot_id="sim_robot"),
+        objective="move",
+    )
+    client = _SkillClient()
+    executor = AgentToolExecutor(
+        _Config(),  # type: ignore[arg-type]
+        tasks,
+        SimpleNamespace(),  # type: ignore[arg-type]
+        client,  # type: ignore[arg-type]
+    )
+
+    await executor.control(
+        AgentControl(
+            Envelope(robot_id="sim_robot"),
+            "session-1",
+            "stop-1",
+            "emergency_stop",
+            "operator stop",
+        )
+    )
+
+    assert client.emergency_stops == [("sim_robot", "operator stop")]
+    assert tasks.active_task("session-1") is None
+    tasks.close()
+
+
+class _ResumeAgent:
+    def __init__(self):
+        self.triggers = []
+
+    async def resume(self, trigger: ResumeTrigger):
+        self.triggers.append(trigger)
+        return SimpleNamespace(text="resumed")
+
+
+class _NoReconciliation:
+    @staticmethod
+    async def reconcile_active_run_results() -> tuple[Any, ...]:
+        return ()
+
+
+@pytest.mark.asyncio
+async def test_startup_resumes_terminal_undeliberated_step(tmp_path) -> None:
+    path = tmp_path / "tasks.sqlite3"
+    original = AgentTaskStore(path)
+    task = original.create_task(
+        session_key="session-1",
+        envelope=Envelope(channel="web", robot_id="sim_robot"),
+        objective="inspect",
+    )
+    pending = original.add_pending_step(
+        task.task_id,
+        SkillCallProposal("observation", "inspect_scene", "inspect", {}),
+        run_id="run-1",
+        tool_call_id="call-1",
+    )
+    original.apply_skill_event(
+        pending.run_id or "",
+        outcome=ToolOutcome("completed", "seen"),
+        status="completed",
+        event_sequence=2,
+    )
+    original.close()
+
+    restarted = AgentTaskStore(path)
+    resume_agent = _ResumeAgent()
+    service = object.__new__(AutonomousAgentService)
+    service.tasks = restarted
+    service.task_coordinator = _NoReconciliation()
+    service._agents = {"session-1": resume_agent}
     service.bus = _Bus()
     service.topics = SimpleNamespace(conversation_result="conversation.result")
 
-    await service._handle_skill_event(
-        SkillEvent(
-            envelope=Envelope(robot_id="sim_robot"),
-            run_id=pending.run_id or "",
-            sequence=3,
-            name="inspect_scene",
-            phase="completed",
-            timestamp=0.0,
-            result=SkillResult(True, "桌面上有一个杯子。", "completed"),
-        )
-    )
+    await service._recover_tasks()
 
-    assert store.task(task.task_id).status == "completed"  # type: ignore[union-attr]
-    assert service.runner.requests[0].run_id == "skill_event_run-1_3"
-    assert (
-        "机器人 Skill 已返回终态事件" in service.runner.requests[0].messages[-2].content
-    )
-    assert service.bus.published[0][0] == "conversation.result"
-    payload = service.bus.published[0][1]
-    assert payload["text"] == "桌面上有一个杯子。"
-    assert payload["interaction_id"] == "run-1"
-    assert payload["envelope"]["channel"] == "web"
-    assert payload["envelope"]["chat_id"] == "chat-1"
-    conversations.close()
-    store.close()
+    assert len(resume_agent.triggers) == 1
+    assert resume_agent.triggers[0].source == "startup_recovery"
+    restarted.close()
 
 
 @pytest.mark.asyncio
-async def test_control_task_cancels_active_skill_runs(tmp_path) -> None:
-    store = AgentTaskStore(tmp_path / "tasks.sqlite3")
-    task = store.create_task(
+async def test_terminal_event_resumes_once_and_replay_is_ignored(tmp_path) -> None:
+    tasks = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    task = tasks.create_task(
         session_key="session-1",
-        envelope=Envelope(robot_id="sim_robot"),
-        objective="移动到桌边",
+        envelope=Envelope(channel="web", robot_id="sim_robot"),
+        objective="inspect",
     )
-    store.add_pending_step(
+    pending = tasks.add_pending_step(
         task.task_id,
-        SkillCallProposal("skill", "move_base", "移动到桌边", {}),
-        run_id="run-active",
-        tool_call_id="move-1",
+        SkillCallProposal("observation", "inspect_scene", "inspect", {}),
+        run_id="run-1",
+        tool_call_id="call-1",
     )
+    coordinator = TaskCoordinator(tasks, SimpleNamespace())  # type: ignore[arg-type]
     service = object.__new__(AutonomousAgentService)
-    service.tasks = store
-    service.skill_client = _SkillClient()
-
-    text = await service._control_task(
-        ControlTaskProposal("cancel", "用户取消任务。"), "session-1"
+    service.tasks = tasks
+    service.task_coordinator = coordinator
+    service._agents = {"session-1": _ResumeAgent()}
+    service.bus = _Bus()
+    service.topics = SimpleNamespace(conversation_result="conversation.result")
+    event = SkillEvent(
+        Envelope(robot_id="sim_robot"),
+        pending.run_id or "",
+        2,
+        "inspect_scene",
+        "completed",
+        0.0,
+        result=SkillResult(True, "seen", "completed"),
     )
 
-    assert text == "用户取消任务。"
-    assert service.skill_client.cancelled == [("run-active", "用户取消任务。")]
-    assert store.task(task.task_id).status == "cancelled"  # type: ignore[union-attr]
-    store.close()
+    await service._handle_skill_event(event)
+    await service._handle_skill_event(event)
+
+    resume_agent = service._agents["session-1"]
+    assert len(resume_agent.triggers) == 1
+    assert service.bus.published[-1][1]["text"] == "resumed"
+    tasks.close()
 
 
 @pytest.mark.asyncio
-async def test_control_task_emergency_stop_uses_priority_control_plane(
+async def test_environment_done_publishes_without_agent_resume(
     tmp_path,
 ) -> None:
-    store = AgentTaskStore(tmp_path / "tasks.sqlite3")
-    task = store.create_task(
+    tasks = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    task = tasks.create_task(
         session_key="session-1",
-        envelope=Envelope(robot_id="sim_robot"),
-        objective="移动到桌边",
+        envelope=Envelope(channel="web", robot_id="sim_robot"),
+        objective="finish",
     )
-    store.add_pending_step(
+    pending = tasks.add_pending_step(
         task.task_id,
-        SkillCallProposal("skill", "move_base", "移动到桌边", {}),
-        run_id="run-active",
-        tool_call_id="move-1",
+        SkillCallProposal("skill", "move_base", "finish", {}),
+        run_id="run-1",
+        tool_call_id="call-1",
     )
     service = object.__new__(AutonomousAgentService)
-    service.tasks = store
-    service.skill_client = _SkillClient()
-
-    await service._control_task(
-        ControlTaskProposal("emergency_stop", "operator estop"), "session-1"
+    service.tasks = tasks
+    service.task_coordinator = TaskCoordinator(tasks, SimpleNamespace())  # type: ignore[arg-type]
+    service._agents = {"session-1": _ResumeAgent()}
+    service.bus = _Bus()
+    service.topics = SimpleNamespace(conversation_result="conversation.result")
+    event = SkillEvent(
+        Envelope(robot_id="sim_robot"),
+        pending.run_id or "",
+        2,
+        "move_base",
+        "completed",
+        0.0,
+        result=SkillResult(
+            True,
+            "environment complete",
+            "completed",
+            data={"termination_reason": "environment_done"},
+        ),
     )
 
-    assert service.skill_client.emergency_stops == [("sim_robot", "operator estop")]
-    assert service.skill_client.cancelled == []
-    assert store.task(task.task_id).status == "cancelled"  # type: ignore[union-attr]
-    store.close()
+    await service._handle_skill_event(event)
+
+    assert tasks.task(task.task_id).status == "completed"  # type: ignore[union-attr]
+    assert service.bus.published[-1][1]["text"] == "environment complete"
+    assert not service._agents["session-1"].triggers
+    tasks.close()

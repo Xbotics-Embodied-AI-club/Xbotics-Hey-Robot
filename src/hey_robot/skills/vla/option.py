@@ -53,7 +53,6 @@ class VLAOptionResult:
                 "before_frame_id": self.before_frame_id,
                 "after_frame_id": self.after_frame_id,
                 "steps_used": len(self.executed_actions),
-                "requires_reobservation": bool(self.executed_actions),
             },
             evidence_ids=self.evidence_ids,
             failure_mode=self.failure_mode,

@@ -104,12 +104,14 @@ class ModelSceneCaptioner:
             messages=[
                 ModelMessage(
                     role="system",
-                    content=self.templates.render("robot/scene_captioner/SYSTEM.md"),
+                    content=self.templates.render(
+                        "perception/scene_captioner/SYSTEM.md"
+                    ),
                 ),
                 ModelMessage(
                     role="user",
                     content=self.templates.render(
-                        "robot/scene_captioner/USER.md",
+                        "perception/scene_captioner/USER.md",
                         frame_id=observation.frame_id,
                         task=(
                             observation.raw.get("policy_task")

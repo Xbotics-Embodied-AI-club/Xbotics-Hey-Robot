@@ -416,58 +416,6 @@ def test_gateway_registers_voice_channel(tmp_path) -> None:
     assert gateway.channels.get("voice") is not None
 
 
-def test_voice_channel_filters_low_priority_notifications(monkeypatch) -> None:
-    spoken: list[str] = []
-
-    async def fake_speak(text: str) -> None:
-        spoken.append(text)
-
-    channel = VoiceChannel(
-        ChannelContext(
-            name="voice",
-            deployment_id="test",
-            spec=ChannelSpec(
-                type="voice",
-                settings={
-                    "asr": {"model": "ep-asr"},
-                    "tts": {"enabled": False},
-                    "notification_levels": ["critical"],
-                },
-            ),
-        )
-    )
-    monkeypatch.setattr(channel.loop, "speak", fake_speak)
-
-    asyncio.run(
-        channel.send(
-            AgentReply(
-                envelope=Envelope(channel="voice"),
-                text="routine status",
-                metadata={
-                    "notification": True,
-                    "severity": "info",
-                    "notification_kind": "task_update",
-                },
-            )
-        )
-    )
-    asyncio.run(
-        channel.send(
-            AgentReply(
-                envelope=Envelope(channel="voice"),
-                text="operator action required",
-                metadata={
-                    "notification": True,
-                    "severity": "critical",
-                    "notification_kind": "operator_alert",
-                },
-            )
-        )
-    )
-
-    assert spoken == ["[CRITICAL] operator alert: operator action required"]
-
-
 def test_voice_channel_ignores_non_voice_replies_and_non_final_progress(
     monkeypatch,
 ) -> None:

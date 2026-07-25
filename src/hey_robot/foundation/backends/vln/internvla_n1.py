@@ -127,9 +127,7 @@ class InternVLAN1Runtime:
                     action_sequence=[current_action],
                     remaining_action_count=len(self._pending_actions),
                     raw_output=self._last_llm_output,
-                    turn_angle_deg=float(
-                        self.settings.get("discrete_turn_deg", 15.0)
-                    ),
+                    turn_angle_deg=float(self.settings.get("discrete_turn_deg", 15.0)),
                     forward_distance_cm=float(
                         self.settings.get("discrete_forward_cm", 25.0)
                     ),
@@ -157,9 +155,7 @@ class InternVLAN1Runtime:
             remaining_action_count=len(self._pending_actions),
             raw_output=self._last_llm_output,
             turn_angle_deg=float(self.settings.get("discrete_turn_deg", 15.0)),
-            forward_distance_cm=float(
-                self.settings.get("discrete_forward_cm", 25.0)
-            ),
+            forward_distance_cm=float(self.settings.get("discrete_forward_cm", 25.0)),
         )
 
     def close(self) -> None:
@@ -293,9 +289,7 @@ def planner_result_from_output(
                 if remaining_action_count is not None
                 else max(len(action_sequence or []) - 1, 0)
             ),
-            forward_distance_cm=(
-                forward_distance_cm if action_code == 1 else None
-            ),
+            forward_distance_cm=(forward_distance_cm if action_code == 1 else None),
             stop=stop,
             reason=reason,
             raw_output=raw_output,
@@ -356,9 +350,7 @@ def planner_result_from_output(
     )
 
 
-def action_to_heading(
-    action: Any, *, turn_angle_deg: float = 15.0
-) -> float | None:
+def action_to_heading(action: Any, *, turn_angle_deg: float = 15.0) -> float | None:
     current = _current_action_code(action)
     if current == 1:
         return 0.0

@@ -228,7 +228,6 @@ class FileRunStore:
                 "before_frame_id",
                 "after_frame_id",
                 "steps_used",
-                "requires_reobservation",
                 "command",
             }
         }

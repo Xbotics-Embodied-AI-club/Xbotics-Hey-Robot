@@ -70,44 +70,6 @@ def test_feishu_channel_send_formats_text_without_sdk() -> None:
     assert sent == [("chat_id", "oc_chat_1", "text", "om_1")]
 
 
-def test_feishu_channel_send_formats_notification_card_without_sdk() -> None:
-    sent: list[tuple[str, str, str, str | None]] = []
-
-    class TestFeishuChannel(FeishuChannel):
-        def _send_or_reply_sync(
-            self,
-            receive_id_type: str,
-            chat_id: str,
-            msg_type: str,
-            _content: str,
-            message_id: str | None,
-        ) -> None:
-            sent.append((receive_id_type, chat_id, msg_type, message_id))
-
-    channel = TestFeishuChannel(
-        ChannelContext(
-            name="feishu", spec=ChannelSpec(type="feishu"), deployment_id="d1"
-        )
-    )
-    channel._client = object()
-
-    asyncio.run(
-        channel.send(
-            AgentReply(
-                envelope=Envelope(channel="feishu", chat_id="oc_chat_1"),
-                text="watchdog stale",
-                metadata={
-                    "notification": True,
-                    "severity": "warning",
-                    "notification_kind": "task_watchdog",
-                },
-            )
-        )
-    )
-
-    assert sent == [("chat_id", "oc_chat_1", "interactive", None)]
-
-
 def test_feishu_channel_on_message_builds_user_turn() -> None:
     channel = FeishuChannel(
         ChannelContext(

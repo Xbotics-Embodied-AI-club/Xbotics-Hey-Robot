@@ -11,8 +11,6 @@ from hey_robot.cognition.tools.task_tools import CompleteTaskTool, ControlTaskTo
 
 
 class SkillCatalogView(Protocol):
-    def get(self, name: str) -> Any: ...
-
     def list(self) -> tuple[Any, ...]: ...
 
 
@@ -45,7 +43,6 @@ class ToolRegistry:
                 raise ValueError(f"Agent tool does not implement prepare(): {name!r}")
             core_tools[name] = tool
         self._tools = core_tools
-        self._catalog = deps.skill_catalog
 
     @property
     def definitions(self) -> list[dict[str, Any]]:
@@ -55,19 +52,8 @@ class ToolRegistry:
     def names(self) -> frozenset[str]:
         return frozenset(self._tools)
 
-    @property
-    def instructions(self) -> str:
-        return (
-            "机器人能力和 Harness 能力以独立工具提供。"
-            "只调用当前 Tool schema 中存在的能力。"
-        )
-
     def prepare(self, name: str, arguments: dict[str, Any]) -> PreparedToolCall:
         tool = self._tools.get(name)
         if tool is None:
             raise KeyError(name)
         return cast(PreparedToolCall, tool.prepare(arguments))
-
-    def proposal(self, name: str, arguments: dict[str, Any]) -> PreparedToolCall:
-        """Compatibility alias for the old proposal-oriented registry API."""
-        return self.prepare(name, arguments)

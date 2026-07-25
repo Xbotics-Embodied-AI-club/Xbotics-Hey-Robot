@@ -40,28 +40,6 @@ skills:
 agent_runtime:
   enabled: true
   robot_id: mock0
-  entity_catalog:
-    - robot:mock0
-    - room:front_workspace
-    - scene
-
-notifications:
-  defaults:
-    channels: [web]
-  channels:
-    web: {}
-    voice:
-      chat_id: mock-voice
-      sender_id: voice-user
-    feishu:
-      chat_id: ""
-  kinds:
-    task_watchdog:
-      severity: critical
-      channels: [web]
-    proactive_message:
-      severity: info
-      channels: [web]
 
 identity:
   enabled: true

@@ -69,13 +69,6 @@ class IdentitySpec:
 
 
 @dataclass(frozen=True)
-class NotificationSpec:
-    defaults: dict[str, Any] = field(default_factory=dict)
-    channels: dict[str, dict[str, Any]] = field(default_factory=dict)
-    kinds: dict[str, dict[str, Any]] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
 class RobotSpec:
     type: str
     enabled: bool = True
@@ -203,14 +196,7 @@ class AgentRuntimeSpec:
     enabled: bool = False
     robot_id: str | None = None
     hard_max_wall_time_sec: float = 3600.0
-    hard_max_continuations: int = 40
     hard_max_skills: int = 24
-    skill_result_timeout_sec: float = 45.0
-    min_battery_percentage: float = 20.0
-    entity_catalog: tuple[str, ...] = ()
-    entity_aliases: dict[str, str] = field(default_factory=dict)
-    enable_auto_reobserve_once: bool = False
-    enable_no_progress_review: bool = False
 
 
 @dataclass(frozen=True)
@@ -218,7 +204,6 @@ class DeploymentConfig:
     deployment: DeploymentSpec = field(default_factory=DeploymentSpec)
     logging: LoggingSpec = field(default_factory=LoggingSpec)
     resources: ResourceSpec = field(default_factory=ResourceSpec)
-    notifications: NotificationSpec = field(default_factory=NotificationSpec)
     identity: IdentitySpec = field(default_factory=IdentitySpec)
     channels: dict[str, ChannelSpec] = field(default_factory=dict)
     robots: dict[str, RobotSpec] = field(default_factory=dict)
@@ -317,22 +302,6 @@ class DeploymentConfig:
             episodes_root=str(episodes_data.get("root", "runtime/episodes")),
             events_max_items=int(events_data.get("retain", 1000)),
         )
-        notifications_data = data.get("notifications", {}) or {}
-        notifications = NotificationSpec(
-            defaults=dict(notifications_data.get("defaults", {}) or {}),
-            channels={
-                str(name): dict(value or {})
-                for name, value in dict(
-                    notifications_data.get("channels", {}) or {}
-                ).items()
-            },
-            kinds={
-                str(name): dict(value or {})
-                for name, value in dict(
-                    notifications_data.get("kinds", {}) or {}
-                ).items()
-            },
-        )
         identity_data = data.get("identity", {}) or {}
         identity = IdentitySpec(
             enabled=bool(identity_data.get("enabled", True)),
@@ -366,7 +335,6 @@ class DeploymentConfig:
             deployment=deployment,
             logging=logging_spec,
             resources=resources,
-            notifications=notifications,
             identity=identity,
             channels={
                 name: ChannelSpec(
@@ -518,33 +486,7 @@ class DeploymentConfig:
                 hard_max_wall_time_sec=float(
                     agent_runtime_data.get("hard_max_wall_time_sec", 3600.0)
                 ),
-                hard_max_continuations=int(
-                    agent_runtime_data.get("hard_max_continuations", 40)
-                ),
                 hard_max_skills=int(agent_runtime_data.get("hard_max_skills", 24)),
-                skill_result_timeout_sec=float(
-                    agent_runtime_data.get("skill_result_timeout_sec", 45.0)
-                ),
-                min_battery_percentage=float(
-                    agent_runtime_data.get("min_battery_percentage", 20.0)
-                ),
-                entity_catalog=tuple(
-                    str(item)
-                    for item in agent_runtime_data.get("entity_catalog", ()) or ()
-                ),
-                entity_aliases={
-                    str(alias).strip(): str(entity_id).strip()
-                    for alias, entity_id in dict(
-                        agent_runtime_data.get("entity_aliases", {}) or {}
-                    ).items()
-                    if str(alias).strip() and str(entity_id).strip()
-                },
-                enable_auto_reobserve_once=bool(
-                    agent_runtime_data.get("enable_auto_reobserve_once", False)
-                ),
-                enable_no_progress_review=bool(
-                    agent_runtime_data.get("enable_no_progress_review", False)
-                ),
             ),
         )
 

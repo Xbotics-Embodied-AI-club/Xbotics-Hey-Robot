@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import time
 import uuid
 from collections.abc import Callable
@@ -285,11 +284,4 @@ def _validate_observation(observation: dict[str, Any]) -> None:
         raise EpisodeError(
             "observation_schema_mismatch",
             f"observation must contain three cameras, got {sorted(pixels)}",
-        )
-
-
-def validate_finite_action(action: list[float]) -> None:
-    if len(action) != 12 or not all(math.isfinite(value) for value in action):
-        raise EpisodeError(
-            "action_schema_mismatch", "action must contain exactly 12 finite values"
         )

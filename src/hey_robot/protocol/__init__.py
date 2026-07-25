@@ -1,6 +1,7 @@
 """渠道、Agent、策略和机器人共用的稳定协议接口。"""
 
 from hey_robot.protocol.messages import (
+    AgentControl,
     AgentReply,
     ArtifactRef,
     ConversationResult,
@@ -31,6 +32,7 @@ from hey_robot.protocol.skills import (
 from hey_robot.protocol.topics import Topics
 
 __all__ = [
+    "AgentControl",
     "AgentReply",
     "ArtifactRef",
     "ConversationResult",

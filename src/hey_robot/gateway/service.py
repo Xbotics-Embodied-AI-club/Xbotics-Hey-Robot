@@ -7,7 +7,7 @@ import re
 import time
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from hey_robot.bus.factory import create_bus_client
 from hey_robot.channels import (
@@ -34,6 +34,7 @@ from hey_robot.health import HealthReportService
 from hey_robot.logging import HeyRobotLogger
 from hey_robot.persistence import FileRunStore
 from hey_robot.protocol import (
+    AgentControl,
     AgentReply,
     ConversationResult,
     ConversationTurn,
@@ -172,10 +173,15 @@ class GatewayService:
             allocation.episode_id,
             replace(turn, envelope=envelope.child(episode_id=allocation.episode_id)),
         )
-        if await self._handle_safety_command(turn.text, envelope, interaction_id):
+        session_key = self._session_key(envelope)
+        if await self._handle_safety_command(
+            turn.text, envelope, interaction_id, session_key
+        ):
             self.interaction_receipts.complete(interaction_id, "safety_command")
             return
-        session_key = self._session_key(envelope)
+        kind: Literal["prompt", "steer"] = (
+            "steer" if turn.intent in {"steer", "follow_up"} else "prompt"
+        )
         await self.bus.publish(
             self.topics.conversation_turn,
             to_payload(
@@ -184,6 +190,7 @@ class GatewayService:
                     session_key,
                     interaction_id,
                     turn.text,
+                    kind,
                 )
             ),
         )
@@ -211,7 +218,11 @@ class GatewayService:
         return f"{self.config.deployment.id}:{envelope.agent_id or self._agent_id(None)}:{principal}"
 
     async def _handle_safety_command(
-        self, text: str, envelope: Envelope, interaction_id: str
+        self,
+        text: str,
+        envelope: Envelope,
+        interaction_id: str,
+        session_key: str,
     ) -> bool:
         """路由高优先级控制，无需等待 LLM 回复。"""
         normalized = " ".join(str(text or "").lower().split())
@@ -246,11 +257,51 @@ class GatewayService:
             "\u53d6\u6d88\u5f53\u524d\u4efb\u52a1",
         }
         if compact in {item.replace(" ", "") for item in cancel}:
-            return False
+            await self.bus.publish(
+                self.topics.agent_control,
+                to_payload(
+                    AgentControl(
+                        envelope,
+                        session_key,
+                        interaction_id,
+                        "cancel",
+                        "user cancelled current task",
+                    )
+                ),
+            )
+            return True
+
+        pause = {"pause", "pause task", "暂停", "暂停任务"}
+        if compact in {item.replace(" ", "") for item in pause}:
+            await self.bus.publish(
+                self.topics.agent_control,
+                to_payload(
+                    AgentControl(
+                        envelope,
+                        session_key,
+                        interaction_id,
+                        "pause",
+                        "user paused current task",
+                    )
+                ),
+            )
+            return True
 
         confirmations = {"confirm", "yes", "\u786e\u8ba4", "\u7ee7\u7eed"}
         if compact in confirmations:
-            return False
+            await self.bus.publish(
+                self.topics.agent_control,
+                to_payload(
+                    AgentControl(
+                        envelope,
+                        session_key,
+                        interaction_id,
+                        "resume",
+                        "user resumed current task",
+                    )
+                ),
+            )
+            return True
 
         query = {
             "status",
@@ -723,7 +774,6 @@ def _task_payload(task: AgentTask) -> dict[str, Any]:
         "created_at": task.created_at,
         "updated_at": task.updated_at,
         "step_count": task.step_count,
-        "continuation_count": task.continuation_count,
         "last_error": task.last_error,
         "final_recap": task.final_recap,
     }

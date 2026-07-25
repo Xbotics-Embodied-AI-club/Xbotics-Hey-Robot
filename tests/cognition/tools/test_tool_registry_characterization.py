@@ -7,7 +7,6 @@ import pytest
 from hey_robot.cognition.tools import (
     HarnessTool,
     HarnessToolCall,
-    ToolDispatcher,
     ToolSpec,
 )
 from hey_robot.cognition.tools.models import SkillCallProposal
@@ -118,24 +117,3 @@ def test_harness_tool_rejects_unknown_arguments_before_handler() -> None:
         registry.prepare("bounded", {"unsafe": True})
 
     assert called is False
-
-
-@pytest.mark.asyncio
-async def test_dispatcher_routes_typed_call_without_owning_execution_state() -> None:
-    async def execute(arguments: dict[str, object]) -> ToolOutcome:
-        return ToolOutcome("completed", str(arguments["value"]))
-
-    call = HarnessToolCall("remember", {"value": "cup"}, execute)
-    seen: list[tuple[HarnessToolCall, object]] = []
-
-    async def route(prepared, context):
-        assert isinstance(prepared, HarnessToolCall)
-        seen.append((prepared, context))
-        return await prepared.execute()
-
-    dispatcher = ToolDispatcher({HarnessToolCall: route})
-
-    outcome = await dispatcher.dispatch(call, "turn-context")
-
-    assert outcome == ToolOutcome("completed", "cup")
-    assert seen == [(call, "turn-context")]

@@ -52,29 +52,6 @@ def test_cli_channel_send_and_input_loop(monkeypatch, capsys) -> None:
     assert turns[0].envelope.robot_id is None
 
 
-def test_cli_channel_formats_notifications(capsys) -> None:
-    channel = CLIChannel(
-        ChannelContext(name="cli", deployment_id="d1", spec=ChannelSpec(type="cli"))
-    )
-
-    asyncio.run(
-        channel.send(
-            AgentReply(
-                envelope=Envelope(channel="cli"),
-                text="watchdog stale",
-                metadata={
-                    "notification": True,
-                    "severity": "warning",
-                    "notification_kind": "task_watchdog",
-                },
-            )
-        )
-    )
-
-    out = capsys.readouterr().out
-    assert "assistant> [WARNING] task watchdog: watchdog stale" in out
-
-
 def test_cli_channel_streams_deltas_without_repeating_final_text(capsys) -> None:
     channel = CLIChannel(
         ChannelContext(name="cli", deployment_id="d1", spec=ChannelSpec(type="cli"))

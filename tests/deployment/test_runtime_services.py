@@ -83,7 +83,7 @@ def test_runner_builds_services_when_configured(tmp_path) -> None:
                 }
             },
             "channels": {"web": {"type": "web", "enabled": True}},
-            "agent_runtime": {"enabled": True, "entity_catalog": ["robot:mock0"]},
+            "agent_runtime": {"enabled": True},
         }
     )
 

@@ -29,14 +29,6 @@ deployment:
 agent_runtime:
   enabled: true
   robot_id: sim_robot
-  entity_catalog:
-    - robot:sim_robot
-    - room:living_room
-    - room:dining_room
-    - room:kitchen
-    - object:wand
-    - fixture:dock
-    - scene
 
 logging:
   level: INFO
@@ -73,19 +65,6 @@ skills:
     - approach_object
     - stop_motion
     - reset_posture
-
-notifications:
-  defaults:
-    channels: [web]
-  channels:
-    web: {}
-    voice:
-      chat_id: sim-voice
-      sender_id: voice-user
-  kinds:
-    task_watchdog:
-      severity: critical
-      channels: [web]
 
 identity:
   enabled: true

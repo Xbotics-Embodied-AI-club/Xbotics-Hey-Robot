@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from hey_robot.cognition.tools.robot import ToolDependencies, ToolRegistry
+from hey_robot.cognition.tools.registry import ToolDependencies, ToolRegistry
 from hey_robot.skills.models import Skill, SkillResult
 
 ROOT = Path(__file__).resolve().parents[2]

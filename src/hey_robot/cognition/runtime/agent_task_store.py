@@ -18,7 +18,7 @@ from hey_robot.cognition.tools.skill_tools import (
 from hey_robot.protocol import Envelope, ToolOutcome
 from hey_robot.protocol.messages import to_payload
 
-TaskStatus = Literal["active", "completed", "blocked", "cancelled", "failed"]
+TaskStatus = Literal["active", "paused", "completed", "blocked", "cancelled", "failed"]
 StepStatus = Literal["pending", "running", "completed", "failed", "cancelled"]
 
 TERMINAL_STATUSES = frozenset({"completed", "blocked", "cancelled", "failed"})
@@ -41,7 +41,6 @@ class AgentTask:
     created_at: float
     updated_at: float
     step_count: int
-    continuation_count: int
     deadline_at: float | None
     last_error: str | None
     final_recap: str | None
@@ -97,10 +96,23 @@ class AgentTaskStore:
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL,
                 step_count INTEGER NOT NULL DEFAULT 0,
-                continuation_count INTEGER NOT NULL DEFAULT 0,
                 deadline_at REAL,
                 last_error TEXT,
-                final_recap TEXT
+                final_recap TEXT,
+                resume_required INTEGER NOT NULL DEFAULT 0,
+                resume_after_sequence INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        self._db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS task_amendments (
+                task_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                text TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                PRIMARY KEY(task_id, sequence),
+                FOREIGN KEY(task_id) REFERENCES sustained_tasks(task_id)
             )
             """
         )
@@ -115,17 +127,21 @@ class AgentTaskStore:
                 started_at REAL NOT NULL,
                 completed_at REAL,
                 evidence_json TEXT NOT NULL,
+                run_id TEXT,
+                tool_call_id TEXT,
+                tool_name TEXT,
+                arguments_json TEXT,
+                status TEXT NOT NULL DEFAULT 'completed',
+                last_event_sequence INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY(task_id) REFERENCES sustained_tasks(task_id)
             )
             """
         )
-        self._migrate_sustained_tasks()
-        self._migrate_task_steps()
         self._db.execute(
             """
-            CREATE UNIQUE INDEX IF NOT EXISTS one_active_sustained_task
+            CREATE UNIQUE INDEX IF NOT EXISTS one_open_sustained_task
             ON sustained_tasks(session_key)
-            WHERE status = 'active'
+            WHERE status IN ('active', 'paused')
             """
         )
         self._db.execute(
@@ -134,47 +150,6 @@ class AgentTaskStore:
             ON task_steps(task_id, sequence)
             """
         )
-        self._db.commit()
-
-    def _migrate_sustained_tasks(self) -> None:
-        columns = {
-            str(row[1])
-            for row in self._db.execute("PRAGMA table_info(sustained_tasks)").fetchall()
-        }
-        migrations = {
-            "channel": "ALTER TABLE sustained_tasks ADD COLUMN channel TEXT",
-            "chat_id": "ALTER TABLE sustained_tasks ADD COLUMN chat_id TEXT",
-            "sender_id": "ALTER TABLE sustained_tasks ADD COLUMN sender_id TEXT",
-            "user_id": "ALTER TABLE sustained_tasks ADD COLUMN user_id TEXT",
-            "agent_id": "ALTER TABLE sustained_tasks ADD COLUMN agent_id TEXT",
-            "episode_id": "ALTER TABLE sustained_tasks ADD COLUMN episode_id TEXT",
-        }
-        for name, statement in migrations.items():
-            if name not in columns:
-                self._db.execute(statement)
-
-    def _migrate_task_steps(self) -> None:
-        columns = {
-            str(row[1])
-            for row in self._db.execute("PRAGMA table_info(task_steps)").fetchall()
-        }
-        migrations = {
-            "run_id": "ALTER TABLE task_steps ADD COLUMN run_id TEXT",
-            "tool_call_id": "ALTER TABLE task_steps ADD COLUMN tool_call_id TEXT",
-            "tool_name": "ALTER TABLE task_steps ADD COLUMN tool_name TEXT",
-            "arguments_json": "ALTER TABLE task_steps ADD COLUMN arguments_json TEXT",
-            "status": (
-                "ALTER TABLE task_steps ADD COLUMN status TEXT NOT NULL "
-                "DEFAULT 'completed'"
-            ),
-            "last_event_sequence": (
-                "ALTER TABLE task_steps ADD COLUMN last_event_sequence INTEGER NOT NULL "
-                "DEFAULT 0"
-            ),
-        }
-        for name, statement in migrations.items():
-            if name not in columns:
-                self._db.execute(statement)
         self._db.execute(
             """
             CREATE UNIQUE INDEX IF NOT EXISTS task_steps_run_id
@@ -182,6 +157,7 @@ class AgentTaskStore:
             WHERE run_id IS NOT NULL
             """
         )
+        self._db.commit()
 
     def create_task(
         self,
@@ -192,7 +168,7 @@ class AgentTaskStore:
         ui_summary: str = "",
         deadline_at: float | None = None,
     ) -> AgentTask:
-        if self.active_task(session_key) is not None:
+        if self.current_task(session_key) is not None:
             raise ValueError("当前会话已有进行中的持续任务。")
         robot_id = envelope.robot_id or ""
         if not robot_id:
@@ -204,10 +180,10 @@ class AgentTaskStore:
             INSERT INTO sustained_tasks (
                 task_id, session_key, robot_id, objective, ui_summary, status,
                 channel, chat_id, sender_id, user_id, agent_id, episode_id,
-                created_at, updated_at, step_count, continuation_count,
+                created_at, updated_at, step_count,
                 deadline_at, last_error, final_recap
             )
-            VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, NULL, NULL)
+            VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, NULL)
             """,
             (
                 task_id,
@@ -237,7 +213,7 @@ class AgentTaskStore:
             """
             SELECT task_id, session_key, robot_id, objective, ui_summary, status,
                    channel, chat_id, sender_id, user_id, agent_id, episode_id,
-                   created_at, updated_at, step_count, continuation_count,
+                   created_at, updated_at, step_count,
                    deadline_at, last_error, final_recap
             FROM sustained_tasks
             WHERE session_key=? AND status='active'
@@ -248,12 +224,94 @@ class AgentTaskStore:
         ).fetchone()
         return _task_from_row(row) if row is not None else None
 
+    def current_task(self, session_key: str) -> AgentTask | None:
+        """Return the one non-terminal task, including a paused task."""
+        row = self._db.execute(
+            """
+            SELECT task_id, session_key, robot_id, objective, ui_summary, status,
+                   channel, chat_id, sender_id, user_id, agent_id, episode_id,
+                   created_at, updated_at, step_count,
+                   deadline_at, last_error, final_recap
+            FROM sustained_tasks
+            WHERE session_key=? AND status IN ('active', 'paused')
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (session_key,),
+        ).fetchone()
+        return _task_from_row(row) if row is not None else None
+
+    def resumable_tasks(self) -> tuple[AgentTask, ...]:
+        rows = self._db.execute(
+            """
+            SELECT task_id, session_key, robot_id, objective, ui_summary, status,
+                   channel, chat_id, sender_id, user_id, agent_id, episode_id,
+                   created_at, updated_at, step_count,
+                   deadline_at, last_error, final_recap
+            FROM sustained_tasks
+            WHERE status='active' AND resume_required=1
+            ORDER BY updated_at ASC
+            """
+        ).fetchall()
+        return tuple(_task_from_row(row) for row in rows)
+
+    def resume_after_sequence(self, task_id: str) -> int:
+        row = self._db.execute(
+            "SELECT resume_after_sequence FROM sustained_tasks WHERE task_id=?",
+            (task_id,),
+        ).fetchone()
+        return int(row[0]) if row is not None else 0
+
+    def append_amendment(self, task_id: str, text: str) -> None:
+        normalized = text.strip()
+        task = self.task(task_id)
+        if task is None or task.status not in {"active", "paused"}:
+            raise ValueError("cannot amend a terminal task")
+        if not normalized:
+            raise ValueError("task amendment must be non-empty")
+        sequence = int(
+            self._db.execute(
+                "SELECT COALESCE(MAX(sequence), 0) + 1 FROM task_amendments "
+                "WHERE task_id=?",
+                (task_id,),
+            ).fetchone()[0]
+        )
+        self._db.execute(
+            "INSERT INTO task_amendments VALUES (?, ?, ?, ?)",
+            (task_id, sequence, normalized, time.time()),
+        )
+        self._db.execute(
+            "UPDATE sustained_tasks SET updated_at=? WHERE task_id=?",
+            (time.time(), task_id),
+        )
+        self._db.commit()
+
+    def amendments(self, task_id: str) -> tuple[str, ...]:
+        rows = self._db.execute(
+            "SELECT text FROM task_amendments WHERE task_id=? ORDER BY sequence ASC",
+            (task_id,),
+        ).fetchall()
+        return tuple(str(row[0]) for row in rows)
+
+    def effective_objective(self, task_id: str) -> str:
+        task = self.task(task_id)
+        if task is None:
+            raise ValueError("unknown task")
+        amendments = self.amendments(task_id)
+        if not amendments:
+            return task.objective
+        return (
+            task.objective
+            + "\n\n用户后续修正：\n"
+            + "\n".join(f"- {item}" for item in amendments)
+        )
+
     def task(self, task_id: str) -> AgentTask | None:
         row = self._db.execute(
             """
             SELECT task_id, session_key, robot_id, objective, ui_summary, status,
                    channel, chat_id, sender_id, user_id, agent_id, episode_id,
-                   created_at, updated_at, step_count, continuation_count,
+                   created_at, updated_at, step_count,
                    deadline_at, last_error, final_recap
             FROM sustained_tasks
             WHERE task_id=?
@@ -270,7 +328,7 @@ class AgentTaskStore:
                 """
                 SELECT task_id, session_key, robot_id, objective, ui_summary, status,
                        channel, chat_id, sender_id, user_id, agent_id, episode_id,
-                       created_at, updated_at, step_count, continuation_count,
+                       created_at, updated_at, step_count,
                        deadline_at, last_error, final_recap
                 FROM sustained_tasks
                 WHERE robot_id=?
@@ -284,7 +342,7 @@ class AgentTaskStore:
                 """
                 SELECT task_id, session_key, robot_id, objective, ui_summary, status,
                        channel, chat_id, sender_id, user_id, agent_id, episode_id,
-                       created_at, updated_at, step_count, continuation_count,
+                       created_at, updated_at, step_count,
                        deadline_at, last_error, final_recap
                 FROM sustained_tasks
                 ORDER BY updated_at DESC
@@ -342,10 +400,11 @@ class AgentTaskStore:
         self._db.execute(
             """
             UPDATE sustained_tasks
-            SET step_count=?, updated_at=?
+            SET step_count=?, updated_at=?, resume_required=1,
+                resume_after_sequence=?
             WHERE task_id=?
             """,
-            (sequence, now, task_id),
+            (sequence, now, sequence, task_id),
         )
         self._db.commit()
         return AgentTaskStep(
@@ -401,7 +460,11 @@ class AgentTaskStore:
             ),
         )
         self._db.execute(
-            "UPDATE sustained_tasks SET step_count=?, updated_at=? WHERE task_id=?",
+            """
+            UPDATE sustained_tasks
+            SET step_count=?, updated_at=?, resume_required=0
+            WHERE task_id=?
+            """,
             (sequence, now, task_id),
         )
         self._db.commit()
@@ -415,27 +478,6 @@ class AgentTaskStore:
             None,
             (),
             status="pending",
-            run_id=run_id,
-            tool_call_id=tool_call_id,
-        )
-
-    def start_skill_step(
-        self,
-        task_id: str,
-        *,
-        run_id: str,
-        tool_call_id: str,
-        tool_name: str,
-        arguments: dict[str, Any],
-    ) -> AgentTaskStep:
-        return self.add_pending_step(
-            task_id,
-            SkillCallProposal(
-                "observation" if tool_name == "inspect_scene" else "skill",
-                tool_name,
-                _objective(tool_name, arguments),
-                dict(arguments),
-            ),
             run_id=run_id,
             tool_call_id=tool_call_id,
         )
@@ -479,6 +521,15 @@ class AgentTaskStore:
                 run_id,
             ),
         )
+        if status in {"completed", "failed", "cancelled"}:
+            self._db.execute(
+                """
+                UPDATE sustained_tasks
+                SET resume_required=1, resume_after_sequence=?, updated_at=?
+                WHERE task_id=? AND status='active'
+                """,
+                (int(row[2]), time.time(), str(row[1])),
+            )
         self._db.commit()
         return AgentTaskStep(
             str(row[0]),
@@ -557,26 +608,34 @@ class AgentTaskStore:
         ).fetchall()
         return tuple(_step_from_row(row) for row in rows)
 
-    def continue_task(self, task_id: str) -> int:
-        task = self.task(task_id)
-        if task is None or task.status != "active":
-            raise ValueError("cannot continue a non-active task")
-        count = task.continuation_count + 1
+    def pause_task(self, task_id: str, reason: str) -> None:
         self._db.execute(
             """
             UPDATE sustained_tasks
-            SET continuation_count=?, updated_at=?
-            WHERE task_id=?
+            SET status='paused', updated_at=?, last_error=?, resume_required=0
+            WHERE task_id=? AND status='active'
             """,
-            (count, time.time(), task_id),
+            (time.time(), reason, task_id),
         )
         self._db.commit()
-        return count
 
-    def complete_task(
-        self, task_id: str, *, recap: str, evidence_ids: tuple[str, ...]
-    ) -> CompletionCheck:
-        check = self.check_completion(task_id, evidence_ids)
+    def resume_task(self, task_id: str) -> AgentTask:
+        self._db.execute(
+            """
+            UPDATE sustained_tasks
+            SET status='active', updated_at=?, last_error=NULL, resume_required=1
+            WHERE task_id=? AND status='paused'
+            """,
+            (time.time(), task_id),
+        )
+        self._db.commit()
+        task = self.task(task_id)
+        if task is None or task.status != "active":
+            raise ValueError("cannot resume a non-paused task")
+        return task
+
+    def complete_task(self, task_id: str, *, recap: str) -> CompletionCheck:
+        check = self.check_completion(task_id)
         if not check.accepted:
             return check
         self._finish(task_id, "completed", final_recap=recap)
@@ -594,46 +653,11 @@ class AgentTaskStore:
             raise ValueError("control_task status must be terminal")
         self._finish(task_id, status, last_error=reason, final_recap=reason)
 
-    def check_completion(
-        self, task_id: str, evidence_ids: tuple[str, ...]
-    ) -> CompletionCheck:
-        if not evidence_ids:
-            return CompletionCheck(
-                False, "complete_task 必须引用至少一个 evidence ID。"
-            )
+    def check_completion(self, task_id: str) -> CompletionCheck:
         steps = self.recent_steps(task_id, limit=200)
-        known: dict[str, AgentTaskStep] = {}
-        for step in steps:
-            for evidence_id in step.evidence_ids:
-                known[evidence_id] = step
-        missing = [item for item in evidence_ids if item not in known]
-        if missing:
-            return CompletionCheck(
-                False, "complete_task 引用了不存在或不属于当前任务的 evidence ID。"
-            )
-        referenced = [known[item] for item in evidence_ids]
-        if any(step.outcome.status != "completed" for step in referenced):
-            return CompletionCheck(False, "完成证据必须来自已成功完成的步骤。")
-        last_world_change = max(
-            (
-                step.sequence
-                for step in steps
-                if step.outcome.status == "completed"
-                and step.proposal.intent_kind == "skill"
-            ),
-            default=0,
-        )
-        if last_world_change and not any(
-            step.sequence > last_world_change
-            and step.proposal.intent_kind == "observation"
-            and step.outcome.status == "completed"
-            for step in referenced
-        ):
-            return CompletionCheck(
-                False,
-                "发生移动或转向后，完成当前场景相关任务必须引用动作后的观察证据。",
-            )
-        return CompletionCheck(True, "完成证据有效。")
+        if not any(step.outcome.status == "completed" for step in steps):
+            return CompletionCheck(False, "当前任务还没有成功完成的步骤。")
+        return CompletionCheck(True, "当前任务已有成功步骤。")
 
     def projection(self, session_key: str) -> str:
         task = self.active_task(session_key)
@@ -644,8 +668,7 @@ class AgentTaskStore:
             (
                 "当前持续任务："
                 f"id={task.task_id}；objective={task.objective}；"
-                f"status={task.status}；steps={task.step_count}；"
-                f"continuations={task.continuation_count}。"
+                f"status={task.status}；steps={task.step_count}。"
             )
         ]
         if steps:
@@ -673,7 +696,8 @@ class AgentTaskStore:
         self._db.execute(
             """
             UPDATE sustained_tasks
-            SET status=?, updated_at=?, last_error=?, final_recap=?
+            SET status=?, updated_at=?, last_error=?, final_recap=?,
+                resume_required=0
             WHERE task_id=? AND status='active'
             """,
             (status, time.time(), last_error, final_recap, task_id),
@@ -682,22 +706,6 @@ class AgentTaskStore:
 
 
 def _task_from_row(row: tuple[Any, ...]) -> AgentTask:
-    if len(row) == 13:
-        row = (
-            row[0],
-            row[1],
-            row[2],
-            row[3],
-            row[4],
-            row[5],
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            *row[6:],
-        )
     return AgentTask(
         task_id=str(row[0]),
         session_key=str(row[1]),
@@ -714,10 +722,9 @@ def _task_from_row(row: tuple[Any, ...]) -> AgentTask:
         created_at=float(row[12]),
         updated_at=float(row[13]),
         step_count=int(row[14]),
-        continuation_count=int(row[15]),
-        deadline_at=float(row[16]) if row[16] is not None else None,
-        last_error=str(row[17]) if row[17] is not None else None,
-        final_recap=str(row[18]) if row[18] is not None else None,
+        deadline_at=float(row[15]) if row[15] is not None else None,
+        last_error=str(row[16]) if row[16] is not None else None,
+        final_recap=str(row[17]) if row[17] is not None else None,
     )
 
 
@@ -754,13 +761,3 @@ def _evidence_ids(
         if isinstance(item, str) and item.strip()
     )
     return tuple(dict.fromkeys(ids))
-
-
-def _objective(name: str, arguments: dict[str, Any]) -> str:
-    question = arguments.get("question")
-    if isinstance(question, str) and question.strip():
-        return question.strip()
-    task_prompt = arguments.get("task_prompt") or arguments.get("objective")
-    if isinstance(task_prompt, str) and task_prompt.strip():
-        return task_prompt.strip()
-    return f"execute {name}"

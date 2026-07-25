@@ -3,13 +3,26 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from typing import Literal
 
-from hey_robot.cognition.runtime.agent_task_store import AgentTaskStep, AgentTaskStore
+from hey_robot.cognition.runtime.agent_task_store import (
+    AgentTaskStep,
+    AgentTaskStore,
+    TaskStatus,
+)
 from hey_robot.cognition.tools.skill_tools import SkillCallProposal
 from hey_robot.protocol import Envelope, ToolOutcome
 from hey_robot.skills.client import SkillClient
 from hey_robot.skills.models import SkillCommand, SkillEvent
+
+
+@dataclass(frozen=True)
+class AppliedSkillEvent:
+    step: AgentTaskStep
+    task_status: TaskStatus
+    should_resume: bool
+    final_text: str | None = None
 
 
 class TaskCoordinator:
@@ -33,13 +46,14 @@ class TaskCoordinator:
         task = self._tasks.task(task_id)
         if task is None or task.status != "active":
             raise ValueError("cannot submit a skill for a non-active task")
+        if self._tasks.active_run_ids(task_id):
+            raise RuntimeError("task already has an active skill run")
         run_id = f"run_{uuid.uuid4().hex}"
-        step = self._tasks.start_skill_step(
+        step = self._tasks.add_pending_step(
             task_id,
+            proposal,
             run_id=run_id,
             tool_call_id=tool_call_id,
-            tool_name=proposal.name,
-            arguments=proposal.arguments,
         )
         command = SkillCommand(
             envelope=envelope.child(robot_id=task.robot_id),
@@ -75,32 +89,52 @@ class TaskCoordinator:
             return failed
         return step
 
-    async def reconcile_active_runs(self) -> tuple[AgentTaskStep, ...]:
-        """将 transport 已知 event 回填到持久化的 non-terminal step。
-
-        transport 不知道该 run 时可以返回 ``None``，此时 step 保持 pending/running。
-        持有 durable receipt 的 Worker 会把失去执行 ownership 的 non-terminal run 收敛为
-        ``failed/execution_lost``，Agent process 不会重放 physical robot command。
-        """
-        return tuple(step for _event, step in await self.reconcile_active_run_events())
-
-    async def reconcile_active_run_events(
+    async def reconcile_active_run_results(
         self,
-    ) -> tuple[tuple[SkillEvent, AgentTaskStep], ...]:
-        """返回已回填的 event/step，供 Agent startup resume 使用。"""
-        reconciled: list[tuple[SkillEvent, AgentTaskStep]] = []
+    ) -> tuple[tuple[SkillEvent, AppliedSkillEvent], ...]:
+        """Reconcile active runs while retaining task-level completion semantics."""
+        reconciled: list[tuple[SkillEvent, AppliedSkillEvent]] = []
         for step in self._tasks.active_skill_steps():
             if step.run_id is None:
                 continue
             event = await self._skills.status(step.run_id)
             if event is None:
                 continue
-            applied = self.apply(event)
+            applied = self.apply_result(event)
             if applied is not None:
                 reconciled.append((event, applied))
         return tuple(reconciled)
 
     def apply(self, event: SkillEvent) -> AgentTaskStep | None:
+        applied = self.apply_result(event)
+        return applied.step if applied is not None else None
+
+    def apply_result(self, event: SkillEvent) -> AppliedSkillEvent | None:
+        step = self._apply_step(event)
+        if step is None:
+            return None
+        task = self._tasks.task(step.task_id)
+        if task is None:
+            return None
+        terminal = event.phase in {"completed", "failed", "cancelled"}
+        final_text: str | None = None
+        if (
+            terminal
+            and event.result is not None
+            and event.result.success
+            and event.result.data.get("termination_reason") == "environment_done"
+        ):
+            final_text = event.result.summary or "Environment reported task completion."
+            self._tasks.complete_from_environment(step.task_id, recap=final_text)
+            task = self._tasks.task(step.task_id) or task
+        return AppliedSkillEvent(
+            step,
+            task.status,
+            terminal and task.status == "active",
+            final_text,
+        )
+
+    def _apply_step(self, event: SkillEvent) -> AgentTaskStep | None:
         if event.phase == "accepted":
             return self._tasks.apply_skill_event(
                 event.run_id,
@@ -148,19 +182,9 @@ class TaskCoordinator:
             operation_id=event.run_id,
             retryable=event.result.failure_mode in {"timeout", "unavailable"},
         )
-        step = self._tasks.apply_skill_event(
+        return self._tasks.apply_skill_event(
             event.run_id,
             outcome=outcome,
             status=status,
             event_sequence=event.sequence,
         )
-        if (
-            step is not None
-            and event.result.success
-            and event.result.data.get("termination_reason") == "environment_done"
-        ):
-            self._tasks.complete_from_environment(
-                step.task_id,
-                recap=event.result.summary or "Environment reported task completion.",
-            )
-        return step

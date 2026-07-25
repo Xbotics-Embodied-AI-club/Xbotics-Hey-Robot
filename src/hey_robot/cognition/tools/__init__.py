@@ -1,6 +1,5 @@
 """单一 Robot Agent 使用的仅提案式工具。"""
 
-from hey_robot.cognition.tools.dispatcher import ToolDispatcher
 from hey_robot.cognition.tools.models import (
     AgentTool,
     HarnessTool,
@@ -28,7 +27,6 @@ __all__ = [
     "SkillCallProposal",
     "SkillTool",
     "ToolDependencies",
-    "ToolDispatcher",
     "ToolRegistry",
     "ToolSpec",
 ]

@@ -6,10 +6,6 @@ import time
 from hey_robot.audio import VoiceInteractionLoop, voice_config_from_settings
 from hey_robot.channels.base import ChannelContext, InboundHandler
 from hey_robot.events import RuntimeEvent
-from hey_robot.notifications import (
-    format_notification_text,
-    should_deliver_notification,
-)
 from hey_robot.protocol import AgentReply, Envelope, UserTurn
 from hey_robot.user_reply import (
     looks_like_internal_user_reply,
@@ -29,15 +25,6 @@ class VoiceChannel:
         self.name = context.name
         self.config = voice_config_from_settings(context.spec.settings)
         self.loop = VoiceInteractionLoop(self.config)
-        configured_levels = context.spec.settings.get(
-            "notification_levels", ["warning", "critical"]
-        )
-        levels = {
-            str(level).strip().lower()
-            for level in configured_levels or []
-            if str(level).strip()
-        }
-        self._notification_levels = levels or {"warning", "critical"}
         self._spoken_event_keys: set[str] = set()
 
     async def start(self, handler: InboundHandler) -> None:
@@ -74,13 +61,6 @@ class VoiceChannel:
         await self.loop.start(on_text)
 
     async def send(self, reply: AgentReply) -> None:
-        if reply.metadata.get("notification"):
-            if not should_deliver_notification(reply, self._notification_levels):
-                return
-            if reply.envelope.channel not in {None, self.name}:
-                return
-            await self.loop.speak(format_notification_text(reply))
-            return
         if reply.envelope.channel != self.name:
             return
         if not reply.final:

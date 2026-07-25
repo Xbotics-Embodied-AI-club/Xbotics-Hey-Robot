@@ -2,13 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from hey_robot.cognition.autonomous_agent_service import _tool_outcome_context
 from hey_robot.cognition.runtime.agent_task_store import AgentTaskStore
-from hey_robot.cognition.tools.robot import (
-    CompleteTaskProposal,
-    ToolDependencies,
-    ToolRegistry,
-)
+from hey_robot.cognition.tools.models import CompleteTaskProposal
+from hey_robot.cognition.tools.registry import ToolDependencies, ToolRegistry
 from hey_robot.cognition.tools.skill_tools import SkillCallProposal
 from hey_robot.protocol import Envelope, ToolOutcome
 from hey_robot.skills.models import Skill, SkillResult
@@ -42,72 +38,41 @@ def test_conversation_skill_does_not_upgrade_by_category() -> None:
     )
     tools = ToolRegistry(ToolDependencies(catalog))
 
-    proposal = tools.proposal("navigate_once", {})
+    proposal = tools.prepare("navigate_once", {})
 
     assert proposal.intent_kind == "skill"
     assert proposal.skill_name == "navigate_once"
 
 
-def test_complete_task_requires_evidence_ids() -> None:
+def test_complete_task_only_requires_recap() -> None:
     tools = ToolRegistry(ToolDependencies(SkillList(())))
 
-    proposal = tools.proposal(
+    proposal = tools.prepare(
         "complete_task",
-        {"recap": "已经进入并观察。", "evidence_ids": ["observation:op1"]},
+        {"recap": "已经进入并观察。"},
     )
 
     assert isinstance(proposal, CompleteTaskProposal)
-    assert proposal.evidence_ids == ("observation:op1",)
+    assert proposal.recap == "已经进入并观察。"
 
 
-def test_bounded_option_result_requires_reobservation_in_next_turn() -> None:
-    proposal = SkillCallProposal("skill", "manipulate", "pick up cup", {})
-    outcome = ToolOutcome(
-        "completed",
-        "bounded option ended",
-        data={"requires_reobservation": True},
-    )
-
-    context = _tool_outcome_context(proposal, outcome)
-
-    assert "先调用 inspect_scene" in context
-    assert "不能仅凭动作调用成功" in context
-
-
-def test_sustained_task_completion_requires_post_motion_observation(
-    tmp_path,
-) -> None:
+def test_sustained_task_completion_requires_a_successful_step(tmp_path) -> None:
     store = AgentTaskStore(tmp_path / "tasks.sqlite3")
     task = store.create_task(
         session_key="session-1",
         envelope=Envelope(robot_id="sim_robot"),
         objective="进入门廊并观察里面有什么",
     )
-    move = store.add_step(
+    check = store.complete_task(task.task_id, recap="尚未执行。")
+    assert not check.accepted
+
+    store.add_step(
         task.task_id,
         SkillCallProposal("skill", "move_base", "move", {"direction": "forward"}),
         ToolOutcome("completed", "Base motion completed.", operation_id="move1"),
     )
 
-    check = store.complete_task(
-        task.task_id,
-        recap="已经进入。",
-        evidence_ids=move.evidence_ids,
-    )
-
-    assert not check.accepted
-    observation = store.add_step(
-        task.task_id,
-        SkillCallProposal(
-            "observation", "inspect_scene", "inspect", {"question": "inside"}
-        ),
-        ToolOutcome("completed", "里面有桌椅。", operation_id="obs1"),
-    )
-    check = store.complete_task(
-        task.task_id,
-        recap="看到里面有桌椅。",
-        evidence_ids=observation.evidence_ids,
-    )
+    check = store.complete_task(task.task_id, recap="已经进入。")
 
     assert check.accepted
     assert store.active_task("session-1") is None

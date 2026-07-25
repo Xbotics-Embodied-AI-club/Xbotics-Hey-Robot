@@ -32,10 +32,6 @@ class SkillTool:
         objective = _objective(self.name, normalized)
         return SkillCallProposal(intent_kind, self.name, objective, normalized)
 
-    def proposal(self, arguments: dict[str, Any]) -> SkillCallProposal:
-        """Compatibility alias while callers migrate to ``prepare``."""
-        return self.prepare(arguments)
-
 
 def skill_call_payload(proposal: SkillCallProposal) -> dict[str, Any]:
     return {

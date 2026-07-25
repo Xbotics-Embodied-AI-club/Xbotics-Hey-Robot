@@ -9,9 +9,6 @@ deployment:
 agent_runtime:
   enabled: true
   robot_id: mock0
-  entity_catalog:
-  - robot:mock0
-  - scene
 logging:
   level: INFO
   theme: dark
@@ -39,26 +36,6 @@ skills:
   - detect_marker
   - stop_motion
   execution_mode: local
-notifications:
-  defaults:
-    channels:
-    - web
-  channels:
-    web: {}
-    voice:
-      chat_id: mock-voice
-      sender_id: voice-user
-    feishu:
-      chat_id: ''
-  kinds:
-    task_watchdog:
-      severity: critical
-      channels:
-      - web
-    proactive_message:
-      severity: info
-      channels:
-      - web
 identity:
   enabled: true
   unified_user_episodes: true

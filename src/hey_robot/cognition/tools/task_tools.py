@@ -17,17 +17,16 @@ class CompleteTaskTool:
         "type": "function",
         "function": {
             "name": name,
-            "description": "引用当前任务证据并提议结束 active task。",
+            "description": (
+                "Finish the active task only when the complete user objective is "
+                "supported by successful tool results, and provide a concise recap."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "recap": {"type": "string"},
-                    "evidence_ids": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                    },
                 },
-                "required": ["recap", "evidence_ids"],
+                "required": ["recap"],
                 "additionalProperties": False,
             },
         },
@@ -41,22 +40,9 @@ class CompleteTaskTool:
 
     def prepare(self, arguments: dict[str, Any]) -> CompleteTaskProposal:
         recap = arguments.get("recap")
-        evidence_ids = arguments.get("evidence_ids")
         if not isinstance(recap, str) or not recap.strip():
             raise ValueError("recap must be a non-empty string")
-        if not isinstance(evidence_ids, list) or not evidence_ids:
-            raise ValueError("evidence_ids must be a non-empty array")
-        normalized = tuple(
-            item.strip()
-            for item in evidence_ids
-            if isinstance(item, str) and item.strip()
-        )
-        if len(normalized) != len(evidence_ids):
-            raise ValueError("evidence_ids must contain only non-empty strings")
-        return CompleteTaskProposal(recap.strip(), normalized)
-
-    def proposal(self, arguments: dict[str, Any]) -> CompleteTaskProposal:
-        return self.prepare(arguments)
+        return CompleteTaskProposal(recap.strip())
 
 
 class ControlTaskTool:
@@ -65,7 +51,10 @@ class ControlTaskTool:
         "type": "function",
         "function": {
             "name": name,
-            "description": "取消、阻塞确认或紧急停止当前持续任务。",
+            "description": (
+                "Stop the active task without claiming success: cancel it, block for "
+                "human input, or request an emergency stop."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -100,6 +89,3 @@ class ControlTaskTool:
         return ControlTaskProposal(
             action, reason.strip() if isinstance(reason, str) else ""
         )
-
-    def proposal(self, arguments: dict[str, Any]) -> ControlTaskProposal:
-        return self.prepare(arguments)
