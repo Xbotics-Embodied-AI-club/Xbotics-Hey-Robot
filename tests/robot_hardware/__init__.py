@@ -1,0 +1,1 @@
+"""Robot hardware adapter tests."""

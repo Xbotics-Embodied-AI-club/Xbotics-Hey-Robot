@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib
 import inspect
 
-from hey_robot.robot_runtime.base import RobotActionSpec
+from hey_robot.robot_api import RobotActionSpec
 from hey_robot.skills.registry import SkillRegistry
 
 

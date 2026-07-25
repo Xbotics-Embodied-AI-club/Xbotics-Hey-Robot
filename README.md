@@ -39,7 +39,8 @@ Hey Robot 是一个不依赖通用 LLM Agent 框架、面向真实机器人构�
 **Embodied Agent Harness**。
 
 系统采用异步快慢双系统和分层解耦架构。Agent Loop 驱动模型推理与 Tool 使用；
-机器人能力不直接作为 Tool 暴露，而是通过统一入口请求 Skill，并根据执行反馈持续推进任务。
+部署配置显式选中的 Skill 会投影为同名 Tool，再通过统一 `SkillClient` 边界提交，并根据
+执行反馈持续推进任务。
 Skill 能力将以 VLA、VLN 等具身模型为主要方向，通过 Robot Runtime 作用于仿真或真机。
 
 当前以 [XLeRobot](https://github.com/Vector-Wangel/XLeRobot) 为主要载体，支持
@@ -57,7 +58,7 @@ MuJoCo 仿真和真实硬件部署。
 ## 核心能力
 
 - **Agent Loop 驱动**：Agent 根据当前任务进行推理，按需调用 Tool，并结合返回结果继续规划和执行。
-- **Tool 与 Skill 分离**：Tool 用于状态、感知和记忆等交互；机器人能力通过统一入口请求 Skill。
+- **Tool 与 Skill 分层**：Skill schema 投影为模型 Tool，typed proposal 通过统一 SkillClient 执行。
 - **感知与执行反馈**：结合相机观察、机器人状态和执行结果持续调整任务。
 - **仿真与真机部署**：支持 MuJoCo 仿真和 XLeRobot 真实硬件。
 - **多种交互方式**：支持 Web、CLI、语音和飞书。
@@ -78,7 +79,7 @@ MuJoCo 仿真和真实硬件部署。
 ```mermaid
 flowchart TD
     U[用户交互] --> A[Agent Loop<br/>推理 · Tool]
-    A -->|请求 Skill| S[Skill 层<br/>能力 · 调度 · 安全]
+    A -->|Typed Skill proposal| S[本地 Skill 层<br/>能力 · 资源 · 生命周期]
     S -->|模型调用| F[Foundation Model<br/>VLA · VLN]
     F -->|决策结果| S
     S -->|受控执行| R[Robot Runtime<br/>MuJoCo · 真机]
@@ -86,7 +87,8 @@ flowchart TD
 ```
 
 这种分层让 Agent、机器人能力、具身模型和具体硬件可以分别演进，同时保持完整的
-任务执行与反馈闭环。
+任务执行与反馈闭环。当前 Agent、Skill Worker 与 Robot Runtime 由同一个主进程组合；
+VLA/VLN ModelService 可通过 gRPC 独立部署。
 
 详细设计见 [系统架构](docs/architecture/system-architecture.md)。
 
@@ -99,11 +101,12 @@ flowchart TD
 - Ubuntu / Linux
 - Python `3.12`
 - [uv](https://docs.astral.sh/uv/)
-- NATS server
+- NATS server（使用 `deployment.bus.type: nats` 时）
 - MuJoCo
 - 可用的大模型 API
 
-> 当前推荐 Ubuntu。仓库保留了 Windows 配置，但现有依赖锁仅支持 Linux。
+> 当前推荐 Ubuntu。主 Harness、真机和 MuJoCo 路径提供 Windows 配置；VLA/VLN、
+> RoboCasa365 和 CUDA 模型环境主要面向 Linux x86_64，需要独立验证。
 
 ### 安装依赖
 
@@ -230,8 +233,10 @@ tests/      单元与集成测试
 | 完整配置 | [在线配置指南（持续更新）](https://my.feishu.cn/docx/LT3odU5yyoMOCNxXmmicvbCznBb) |
 | 系统概览 | [部署与运行形态](docs/overview/runtime-shape.md) |
 | 架构设计 | [系统架构](docs/architecture/system-architecture.md) |
-| 最小架构与演进 | [最小化 Embodied Agent Harness 设计](docs/architecture/minimal-embodied-agent-harness.zh-CN.md) |
-| Tool/Skill 与 VLA 增量重构 | [Tool/Skill 边界与 VLA 能力增量重构方案](docs/architecture/minimal-harness-refactoring-plan.zh-CN.md) |
+| 架构审计 | [结构、耦合、兼容性与复杂度分析](docs/architecture/system-structure-coupling-compatibility-complexity-analysis.zh-CN.md) |
+| Robot 重构 | [Robot Runtime 边界重构](docs/architecture/robot-runtime-refactor.zh-CN.md) |
+| Durable Agent baseline | [最小 Pi-shaped Durable Agent 架构](docs/architecture/minimal-pi-shaped-durable-agent.zh-CN.md) |
+| Tool/Skill 收缩重构记录 | [最小 Tool/Skill 收缩重构方案](docs/architecture/minimal-tool-skill-refactor.zh-CN.md) |
 | RoboCasa365 重构门禁 | [Tool/Skill 与 VLA 重构评估记录](docs/evaluation/robocasa365/tool-skill-vla-refactoring-evaluation-20260724.zh-CN.md) |
 | Agent 与机器人能力 | [Agent 与 Skill 边界](docs/architecture/agent-skill-boundaries.md) |
 | MuJoCo 仿真 | [XLeRobot 仿真部署](docs/operations/xlerobot-sim.md) |

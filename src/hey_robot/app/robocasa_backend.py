@@ -12,12 +12,12 @@ from pathlib import Path
 import grpc
 
 from hey_robot.config import DeploymentConfig, RobotSpec
-from hey_robot.robot_runtime.robocasa_remote.contract import ALLOWED_TASKS
-from hey_robot.robot_runtime.robocasa_remote.episode_manager import EpisodeManager
-from hey_robot.robot_runtime.robocasa_remote.rpc.v1 import (
+from hey_robot.robocasa_backend.contract import ALLOWED_TASKS
+from hey_robot.robocasa_backend.episode_manager import EpisodeManager
+from hey_robot.robocasa_backend.rpc.v1 import (
     robocasa_runtime_pb2_grpc as runtime_pb2_grpc,
 )
-from hey_robot.robot_runtime.robocasa_remote.runtime_server import (
+from hey_robot.robocasa_backend.runtime_server import (
     RoboCasaRuntimeService,
 )
 

@@ -21,9 +21,10 @@ from hey_robot.protocol import (
     Topics,
 )
 from hey_robot.protocol.messages import to_payload
-from hey_robot.robot_runtime.clients import LocalRobotClient, RobotClient
-from hey_robot.robot_runtime.media.store import LocalMediaStore
-from hey_robot.robot_runtime.service import RobotService
+from hey_robot.robot_api import RobotClient
+from hey_robot.robot_media import LocalMediaStore
+from hey_robot.robot_runtime.clients import LocalRobotClient
+from hey_robot.robot_transport import RobotService
 from hey_robot.skills import SkillRegistry, registry_from_config
 from hey_robot.skills.context import SkillContext
 from hey_robot.skills.models import Skill, SkillCommand, SkillEvent

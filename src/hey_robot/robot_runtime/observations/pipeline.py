@@ -12,11 +12,11 @@ from hey_robot.protocol import (
     SceneEntity,
     SceneRelation,
 )
-from hey_robot.robot_runtime.media import LocalMediaStore
-from hey_robot.robot_runtime.observations.observation import (
+from hey_robot.robot_api.observation import (
     DriverObservation,
     ObservationAsset,
 )
+from hey_robot.robot_media import LocalMediaStore
 
 
 @dataclass(frozen=True)

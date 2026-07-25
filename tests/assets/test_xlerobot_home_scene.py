@@ -7,9 +7,8 @@ import numpy as np
 import pytest
 
 from hey_robot.config.model import RobotSpec
-from hey_robot.robot_runtime.base import RobotDriverContext
-from hey_robot.robot_runtime.embodiments import get_embodiment_profile
-from hey_robot.robot_runtime.simulation.xlerobot_sim_driver import XLeRobotSimDriver
+from hey_robot.robot_backends.simulation.xlerobot_sim_driver import XLeRobotSimDriver
+from hey_robot.robot_runtime.manager import create_driver_context
 
 SCENE_PATH = (
     Path(__file__).resolve().parents[2] / "assets" / "scenes" / "home_scene.xml"
@@ -255,14 +254,7 @@ def _home_scene_driver() -> XLeRobotSimDriver:
         embodiment_profile="xlerobot_sim",
         settings={"mjcf_path": str(SCENE_PATH)},
     )
-    driver = XLeRobotSimDriver(
-        RobotDriverContext(
-            deployment_id="test",
-            robot_id="sim_robot",
-            spec=spec,
-            embodiment=get_embodiment_profile(spec),
-        )
-    )
+    driver = XLeRobotSimDriver(create_driver_context("sim_robot", spec, "test"))
     driver.model = mujoco.MjModel.from_xml_path(str(SCENE_PATH))
     driver.data = mujoco.MjData(driver.model)
     mujoco.mj_forward(driver.model, driver.data)

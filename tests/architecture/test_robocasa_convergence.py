@@ -17,12 +17,7 @@ def test_robocasa_production_code_has_one_action_owner() -> None:
         if "manager.step" in path.read_text(encoding="utf-8")
     ]
     assert callers == [
-        ROOT
-        / "src"
-        / "hey_robot"
-        / "robot_runtime"
-        / "robocasa_remote"
-        / "runtime_server.py"
+        ROOT / "src" / "hey_robot" / "robocasa_backend" / "runtime_server.py"
     ]
 
 
@@ -36,7 +31,7 @@ def test_foundation_policy_does_not_import_environment_owner() -> None:
         / "lerobot"
         / "executor.py"
     ).read_text(encoding="utf-8")
-    assert "from hey_robot.robot_runtime.robocasa_remote.episode_manager" not in source
+    assert "from hey_robot.robocasa_backend.episode_manager" not in source
     assert "import EpisodeManager" not in source
 
 

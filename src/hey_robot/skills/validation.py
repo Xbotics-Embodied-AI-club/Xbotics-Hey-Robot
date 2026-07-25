@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from hey_robot.robot_runtime.clients import RobotClientCapabilities
+from hey_robot.robot_api import RobotClientCapabilities
 from hey_robot.skills.models import Skill
 
 

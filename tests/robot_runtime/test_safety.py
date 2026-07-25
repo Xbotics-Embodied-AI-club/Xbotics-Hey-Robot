@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from hey_robot.protocol import Envelope, RobotAction
-from hey_robot.robot_runtime.base import RobotCapabilities, RobotHealth
+from hey_robot.robot_api import RobotCapabilities, RobotHealth
 from hey_robot.robot_runtime.safety import RobotSafetySupervisor
 
 

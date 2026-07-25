@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from hey_robot.config.model import DeploymentConfig, RobotSpec
-from hey_robot.robot_runtime.primitive_inventory import supported_driver_primitives
+from hey_robot.config.robot_inventory import supported_driver_primitives
 from hey_robot.skills import Skill, registry_from_config
 
 

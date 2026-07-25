@@ -1,19 +1,37 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from importlib import import_module
+from typing import Any, cast
+
 from hey_robot.config import DeploymentConfig
-from hey_robot.robot_runtime.base import (
+from hey_robot.robot_api import (
     RobotActionSpec,
     RobotDriver,
     RobotDriverContext,
 )
 from hey_robot.robot_runtime.embodiments import get_embodiment_profile
-from hey_robot.robot_runtime.mock import MockRobotDriver
-from hey_robot.robot_runtime.robocasa_remote import (
-    GrpcRoboCasaRuntimeClient,
-    RoboCasaRemoteDriver,
-)
-from hey_robot.robot_runtime.simulation.xlerobot_sim_driver import XLeRobotSimDriver
-from hey_robot.robot_runtime.xlerobot import XLeRobotDriver
+
+DriverFactory = Callable[[RobotDriverContext], RobotDriver]
+
+_BUILTIN_DRIVERS = {
+    ("*", "*", "mock"): "hey_robot.robot_backends.mock:MockRobotDriver",
+    (
+        "xlerobot",
+        "sim",
+        "mujoco",
+    ): "hey_robot.robot_backends.simulation.xlerobot_sim_driver:XLeRobotSimDriver",
+    (
+        "xlerobot",
+        "real",
+        "native",
+    ): "hey_robot.robot_backends.xlerobot.driver:XLeRobotDriver",
+    (
+        "robocasa",
+        "remote",
+        "grpc",
+    ): "hey_robot.robot_backends.robocasa_remote.driver:create_driver",
+}
 
 
 class RobotManager:
@@ -44,43 +62,53 @@ class RobotManager:
         for robot_id, spec in self.config.robots.items():
             if not spec.enabled:
                 continue
-            context = RobotDriverContext(
-                robot_id=robot_id,
-                spec=spec,
-                deployment_id=self.config.deployment.id,
-                embodiment=get_embodiment_profile(spec),
+            context = create_driver_context(
+                robot_id,
+                spec,
+                self.config.deployment.id,
                 action_specs=self.action_specs,
             )
-            if spec.driver_kind == "mock":
-                self._drivers[robot_id] = MockRobotDriver(context)
-                continue
-            if spec.robot_family == "xlerobot" and spec.driver_kind == "mujoco":
-                self._drivers[robot_id] = XLeRobotSimDriver(context)
-                continue
-            if spec.robot_family == "xlerobot" and spec.driver_kind == "native":
-                self._drivers[robot_id] = XLeRobotDriver(context)
-                continue
-            if (
-                spec.robot_family == "robocasa"
-                and spec.robot_environment == "remote"
-                and spec.driver_kind == "grpc"
-            ):
-                target = str(spec.settings.get("target", "grpc://127.0.0.1:9092"))
-                self._drivers[robot_id] = RoboCasaRemoteDriver(
-                    context,
-                    GrpcRoboCasaRuntimeClient(
-                        target,
-                        timeout_sec=float(spec.settings.get("timeout_sec", 10.0)),
-                        role="data",
-                    ),
-                    control_client=GrpcRoboCasaRuntimeClient(
-                        target,
-                        timeout_sec=float(spec.settings.get("timeout_sec", 10.0)),
-                        role="evaluator",
-                    ),
-                )
-                continue
-            raise ValueError(
-                "unsupported robot driver combination: "
-                f"family={spec.robot_family} environment={spec.robot_environment} driver={spec.driver_kind}"
-            )
+            factory = _load_driver_factory(spec)
+            self._drivers[robot_id] = factory(context)
+
+
+def create_driver_context(
+    robot_id: str,
+    spec: Any,
+    deployment_id: str,
+    *,
+    action_specs: tuple[RobotActionSpec, ...] = (),
+) -> RobotDriverContext:
+    """Translate deployment configuration into the backend-neutral driver contract."""
+    return RobotDriverContext(
+        robot_id=robot_id,
+        deployment_id=deployment_id,
+        robot_family=spec.robot_family,
+        environment=spec.robot_environment,
+        driver_kind=spec.driver_kind,
+        settings=dict(spec.settings),
+        embodiment=get_embodiment_profile(spec),
+        action_specs=action_specs,
+    )
+
+
+def _load_driver_factory(spec: Any) -> DriverFactory:
+    explicit = str(spec.settings.get("driver_factory") or "").strip()
+    target = explicit or _BUILTIN_DRIVERS.get(
+        (spec.robot_family, spec.robot_environment, spec.driver_kind)
+    )
+    if target is None and spec.driver_kind == "mock":
+        target = _BUILTIN_DRIVERS[("*", "*", "mock")]
+    if target is None:
+        raise ValueError(
+            "unsupported robot driver combination: "
+            f"family={spec.robot_family} environment={spec.robot_environment} "
+            f"driver={spec.driver_kind}"
+        )
+    module_name, separator, attribute = target.partition(":")
+    if not separator or not module_name or not attribute:
+        raise ValueError(f"invalid robot driver factory: {target!r}")
+    factory = getattr(import_module(module_name), attribute)
+    if not callable(factory):
+        raise TypeError(f"robot driver factory is not callable: {target!r}")
+    return cast(DriverFactory, factory)

@@ -5,10 +5,9 @@ import asyncio
 import numpy as np
 
 from hey_robot.protocol import Envelope
-from hey_robot.robot_runtime.media import LocalMediaStore
+from hey_robot.robot_api import DriverObservation, ObservationAsset
+from hey_robot.robot_media import LocalMediaStore
 from hey_robot.robot_runtime.observations import (
-    DriverObservation,
-    ObservationAsset,
     ObservationPipeline,
     PerceptionService,
 )
@@ -191,3 +190,27 @@ def test_observation_pipeline_materializes_each_camera_frame_once(tmp_path) -> N
     assert (
         len(list((tmp_path / "images" / "robocasa365" / "camera1").glob("*.jpg"))) == 1
     )
+
+
+def test_concurrent_perception_refresh_shares_one_driver_observation(tmp_path) -> None:
+    class Driver:
+        robot_id = "robot0"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def observe(self) -> DriverObservation:
+            self.calls += 1
+            await asyncio.sleep(0)
+            return DriverObservation(Envelope(robot_id=self.robot_id), self.calls)
+
+    async def run() -> None:
+        driver = Driver()
+        service = PerceptionService(driver, LocalMediaStore(tmp_path))
+        left, right = await asyncio.gather(
+            service.refresh(reason="left"), service.refresh(reason="right")
+        )
+        assert driver.calls == 1
+        assert left.observation.frame_id == right.observation.frame_id == 1
+
+    asyncio.run(run())

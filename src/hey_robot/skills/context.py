@@ -10,7 +10,7 @@ from hey_robot.protocol import RobotObservation
 
 if TYPE_CHECKING:
     from hey_robot.foundation.clients.models import ModelRouter
-    from hey_robot.robot_runtime.clients import RobotClient
+    from hey_robot.robot_api import RobotClient
 
 
 class SkillCancelledError(RuntimeError):

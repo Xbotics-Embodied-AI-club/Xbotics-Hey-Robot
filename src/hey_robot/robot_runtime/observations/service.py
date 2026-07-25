@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass
 from typing import Protocol
 
 from hey_robot.protocol import RobotObservation
-from hey_robot.robot_runtime.media import LocalMediaStore
-from hey_robot.robot_runtime.observations.observation import DriverObservation
+from hey_robot.robot_api.observation import DriverObservation
+from hey_robot.robot_media import LocalMediaStore
 from hey_robot.robot_runtime.observations.pipeline import ObservationPipeline
 
 
@@ -77,25 +78,32 @@ class PerceptionService:
             media_store, image_save_every_n=image_save_every_n
         )
         self._latest: PerceptionSnapshot | None = None
+        self._refresh_lock = asyncio.Lock()
+        self._refreshed_at = 0.0
 
     async def refresh(self, *, reason: str | None = None) -> PerceptionSnapshot:
-        driver_observation = await self.driver.observe()
-        observation = self._annotate(
-            self.pipeline.build(driver_observation),
-            observed_at=driver_observation.timestamp,
-            source="refresh",
-            reason=reason,
-        )
-        snapshot = PerceptionSnapshot(
-            robot_id=observation.envelope.robot_id or self.driver.robot_id,
-            observation=observation,
-            observed_at=driver_observation.timestamp,
-            source="refresh",
-            reason=reason,
-            driver_observation=driver_observation,
-        )
-        self._latest = snapshot
-        return snapshot
+        requested_at = time.monotonic()
+        async with self._refresh_lock:
+            if self._latest is not None and self._refreshed_at >= requested_at:
+                return self._latest
+            driver_observation = await self.driver.observe()
+            observation = self._annotate(
+                self.pipeline.build(driver_observation),
+                observed_at=driver_observation.timestamp,
+                source="refresh",
+                reason=reason,
+            )
+            snapshot = PerceptionSnapshot(
+                robot_id=observation.envelope.robot_id or self.driver.robot_id,
+                observation=observation,
+                observed_at=driver_observation.timestamp,
+                source="refresh",
+                reason=reason,
+                driver_observation=driver_observation,
+            )
+            self._latest = snapshot
+            self._refreshed_at = time.monotonic()
+            return snapshot
 
     def latest(self, *, max_age_ms: int | None = None) -> PerceptionSnapshot | None:
         snapshot = self._latest

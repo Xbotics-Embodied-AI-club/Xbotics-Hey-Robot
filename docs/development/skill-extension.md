@@ -1,53 +1,25 @@
 # Skill 扩展指南
 
-本文说明重构后的唯一 Skill 扩展方式。目标是让二次开发者在组合已有机器人能力时，只关注 Skill 层和部署配置，不需要修改 Agent、Controller、消息总线或具体硬件驱动。
+本文说明当前 native local Skill架构的唯一扩展方式。普通Skill开发不需要修改Agent、
+消息总线、Worker或具体硬件驱动；新增模型能力或硬件原语时，仍需扩展其所有权层。
 
-在异步快慢双系统中，Skill 属于下层快系统：它接收慢系统给出的目标，在受约束的短时域
-内调用 Foundation Model 或 Robot Runtime，并把进度和结果异步反馈给上层。
-
-## 1. 先给结论
-
-如果新能力只组合系统已经具备的能力，开发者只需：
-
-1. 实现一个异步 handler，并创建一个 `Skill`；
-2. 在 `Skill` 中声明输入、资源、依赖和运行时要求；
-3. 通过 `register(registry)` 注册；
-4. 在部署配置的 `skills.modules` 和 `skills.tools` 中启用；
-5. 添加 Skill 单元测试和部署校验测试。
-
-不需要修改：
-
-- Agent prompt、Agent 主循环或 Agent tool；
-- `LocalSkillClient`、`SkillWorker` 或 `SkillRunner`；
-- Bus topic 和协议消息；
-- Robot Driver。
-
-但存在明确边界：
-
-- 新增硬件原语时，需要扩展 Driver 和对应执行适配器；
-- 新增传感器能力时，需要扩展感知或 Driver 适配器；
-- 新增外部模型或服务时，需要实现 Foundation Model executor/ModelService，并在配置中启用；
-- 只有底层能力已经存在时，Skill 才能只靠组合获得新语义能力。
-
-## 2. 唯一运行链路
+## 1. 运行链
 
 ```text
-deployment skills.modules
-  -> register(SkillRegistry)
-  -> deployment skills.tools
-  -> Agent 读取可见 Skill 契约
-  -> LocalSkillClient.submit(SkillCommand)
-  -> SkillWorker 管理异步运行、取消和持久化
-  -> SkillRunner 检查参数、依赖、资源和超时
-  -> Skill handler
-  -> SkillContext ports
-  -> Robot Runtime / ModelService
+skills.modules -> register(SkillRegistry)
+skills.tools   -> ToolRegistry exposes selected Skills
+model proposal -> PhysicalToolCall
+TaskCoordinator -> SkillClient.submit(SkillCommand)
+SkillWorker -> SkillRunner -> handler(SkillContext, arguments)
+SkillContext.robot  -> RobotClient -> RobotRuntime
+SkillContext.models -> ModelRouter -> gRPC ModelService
 ```
 
-系统没有兼容 Registry 或第二执行器。`Skill` 是契约的唯一事实源，
-`SkillRunner.run()` 是顶层和嵌套 Skill 的唯一执行入口。
+当前没有`LocalSkillClient`类，`SkillWorker`本身实现`SkillClient`接口。也没有嵌套
+`ctx.run()`或Skill dependency graph；组合能力应写成一个有界handler，直接通过
+RobotClient/ModelRouter调用其所需的稳定下层端口。
 
-## 3. 最小 Skill
+## 2. 最小 Skill
 
 ```python
 from typing import Any
@@ -59,108 +31,138 @@ async def inspect_target(
     ctx: SkillContext, arguments: dict[str, Any]
 ) -> SkillResult:
     observation = await ctx.observe(timeout_sec=2.0)
+    target = str(arguments["target"])
     return SkillResult(
         success=True,
-        summary=f"inspected {arguments['target']}",
+        summary=f"inspected {target}",
         status="completed",
-        data={"frame_id": observation.frame_id},
+        data={"frame_id": observation.frame_id, "target": target},
         observations=tuple(observation.images),
         artifacts=tuple(observation.artifacts),
     )
 
 
 INSPECT_TARGET = Skill(
-        name="inspect_target",
-        description="Inspect whether a named target is visible.",
-        parameters={
-            "type": "object",
-            "properties": {"target": {"type": "string"}},
-            "required": ["target"],
-            "additionalProperties": False,
-        },
-        handler=inspect_target,
-        resources=("camera",),
-        supported_robots=("xlerobot",),
-        timeout_sec=6.0,
-        required_actions=("inspect_scene",),
-    )
+    name="inspect_target",
+    description="Inspect whether a named target is visible.",
+    parameters={
+        "type": "object",
+        "properties": {"target": {"type": "string", "minLength": 1}},
+        "required": ["target"],
+        "additionalProperties": False,
+    },
+    handler=inspect_target,
+    resources=("camera",),
+    supported_robots=("xlerobot",),
+    timeout_sec=6.0,
+)
 ```
 
-Skill handler 只描述一次有界执行。实际执行轨迹由 Worker 根据真实事件记录，避免计划和执行形成两个事实源。
+Handler必须返回`SkillResult`，不应抛出异常表达业务失败。未捕获异常会由SkillRunner归一化
+为`internal_error`。
 
-## 4. 组合已有 Skill
+## 3. 当前 Skill contract
 
-组合 Skill 使用 `ctx.run()`，并在父 Skill 中声明依赖：
+`hey_robot.skills.models.Skill`只有以下契约字段：
+
+- `name`：registry内全局唯一；
+- `description`：直接投影给Agent模型；
+- `parameters`：JSON Schema；
+- `handler`：异步执行函数；
+- `resources`：按`(robot_id, resource)`互斥；
+- `timeout_sec`：单次handler执行上限；
+- `supported_robots`：允许的robot family；
+- `required_actions`：Robot Runtime必须支持的动作；
+- `required_models`：deployment必须提供的ModelService capability。
+
+当前没有以下字段或机制：
+
+- `agent_visible`；
+- `dependencies`与`ctx.run()`；
+- safety level或interruptibility contract；
+- success criteria、failure modes、recovery hints或goal effects。
+
+不要在扩展模块中假设这些历史设计字段存在。
+
+## 4. SkillContext 边界
+
+Handler可使用：
+
+- `ctx.robot.execute(robot_id, action, arguments, run_id=...)`；
+- `ctx.robot.observe(...)`，通常优先使用`ctx.observe()`；
+- `ctx.models.infer(capability, request, run_id=..., robot_id=...)`；
+- `ctx.progress(value, summary)`；
+- `ctx.raise_if_cancelled()`。
+
+使用前应处理`ctx.robot`或`ctx.models`为`None`的情况，并返回结构化失败。
+
+禁止在普通Skill中：
+
+- 发布bus消息或构造protocol payload；
+- 导入Cognition或修改Agent任务状态；
+- 直接访问串口、舵机SDK、MuJoCo actuator或remote environment；
+- 自己创建全局资源锁、run store或生命周期事件；
+- 绕过RobotClient直接调用driver。
+
+## 5. 调用机器人动作
+
+简单Skill可复用内置适配器：
 
 ```python
-async def inspect_then_stop(ctx, arguments):
-    inspection = await ctx.run("inspect_scene", dict(arguments))
-    if not inspection.success:
-        return inspection
-    stopped = await ctx.run("stop_motion", {})
-    if not stopped.success:
-        return stopped
-    return SkillResult(True, "Inspection completed and motion stopped.", "completed")
+from hey_robot.skills.builtins.common import execute_robot_action
 
 
-INSPECT_THEN_STOP = Skill(
-        name="inspect_then_stop",
-        description="Inspect the scene and then stop robot motion.",
-        parameters={"type": "object"},
-        handler=inspect_then_stop,
-        dependencies=("inspect_scene", "stop_motion"),
-        resources=("camera", "base"),
-        supported_robots=("xlerobot",),
+async def point_camera(ctx, arguments):
+    return await execute_robot_action(ctx, "set_arm_pose", arguments)
+```
+
+随后在`Skill.required_actions`中声明`set_arm_pose`。部署校验会检查所选robot driver是否
+支持该动作。
+
+如果动作不存在，先在Robot Runtime/driver层实现和验证动作，再注册Skill。新增硬件能力
+不应隐藏在Skill handler的私有串口调用中。
+
+## 6. 调用 ModelService
+
+模型驱动Skill应：
+
+1. 在`required_models`声明capability；
+2. 调用`ctx.models.infer()`时使用相同capability名称；
+3. 确保deployment的`model_services.<id>.provides`包含该名称；
+4. 为路由、timeout、取消、无服务和模型失败添加测试。
+
+示意：
+
+```python
+if ctx.models is None:
+    return SkillResult(
+        False,
+        "model router unavailable",
+        "failed",
+        failure_mode="model_service_unavailable",
     )
+
+inference = await ctx.models.infer(
+    "my_capability",
+    {"observation": observation_payload, "prompt": prompt},
+    run_id=ctx.run_id,
+    robot_id=ctx.robot_id,
+    timeout_sec=30.0,
+)
 ```
 
-必须同时在 `dependencies` 中声明所有子 Skill。部署校验会递归检查依赖是否存在，以及依赖的外部 ModelService 是否可用。
-
-## 5. SkillContext 边界
-
-Skill 只能通过以下端口访问系统能力：
-
-```text
-ctx.robot          已有机器人动作
-ctx.models         已配置的 ModelService 路由
-ctx.run            已声明依赖的其他 Skill
-ctx.progress       当前 run 的进度事件
-ctx.raise_if_cancelled  协作式取消检查
-```
-
-禁止在 Skill 中：
-
-- 直接发布 Bus 消息；
-- 构造 `RobotAction` 或协议 payload；
-- 导入 Agent 运行时；
-- 访问串口、舵机、MuJoCo actuator 等硬件细节；
-- 自己实现调度、资源锁、超时或生命周期事件。
-
-## 6. Skill 契约字段
-
-`Skill` 是 Skill 契约的唯一来源，重点字段如下：
-
-- `name`：全局唯一，重复注册会启动失败；
-- `description`：准确描述真实能力，不允许语义夸大；
-- `parameters`：JSON Schema 参数结构和必填参数；
-- `resources`：如 `camera`、`base`、`arm`、`gripper`；
-- `dependencies`：执行时调用的子 Skill；
-- `required_actions`：该 Skill 直接需要 Robot Runtime 支持的动作；
-- `required_models`：该 Skill 直接依赖的 ModelService 能力；
-- `supported_robots`：支持的机器人族；
-- `timeout_sec`：运行上限；
-
-只有列入 `skills.tools` 的 Skill 才投影为 Agent tool。注册但未列入的底层 Skill 只能通过已声明的 `ctx.run()` 依赖调用。
+对于多步VLA/VLN，应将observe-infer-act循环封装为有界option runner，并明确max steps、
+fresh observation和termination语义。
 
 ## 7. 注册与配置
 
-模块必须暴露统一注册函数：
+扩展模块暴露`register(registry)`：
 
 ```python
-from typing import Any
+from hey_robot.skills import SkillRegistry
 
 
-def register(registry: Any) -> None:
+def register(registry: SkillRegistry) -> None:
     registry.register(INSPECT_TARGET)
 ```
 
@@ -169,6 +171,7 @@ def register(registry: Any) -> None:
 ```yaml
 skills:
   mode: production
+  execution_mode: local
   modules:
     - hey_robot.skills.builtins
     - my_robot_skills
@@ -179,61 +182,49 @@ skills:
 
 含义：
 
-- `modules` 决定加载哪些注册模块；
-- `tools` 是当前部署对 Agent 开放的显式能力面；
-- 未注册、重名、不支持当前机器人或缺少外部 ModelService，部署校验会失败；
-- `required_actions` 声明的动作不被当前 robot runtime 支持时，部署校验会失败；
-- 未列入 `tools` 的内部依赖仍可由已启用 Skill 调用，但不会直接暴露给 Agent。
+- `modules`加载registry模块；当前部署校验默认只允许`hey_robot.skills.*`命名空间，若要
+  支持外部包，需要先有意识地扩展该安全规则；
+- `tools`是Agent可见Skill的唯一显式allowlist；
+- `implementations`可为支持该参数的register函数选择具体实现；
+- `execution_mode`当前只能是`local`；
+- `mode`当前只校验`production/bringup`取值，不会自动过滤Skill。
 
-## 8. 三类扩展
+因此将primitive加入`tools`会直接暴露给模型，无论mode名称是什么。
 
-### 8.1 纯语义组合
+## 8. 组合能力
 
-例：先观察，再转向，再复查。
+当前没有嵌套Skill API。组合既有动作时，在一个handler内按顺序调用RobotClient，并在
+每一步检查`RobotActionResult`；长循环中调用`raise_if_cancelled()`并通过`progress()`
+报告进度。
 
-只改 Skill 和配置，不改 Agent 与硬件层。
+组合handler应满足：
 
-### 8.2 新外部能力
+- 执行有界；
+- 每一步失败立即返回结构化`SkillResult`；
+- 不声称未验证的成功；
+- `resources`覆盖整个组合期间使用的资源；
+- `required_actions`列出所有直接机器人动作；
+- 需要fresh observation时使用`after_frame_id`和timeout。
 
-例：VLA、导航服务、IK 服务。
-
-需要：
-
-1. 实现 ModelService；
-2. 在配置中声明该服务提供的能力名；
-3. 创建模型驱动 Skill，设置 `required_models`；
-4. 由语义 Skill 通过 `ctx.run()` 调用。
-
-`required_models`、Skill 实现传给 `ctx.models.call(name, ...)` 的
-`name`，以及 deployment 中 `model_services.<id>.provides` 必须一致。仅通过静态部署
-校验还不足以发现实现调用名不一致，必须添加一次真实 `ModelServiceRegistry` 路由测试。
-
-### 8.3 新硬件原语
-
-例：新夹爪命令、新关节模式、新传感器。
-
-需要：
-
-1. 在 Driver 或感知层实现真实能力；
-2. 在对应 port/adapter 暴露稳定接口；
-3. 创建内部 Skill，并在 `required_actions` 中声明它需要的运行时动作；
-4. 再创建面向 Agent 的语义 Skill。
-
-这不是架构泄漏，而是能力所有权边界：Skill 定义“做什么”，Driver 定义“硬件怎样做”。
+如果组合逻辑需要复用，抽成普通Python helper或option runner，而不是构造第二套Skill
+scheduler。
 
 ## 9. 测试要求
 
 至少覆盖：
 
-- 输入缺失时被 `SkillRunner` 拒绝；
-- `execute()` 成功和失败结果；
-- 嵌套 `ctx.run()` 的调用参数、依赖限制和失败传播；
-- Registry 能加载模块且拒绝重名；
-- 部署配置能启用 Skill；
-- 机器人族不匹配或 ModelService 缺失时启动失败；
-- 涉及资源的 Skill 具备冲突测试；
-- 新硬件原语具备 Driver 或仿真集成测试。
+- JSON Schema缺失、额外字段和边界值；
+- handler成功、业务失败、异常和timeout；
+- cancellation与资源释放；
+- resource conflict串行化；
+- Registry加载和重名拒绝；
+- `skills.tools`投影出的Agent schema；
+- robot family、required action和required model部署校验；
+- RobotClient/ModelRouter调用参数及失败传播；
+- 多步能力的fresh observation、budget exhaustion和termination reason。
 
 ## 10. 完成标准
 
-一个普通语义 Skill 的提交不应修改 Agent、Worker、Runner、Robot Runtime、协议和 Driver。若必须修改这些模块，应先判断新增的是系统级机制、Foundation Model 服务，还是全新的硬件原语，而不是把它伪装成普通 Skill 扩展。
+普通语义Skill提交不应修改Agent、Worker、Runner、协议或driver。若必须修改这些模块，先
+判断新增的是系统级调度机制、远程执行adapter、Foundation Model capability还是新的
+硬件原语，并在相应所有权层实现。

@@ -19,8 +19,8 @@ from hey_robot.config import ModelServiceSpec
 from hey_robot.foundation.backends.lerobot import LeRobotPolicyExecutor
 from hey_robot.foundation.clients.models import ModelInferenceResult
 from hey_robot.protocol import Envelope, ImageRef, RobotObservation
-from hey_robot.robot_runtime.clients import RobotActionResult
-from hey_robot.robot_runtime.robocasa_remote.episode_manager import EpisodeManager
+from hey_robot.robocasa_backend.episode_manager import EpisodeManager
+from hey_robot.robot_api import RobotActionResult
 from hey_robot.skills import (
     SkillCommand,
     SkillContext,
@@ -429,7 +429,7 @@ def test_rollout_skill_is_removed() -> None:
 
 
 def test_runtime_roles_require_distinct_credentials() -> None:
-    from hey_robot.robot_runtime.robocasa_remote.runtime_server import (
+    from hey_robot.robocasa_backend.runtime_server import (
         RoboCasaRuntimeService,
     )
 

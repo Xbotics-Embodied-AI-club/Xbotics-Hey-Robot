@@ -249,11 +249,12 @@ video.mp4
 ```bash
 .venv/bin/pytest -q --no-cov \
   tests/integration/test_robocasa365_contract.py \
-  tests/robot_runtime/test_robocasa_remote_driver.py
+  tests/robot_backends/robocasa_remote/test_driver.py
 
 .venv/bin/ruff check \
   evaluation/robocasa365 \
-  src/hey_robot/robot_runtime/robocasa_remote \
+  src/hey_robot/robot_backends/robocasa_remote \
+  src/hey_robot/robocasa_backend \
   src/hey_robot/skill_os/builtins/manipulation.py
 ```
 

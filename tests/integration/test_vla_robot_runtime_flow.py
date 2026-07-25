@@ -9,16 +9,15 @@ from PIL import Image
 from hey_robot.config import DeploymentConfig
 from hey_robot.foundation.clients.models import ModelInferenceResult
 from hey_robot.protocol import Envelope
-from hey_robot.robot_runtime.base import RobotDriverContext
-from hey_robot.robot_runtime.clients import LocalRobotClient
-from hey_robot.robot_runtime.embodiments import get_embodiment_profile
-from hey_robot.robot_runtime.media import LocalMediaStore
-from hey_robot.robot_runtime.robocasa_remote.driver import RoboCasaRemoteDriver
-from hey_robot.robot_runtime.robocasa_remote.protocol import (
+from hey_robot.robot_backends.robocasa_remote.driver import RoboCasaRemoteDriver
+from hey_robot.robot_backends.robocasa_remote.protocol import (
     RemoteImage,
     RemoteObservation,
     RemoteStep,
 )
+from hey_robot.robot_media import LocalMediaStore
+from hey_robot.robot_runtime.clients import LocalRobotClient
+from hey_robot.robot_runtime.manager import create_driver_context
 from hey_robot.robot_runtime.runtime import RobotRuntime
 from hey_robot.skills import (
     SkillCommand,
@@ -123,12 +122,7 @@ async def test_vla_action_reaches_real_robocasa_runtime_gate(tmp_path) -> None:
     spec = config.robots["robocasa365"]
     episode_client = _EpisodeClient()
     driver = RoboCasaRemoteDriver(
-        RobotDriverContext(
-            "robocasa365",
-            spec,
-            "test",
-            get_embodiment_profile(spec),
-        ),
+        create_driver_context("robocasa365", spec, "test"),
         episode_client,
     )
     runtime = RobotRuntime(driver, LocalMediaStore(tmp_path / "media"))

@@ -5,7 +5,7 @@ import pytest
 
 from hey_robot.persistence import FileRunStore
 from hey_robot.protocol import Envelope
-from hey_robot.robot_runtime.media.store import LocalMediaStore
+from hey_robot.robot_media import LocalMediaStore
 from hey_robot.skills import SkillCommand, SkillEvent, SkillResult
 
 

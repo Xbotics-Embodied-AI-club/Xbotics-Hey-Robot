@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass, field, replace
-from typing import Any, Protocol
+from dataclasses import replace
+from typing import Any
 
 from hey_robot.protocol import (
     Envelope,
@@ -14,53 +14,12 @@ from hey_robot.protocol import (
     RobotSkillAction,
     SkillIntent,
 )
-from hey_robot.robot_runtime.base import RobotActionSpec
+from hey_robot.robot_api import (
+    RobotActionResult,
+    RobotActionSpec,
+    RobotClientCapabilities,
+)
 from hey_robot.robot_runtime.runtime import RobotRuntime
-
-
-@dataclass(frozen=True)
-class RobotClientCapabilities:
-    robot_id: str
-    actions: tuple[RobotActionSpec, ...] = ()
-    cameras: tuple[str, ...] = ()
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class RobotActionResult:
-    success: bool
-    summary: str
-    status: str = "completed"
-    failure_mode: str | None = None
-    error: str | None = None
-    frame_id: int | None = None
-    data: dict[str, Any] = field(default_factory=dict)
-
-
-class RobotClient(Protocol):
-    async def capabilities(self, robot_id: str) -> RobotClientCapabilities: ...
-
-    async def observe(
-        self,
-        robot_id: str,
-        *,
-        after_frame_id: int | None = None,
-        timeout_sec: float | None = None,
-    ) -> RobotObservation: ...
-
-    async def execute(
-        self,
-        robot_id: str,
-        action: str,
-        arguments: dict[str, Any],
-        *,
-        run_id: str,
-        expected_frame_id: int | None = None,
-    ) -> RobotActionResult: ...
-
-    async def stop(self, robot_id: str, *, reason: str) -> None: ...
-
-    async def emergency_stop(self, robot_id: str, *, reason: str) -> None: ...
 
 
 class LocalRobotClient:

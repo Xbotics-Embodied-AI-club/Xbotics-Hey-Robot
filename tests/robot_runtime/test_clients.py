@@ -12,8 +12,8 @@ from hey_robot.protocol import (
     RobotStatus,
     SkillIntent,
 )
-from hey_robot.robot_runtime import LocalRobotClient
-from hey_robot.robot_runtime.base import RobotCapabilities
+from hey_robot.robot_api import RobotCapabilities
+from hey_robot.robot_runtime.clients import LocalRobotClient
 
 
 @dataclass

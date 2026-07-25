@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from evaluation.robocasa365.full_system_benchmark import run_trial
-from hey_robot.robot_runtime.robocasa_remote.contract import load_manifest
+from hey_robot.robocasa_backend.contract import load_manifest
 
 
 def _parser() -> argparse.ArgumentParser:

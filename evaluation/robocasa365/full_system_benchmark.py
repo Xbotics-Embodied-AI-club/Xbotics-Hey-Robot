@@ -27,11 +27,11 @@ import httpx
 from evaluation.robocasa365.conditions import condition_for
 from hey_robot.config import DeploymentConfig
 from hey_robot.foundation.transport.grpc.client import GrpcModelServiceClient
-from hey_robot.robot_runtime.robocasa_remote.client import GrpcRoboCasaRuntimeClient
-from hey_robot.robot_runtime.robocasa_remote.contract import (
+from hey_robot.robocasa_backend.contract import (
     ALLOWED_TASKS,
     load_manifest,
 )
+from hey_robot.robot_backends.robocasa_remote.client import GrpcRoboCasaRuntimeClient
 
 
 def _parser() -> argparse.ArgumentParser:

@@ -6,7 +6,7 @@ from typing import Any, ClassVar
 
 from hey_robot.protocol.messages import RobotStatus
 from hey_robot.protocol.skills import RobotSkillAction
-from hey_robot.robot_runtime.base import RobotActionSpec
+from hey_robot.robot_api import RobotActionSpec
 
 
 @dataclass(frozen=True)

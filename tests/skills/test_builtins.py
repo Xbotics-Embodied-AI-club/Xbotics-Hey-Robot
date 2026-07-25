@@ -5,7 +5,7 @@ from typing import Any
 
 from hey_robot.config import DeploymentConfig
 from hey_robot.protocol import Envelope, RobotObservation
-from hey_robot.robot_runtime.clients import RobotActionResult
+from hey_robot.robot_api import RobotActionResult
 from hey_robot.skills import (
     ResourceManager,
     SkillCommand,

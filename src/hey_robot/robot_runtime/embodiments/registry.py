@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from hey_robot.config import RobotSpec
-from hey_robot.robot_runtime.embodiments.base import EmbodimentProfile
+from hey_robot.robot_api.embodiment import EmbodimentProfile
 
 DEFAULT_EMBODIMENT_PROFILES: dict[str, EmbodimentProfile] = {
     "robocasa_remote": EmbodimentProfile(

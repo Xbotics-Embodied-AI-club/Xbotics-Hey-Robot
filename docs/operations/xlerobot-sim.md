@@ -10,8 +10,9 @@
 | Ubuntu | `configs/xlerobot.sim.ubuntu.yaml` |
 | 实验 VLA + VLN | `configs/xlerobot.sim.vla_vln.yaml` |
 
-Windows/Ubuntu 主配置只运行 11 个 native/sim skill，不包含 ModelService。只有实验配置
-声明 `vln_nav` 和 `manipulate`。
+Windows/Ubuntu主配置只向Agent开放`inspect_scene`、`move_base`和`turn_base`，不包含
+ModelService。实验配置声明VLN和`manipulate` ModelService，但当前同样只开放这3个
+Skill；模型服务条目用于独立联调，必须把对应Skill显式加入`skills.tools`后Agent才能调用。
 
 ## 平台差异
 
@@ -132,7 +133,7 @@ MJCF 渲染得到的正俯视图，用于人工检查房间、地毯、家具和
 运行仿真测试：
 
 ```bash
-pytest tests/robot_runtime/test_simulation.py -q --no-cov
+pytest tests/robot_backends/simulation/test_xlerobot_sim.py -q --no-cov
 ```
 
 ## 启动步骤
@@ -264,43 +265,37 @@ model_services:
 | `left_wrist` | 左腕视角 |
 | `right_wrist` | 右腕视角 |
 
-## 启用的 Skills
+## Agent 可见 Skills
 
-普通 Windows/Ubuntu 仿真配置启用 11 个非 VLA skill，和真机保持一致：
+普通Windows/Ubuntu仿真配置和`xlerobot.sim.vla_vln.yaml`当前都只开放：
 
 | 类别 | Skill | 说明 |
 |---|---|---|
 | 感知 | `inspect_scene` | 获取当前场景观察和摘要 |
-| 感知 | `look_around` | 转动/扫描视野并观察 |
-| 感知 | `detect_marker` | 检测可见 marker |
 | 导航 | `move_base` | 底盘前进/后退 |
 | 导航 | `turn_base` | 底盘左转/右转 |
-| 导航 | `human_follow` | 基于视觉的人体跟随 |
-| 安全 | `stop_motion` | 停止所有运动 |
-| 安全 | `reset_posture` | 回到安全姿态 |
-| 操作 | `set_arm_pose` | 设置机械臂命名姿态 |
-| 操作 | `move_arm_joints` | 控制机械臂关节 |
-| 操作 | `set_gripper` | 控制夹爪开合 |
 
-实验 `xlerobot.sim.vla_vln.yaml` 在上述能力之外声明：
+实验配置中的ModelService声明可支持：
 
 | 类别 | Skill | 当前状态 |
 |---|---|---|
 | 导航 | `navigate_to` | 需要 `vln_nav` gRPC 服务 |
 | 导航 | `approach_object` | 需要 `vln_nav` gRPC 服务 |
 | 操作 | `manipulate` | 需要 `manipulate` gRPC 服务，LeRobot Policy 直接加载 |
-| 操作 | `human_follow` | 基于视觉的人体跟随（使用 YOLO 检测器） |
 
-VLA 操作已合并为单一 `manipulate` skill，由 LeRobot Policy 直接推理，模型在进程中加载
-（不再需要独立 HTTP 推理服务器或 `.vla-venv`）。已通过 MuJoCo 仿真端到端验证：
-Skill → gRPC → LeRobot Policy 推理 → 解析原语 → 仿真执行，全部链路正常。
+这些Skill已注册，但当前不在实验YAML的`skills.tools`中，因此不会出现在Agent tool
+surface。启用时必须同时验证ModelService health、capability name、observation mapping、
+action dimensions、fresh frame和budget termination。仓库测试覆盖接口链路，不代表指定
+checkpoint已经完成真实任务效果验证。
 
 ## VLA 模型注册
 
 当前 VLA 环境使用 **lerobot >= 0.6.0**（Python 3.12 兼容性要求）。旧版 lerobot（0.4.x/0.5.x）与
 Python 3.12 的 dataclass 严格检查不兼容。
 
-可用模型一览，通过 `configs/xlerobot.sim.vla_vln.yaml` 中 `manipulate.settings.model_path` + `policy_type` 切换。
+可用模型通过`configs/xlerobot.sim.vla_vln.yaml`中的
+`model_services.manipulate.settings.policy_path`切换。Policy类型由checkpoint自身的
+`config.json`和LeRobot factory解析，不在deployment YAML中另设`policy_type`。
 
 下载模型时建议使用 hf-mirror.com 镜像加速：
 
@@ -331,8 +326,7 @@ huggingface-cli download sorel/pi05-so101-record-0121 --local-dir models/pi05-so
 ```yaml
 manipulate:
   settings:
-    model_path: "models/pi05-so101-record-0121"
-    policy_type: "pi05"
+    policy_path: "models/pi05-so101-record-0121"
 ```
 
 `sorel/pi05-so101-record-0121` 摄像头 key 为 `observation.images.front` + `observation.images.wrist`，

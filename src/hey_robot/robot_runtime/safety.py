@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from hey_robot.protocol import RobotAction
-from hey_robot.robot_runtime.base import RobotCapabilities, RobotHealth
+from hey_robot.robot_api import RobotCapabilities, RobotHealth
 
 
 class RobotSafetyError(RuntimeError):

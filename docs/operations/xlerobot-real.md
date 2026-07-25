@@ -7,8 +7,9 @@ XLeRobot 是 Hey Robot 的组合式真实机器人 embodiment：
 - **OpenCVCamera**：Ubuntu/S600 默认双路（front + wrist），Windows 默认一路 front
 - **ServoBusBattery**：通过舵机总线读取电池电压
 
-Agent 和 Skill 层不绑定具体机器人形态。Agent 提交 `SkillIntent`，Skill OS 将实际
-primitive 编码为 `RobotAction`，robot driver 最后判断目标 embodiment 是否能执行。
+Agent 和 Skill 层不绑定具体机器人形态。Agent 通过进程内 `SkillClient` 提交
+`SkillCommand`，Skill handler 再通过 `LocalRobotClient` 请求 Robot Runtime；Runtime
+将请求编码为 `RobotAction` 并由 driver 最终判断目标 embodiment 是否能执行。
 
 ## 配置文件
 
@@ -146,44 +147,38 @@ hey-robot run --config configs/xlerobot.real.ubuntu.yaml
 > newgrp dialout     # 当前终端立即生效，或重新登录
 > ```
 
-主服务在同一 asyncio 进程中并发启动：robot service、skill controller、task
-supervisor、agent 和 gateway。它们各自连接 NATS，不要依赖列表顺序作为 readiness
-顺序；应观察各服务的 ready/health 日志。
+主服务在同一 asyncio 进程中并发启动 RobotService、本地 SkillWorker、Agent 和
+Gateway，并按配置选择 HumanFollowService。Agent、SkillWorker 与 RobotRuntime 是进程内
+组合；Gateway/Agent消息和运行投影使用配置的bus。不要依赖服务列表顺序作为readiness
+顺序，应观察各组件的ready/health日志。
 
 ## 建议验证顺序
 
-先验证 11 个非 VLA skill 稳定，再单独调试 VLA：
+先验证当前配置显式开放的3个Skill，再单独调试未开放的硬件原语和VLA：
 
 1. 摄像头稳定发布 frame，心跳日志正常
-2. `inspect_scene` 和 `look_around` 返回观测
-3. `detect_marker` 在 marker 可见时返回检测结果
-4. `stop_motion`、`move_base`、`turn_base` 可用
-5. `set_arm_pose`、`move_arm_joints` 可用
-6. `set_gripper` 可用
-7. readiness gate 阻止不安全的动作
-8. failure 进入 recovery flow
-9. 只有完成独立 ModelService、observation 和真机安全验证后，才设计 VLA deployment
+2. `inspect_scene`返回有效观测
+3. `move_base`和`turn_base`执行短距离、低速度动作
+4. RobotRuntime readiness/safety阻止不安全动作
+5. failure写入Skill run并返回Agent task
+6. 使用诊断脚本分别验证机械臂、夹爪和底盘原语，不直接扩大Agent tool surface
+7. 只有完成独立ModelService、observation和真机安全验证后，才设计VLA deployment
 
-## 启用的 Skills（11 个）
+## Agent 可见 Skills（3 个）
 
-默认 `mode: bringup`，启用 11 个非 VLA skill：
+三份真机配置当前都使用`execution_mode: local`，并在`skills.tools`中只开放：
 
 | 类别 | Skill | 说明 |
 |---|---|---|
 | 感知 | `inspect_scene` | 获取当前场景观察和摘要 |
-| 感知 | `look_around` | 转动/扫描视野并观察 |
-| 感知 | `detect_marker` | 检测可见 marker |
 | 导航 | `move_base` | 底盘前进/后退 |
 | 导航 | `turn_base` | 底盘左转/右转 |
-| 导航 | `human_follow` | 基于视觉的人体跟随 |
-| 安全 | `stop_motion` | 停止所有运动 |
-| 安全 | `reset_posture` | 回到安全姿态 |
-| 操作 | `set_arm_pose` | 设置机械臂命名姿态 |
-| 操作 | `move_arm_joints` | 控制机械臂关节 |
-| 操作 | `set_gripper` | 控制夹爪开合 |
 
-`vla_manipulation` Skill 已注册，但当前三份真机配置的 `model_services` 都为空，也没有把
-VLA 加入 `skills.tools`。因此默认真机系统不具备可启动的 VLA 服务。
+内置registry还注册了其他感知、安全、机械臂和模型驱动Skill，但注册不等于对Agent
+开放。`skills.mode: bringup`当前不会自动扩大能力面，唯一事实源是`skills.tools`。
+
+当前三份真机配置的`model_services`都为空，也没有把`manipulate`加入`skills.tools`，
+因此默认真机系统不具备可启动的VLA服务。
 
 ## 摄像头配置
 
@@ -214,23 +209,22 @@ Windows 默认只配置 `front`。新增 wrist 前先扫描设备，并确认相
 VLA 的架构位置已经确定，但当前真机 deployment 尚未交付：
 
 ```text
-Agent request_skill
-  -> SkillControllerService
+Agent physical tool proposal
+  -> TaskCoordinator / local SkillWorker
   -> ModelServiceRegistry
   -> gRPC RobotPolicyService
   -> one-step policy result
-  -> Skill OS converts result to guarded primitives
+  -> VLA option converts result to guarded robot actions
   -> RobotRuntime / XLeRobotDriver
 ```
 
 当前代码和配置的事实边界：
 
-- 真机 YAML 中没有 ModelService entry，不能直接运行 `--service-id arm_vla`；
-- 默认真机 Skill surface 只有前述 11 个 native skill；
-- VLA executor 的内部测试路径只能用于协议测试；
-- real path 仍依赖 LeRobot RobotClient 的 arm/camera config，尚未完全成为只消费系统注入
-  observation 的纯推理服务；
-- `pick_object` / `place_object` 还需要对齐 Skill 调用名与 ModelService `provides`。
+- 真机 YAML 中没有 ModelService entry，不能直接运行 `--service-id manipulate`；
+- 默认真机Skill surface只有前述3个Skill；
+- 当前通用VLA Skill名为`manipulate`，依赖同名ModelService capability；
+- LeRobot executor、observation mapping和action dimensions必须与真机embodiment逐项验证；
+- 仓库中的接口和仿真测试不能替代真机安全验证。
 
 启用真机 VLA 前至少需要：
 

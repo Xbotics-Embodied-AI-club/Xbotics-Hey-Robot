@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hey_robot.robot_runtime.clients import RobotActionResult
+from hey_robot.robot_api import RobotActionResult
 from hey_robot.skills.context import SkillContext
 from hey_robot.skills.models import SkillResult
 

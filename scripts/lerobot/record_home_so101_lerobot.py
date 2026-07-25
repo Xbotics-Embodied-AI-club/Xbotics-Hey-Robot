@@ -10,14 +10,14 @@ import numpy as np
 from PIL import Image
 
 from hey_robot.config import DeploymentConfig
-from hey_robot.robot_runtime.manager import RobotManager
-from hey_robot.robot_runtime.simulation.xlerobot_sim_driver import XLeRobotSimDriver
-from hey_robot.robot_runtime.so101.vla_codec import (
+from hey_robot.robot_backends.simulation.xlerobot_sim_driver import XLeRobotSimDriver
+from hey_robot.robot_backends.xlerobot.hardware.vla_codec import (
     SO101_STATE_SCHEMA,
     SO101_VECTOR_NAMES,
     action_vector_to_targets,
     state_from_sim_driver,
 )
+from hey_robot.robot_runtime.manager import RobotManager
 
 
 def _import_lerobot_dataset() -> tuple[Any, Any]:

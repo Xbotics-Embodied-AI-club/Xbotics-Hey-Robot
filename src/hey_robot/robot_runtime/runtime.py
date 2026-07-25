@@ -13,14 +13,16 @@ from hey_robot.protocol import (
     SceneEntity,
     SkillIntent,
 )
-from hey_robot.robot_runtime.base import RobotCapabilities, RobotDriver, RobotHealth
-from hey_robot.robot_runtime.control_plane import RobotControlPlane
-from hey_robot.robot_runtime.media import LocalMediaStore
-from hey_robot.robot_runtime.observations import (
+from hey_robot.robot_api import (
     DriverObservation,
-    PerceptionService,
-    PerceptionSnapshot,
+    PerceptionRequestDriver,
+    RobotCapabilities,
+    RobotDriver,
+    RobotHealth,
 )
+from hey_robot.robot_media import LocalMediaStore
+from hey_robot.robot_runtime.control_plane import RobotControlPlane
+from hey_robot.robot_runtime.observations import PerceptionService, PerceptionSnapshot
 from hey_robot.robot_runtime.safety import RobotSafetyError, RobotSafetySupervisor
 
 logger = HeyRobotLogger(name="robot_runtime")
@@ -176,9 +178,10 @@ class RobotRuntime:
         self, action: RobotAction, skill_name: str
     ) -> RobotStatus:
         skill_action = RobotSkillAction.from_robot_action(action)
-        before_request = getattr(self.driver, "before_perception_request", None)
-        if callable(before_request):
-            before_request(skill_name, dict(skill_action.arguments))
+        if isinstance(self.driver, PerceptionRequestDriver):
+            self.driver.before_perception_request(
+                skill_name, dict(skill_action.arguments)
+            )
         if skill_name == "look_around":
             result = await self._look_around(action, dict(skill_action.arguments))
             return await self._perception_status(action, result=result)
@@ -420,7 +423,6 @@ def _perception_skill_name(action: RobotAction) -> str | None:
         "inspect_scene",
         "look_around",
         "detect_marker",
-        "human_follow",
     }:
         return skill.name
     return None
@@ -579,10 +581,6 @@ def _marker_detection(marker_id: int | None, pts: Any, shape: Any) -> dict[str, 
         "image_size": [width, height],
         "confidence": 0.9 if marker_id is not None else 0.45,
     }
-
-
-def _marker_area_key(item: dict[str, Any]) -> float:
-    return float(item.get("area", 0.0))
 
 
 def _entity_payload(entity: SceneEntity) -> dict[str, object]:

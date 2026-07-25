@@ -1,48 +1,48 @@
 # Hey Robot 系统架构
 
-本文描述当前代码的实际运行结构。历史设计稿可能仍使用“三层架构”或
-“CapabilityService”等旧术语；当前实现以四层边界、NATS 主链和 gRPC ModelService
-为准。
+本文描述当前代码的实际运行结构。历史设计稿中的 `RobotAgentCore`、`AgentRuntime`、
+`SkillGateway`、`SkillControllerService`、`TaskSupervisorService` 和 NATS
+`skill.intent` 控制链已经不属于当前生产拓扑。
+
+更完整的工程审计见
+[系统结构、耦合、兼容性与复杂度分析](system-structure-coupling-compatibility-complexity-analysis.zh-CN.md)。
+Robot 子系统的物理包边界、惰性 Driver 加载和旧代码删除清单见
+[Robot Runtime 边界重构](robot-runtime-refactor.zh-CN.md)。
 
 ## 1. 系统定位
 
-Hey Robot 是一个不依赖通用 LLM Agent 框架、面向真实机器人原生构建的
-Embodied Agent Harness，不是单独的 LLM loop，也不是端到端神经网络控制器。
+Hey Robot 是面向真实机器人构建的 Embodied Agent Harness。它不依赖通用 LLM Agent
+框架，也不是端到端神经网络控制器。系统自行实现：
 
-核心 Agent Runtime、tool protocol、任务状态机、记忆路由和 execution-feedback loop
-均由项目自主实现。模型调用统一使用 OpenAI Python SDK 的 Chat Completions 接口，不承担
-Agent 编排；OpenAI、DeepSeek、Qwen 和 vLLM 仅通过模型名、API key 与 `base_url` 区分。
-这里的“原生”指系统从一开始围绕异步物理执行、观测过期、硬件状态和失败恢复设计。
-
-系统围绕以下工程问题提供统一实现：
-
-- 多渠道用户入口、身份和会话连续性；
-- LLM tool loop、任务状态、记忆和主动感知；
-- Skill contract、资源调度、超时和中断；
-- VLA/VLN 等 Foundation Model 的独立部署；
-- MuJoCo 和真机的统一 RobotDriver 边界；
-- observation、execution feedback、recovery、审计和任务 UI。
+- 多渠道接入、身份绑定、episode 和会话连续性；
+- LLM tool loop、持续任务状态和恢复；
+- Skill 参数校验、资源互斥、超时、取消和运行记录；
+- VLA/VLN ModelService 路由；
+- MuJoCo、真机与远程 RoboCasa 的 RobotDriver 边界；
+- observation、execution event、media、审计和 Tasks UI。
 
 当前主线 embodiment 是 XLeRobot，真机由 SO101 机械臂、LeKiwi 移动底盘、相机和
 舵机总线电池监控组成。
 
-## 2. 异步快慢双系统与四层架构
+## 2. 快慢系统与四个代码所有权层
 
-快慢双系统描述决策层级：
+快慢系统描述决策时间尺度：
 
-| 系统 | 负责什么 | 当前代码 |
+| 系统 | 责任 | 当前实现 |
 |---|---|---|
-| 慢系统 | 语言理解、目标分解、任务状态、记忆、长程规划、恢复 | `RobotAgentCore`、`AgentRuntime`、`TaskRunManager`、`MemoryBroker` |
-| 快系统 | VLA/VLN、短时域技能闭环、安全门控、局部控制、机器人执行 | Foundation Model、Skill OS、Human Follow、Robot Runtime |
+| 慢系统 | 语言理解、任务推进、模型工具决策、持久状态和恢复 | `Agent`、`AgentRunner`、`AgentTaskStore`、`TaskCoordinator` |
+| 快系统 | 有界 Skill闭环、模型短时域决策、安全检查和机器人执行 | `SkillWorker`、VLA/VLN option、`RobotRuntime`、driver |
 
-两套系统不是同步函数调用栈，而是通过 `SkillIntent`、`SkillEvent`、`SkillResult`、
-`RobotStatus` 和 `RobotObservation` 异步协作。慢系统下发目标，快系统执行并持续产生
-状态和证据，慢系统再根据反馈继续规划、恢复或结束任务。
+四个代码所有权层为：
 
-这里的“快”表示更接近具身控制、决策周期和任务视野更短，不表示所有 VLA/VLN 推理都比
-LLM 更低延迟，也不表示当前 Python asyncio 执行路径是硬实时控制器。
+1. **Cognition**：决定调用哪个可见 Tool/Skill，不构造 RobotAction；
+2. **Skill**：定义有界能力，管理参数、资源、timeout、取消和生命周期；
+3. **Foundation Model**：通过 gRPC 提供 VLA/VLN 推理，不拥有机器人环境；
+4. **Robot Runtime**：拥有 observation、安全、control plane 和 driver执行。
 
-四层架构描述这套快慢系统在代码和部署中的所有权边界：
+Gateway、bus、persistence、media 和 logging 是横切基础设施。
+
+## 3. 当前实际拓扑
 
 ```text
 User Channels
@@ -52,358 +52,263 @@ User Channels
 GatewayService
   identity / episode / history / presentation
           |
-          | NATS: user.turn
+          | NATS or in-memory bus: conversation.turn
           v
-1. Agent / Cognition
-  AutonomousAgentService
-  RobotAgentLoop: restore -> build -> run -> save
-  RobotAgentCore / AgentRuntime
-  task state / memory / perception / feedback / recovery
+AutonomousAgentService
           |
-          | NATS: skill.intent
           v
-2. Skill OS
-  SkillControllerService
-  SkillAdmissionGate / SkillScheduler / SkillRuntime
-          |                           |
-          | NATS: robot.action        | gRPC
-          v                           v
-4. Robot Runtime              3. Foundation Model
-  RobotService                   ModelService
-  RobotRuntime                   VLA / VLN executors
-  MuJoCo / native                GetHealth / ExecuteSkill / CancelSkill
-          |                           |
-          +-------------+-------------+
-                        |
-                        v
-  robot.status / robot.observation / skill.event / skill.result
+Agent -> AgentRunner -> AgentToolExecutor
+          |
+          v
+TaskCoordinator
+          |
+          | in-process SkillClient
+          v
+SkillWorker -> SkillRunner -> Skill handler
+          |                       |
+          |                       +---- gRPC ----> ModelService
+          v
+LocalRobotClient -> RobotRuntime -> RobotDriver
+                           |
+                           v
+           robot.status / robot.observation / skill.event projection
 ```
 
-四层与快慢系统的对应关系如下：
+关键边界：
 
-1. Agent 层属于慢系统，决定“当前应该请求什么能力”，但不接触硬件动作。
-2. Skill OS 属于快系统的执行编排层，决定能力是否允许、如何组合和占用资源。
-3. Foundation Model 层属于快系统的学习型决策层，提供 VLA/VLN 等短时域结果。
-4. Robot Runtime 属于快系统的执行层，决定如何在当前 embodiment 上执行 primitive。
+- Gateway 到 Agent 使用 bus 消息；
+- Agent 到 Skill 使用进程内 `SkillClient`；
+- Skill 到 Robot 使用进程内 `LocalRobotClient`；
+- Skill 到 VLA/VLN 使用 gRPC `ModelService`；
+- Skill执行事实写入 `FileRunStore`，再异步投影到 bus；
+- RobotService 独立发布 observation、status 和 raw camera frame。
 
-Gateway、消息总线、持久化和通知是贯穿四层的系统基础设施，不作为第五个机器人决策层。
+`protocol.Topics` 仍保留 `skill.intent` 和 `robot.action`。前者不再是生产 Skill提交
+入口；后者仍由 RobotService订阅，属于兼容/外部动作入口，不是主 Harness执行路径。
 
-## 3. 默认部署形态
+## 4. 默认部署形态
 
-`hey-robot run` 使用 `DeploymentRunner` 在一个 asyncio 进程中构造：
+`hey-robot run` 的 `DeploymentRunner` 在一个 asyncio 进程中创建：
 
-- `RobotService`
-- 可选 `HumanFollowService`
-- `SkillControllerService`
-- `TaskSupervisorService`
-- 一个或多个 `AutonomousAgentService`
-- `GatewayService`
+- `RobotService`；
+- 一个本地 `SkillWorker`（以 managed service `skills` 启停）；
+- 一个 enabled `AutonomousAgentService`；
+- 可选 `HumanFollowService`；
+- `GatewayService`；
+- 可选受管 RoboCasa sidecar。
 
-这些服务各自创建 NATS client，并通过协议消息协作。ModelService 和 NATS broker 是独立
-进程。CLI 同时提供 `agent`、`gateway`、`robot`、`task-supervisor` 和
-`model-service` 等入口，因此主服务也可拆分部署。
+配置校验只接受 `skills.execution_mode: local`，并拒绝一个 deployment 中启用多个
+autonomous Agent。因此当前部署边界应描述为：
 
-这个形态应表述为：
+> Agent、Skill Worker 与 Robot Runtime 默认且目前必须在主 Harness 进程中组合；
+> ModelService 和 RoboCasa backend 可以独立进程或容器部署。
 
-> 协议上服务化、可拆分；默认主系统本地一体化。
+NATS不是始终必需：`deployment.bus.type: in_memory` 可用于同进程开发与评测；NATS用于
+外部 Channel/Agent通信、运行投影和 raw frame consumer。Core NATS publish/subscribe
+默认不持久化；只有显式启用 JetStream 才有 broker侧持久化语义。
 
-默认 NATS 配置使用 core publish/subscribe。只有显式设置 `use_jetstream` 时才启用
-JetStream，因此不能默认假设消息会持久化或重放。任务的 durable state 主要来自本地
-JSON/JSONL store。
+## 5. 一次用户 turn
 
-## 4. 一次 turn 的实际链路
+### 5.1 Gateway
 
-### 4.1 Gateway
+Channel 把输入归一化为 `UserTurn`。Gateway：
 
-Channel 将外部输入归一化为 `UserTurn`。Gateway：
+1. 解析统一身份；
+2. 选择 Agent 和 Robot；
+3. 分配 episode/session；
+4. 保存用户历史；
+5. 发布 `ConversationTurn`。
 
-1. 解析 `user_id`；
-2. 选择 `agent_id` 和 `robot_id`；
-3. 按身份、渠道和会话维度分配 episode；
-4. 保存用户 turn；
-5. 发布 `user.turn`。
+`Envelope` 携带 trace、episode、channel、user、agent、robot 和 deployment身份。
 
-`Envelope` 贯穿后续消息，携带 `trace_id`、`episode_id`、`robot_id`、`agent_id`、
-channel 和用户身份。
+### 5.2 Agent
 
-### 4.2 Agent turn
+`AutonomousAgentService` 为 session 延迟创建一个 `Agent`。Agent：
 
-`AutonomousAgentService` 为 episode 和 robot 加锁，避免同一机器人同时处理冲突 turn。
-`RobotAgentLoop` 依次执行：
+1. 由 `AgentContextBuilder` 构造对话或恢复上下文；
+2. 调用纯决策 `AgentRunner`；
+3. 接受最终文本，或一个 harness/physical typed proposal；
+4. 由 `AgentToolExecutor` 执行 proposal；
+5. 非物理 Tool结果可在同次唤醒继续进入模型；
+6. 物理 Skill提交后返回 `waiting`，等待终态事件恢复。
 
-- `restore`：恢复 checkpoint 和 task state；
-- `build`：组装 history、memory、recovery 和最新 robot snapshot；
-- `run`：调用 `RobotAgentCore`；
-- `save`：保存 task state 和 robot episode state。
+一次唤醒最多进行 8 次模型决策。用户在物理动作期间 steer 时，意图写入 conversation，
+Agent在安全点继续；急停走确定性 control path，不依赖 LLM。
 
-`RobotAgentCore` 的决策顺序是：
+### 5.3 持续任务与恢复
 
-1. turn mode 和任务安全；
-2. stop、reset、home、gripper 等确定性短命令路由；
-3. memory 和主动感知上下文；
-4. `AgentRuntime` 的 LLM tool loop。
+`TaskCoordinator` 在提交 Skill前先写入 pending step，然后构造 `SkillCommand` 并调用
+`SkillClient.submit()`。Skill终态通过 `SkillClient.events()` 回到 Agent，更新 task step
+并触发下一次模型决策。
 
-LLM 可见的生产工具包括状态查询、任务上下文、感知、记忆、等待、动作提议和
-`request_skill`。Agent 层不能直接构造 `RobotAction`，也不能依赖 driver primitive。
+启动恢复会查询 active run：
 
-### 4.3 Skill 请求和等待策略
+- 已有终态事件则归并到 Agent task；
+- 持久化为非终态但没有 worker所有者时，标记 `execution_lost`；
+- 未知状态的物理动作不会被自动重放。
 
-所有物理能力请求统一经过 `SkillGateway`。它负责：
+## 6. Skill 层
 
-- 检查 skill 是否在 deployment surface 中；
-- 应用 channel/task safety；
-- 检查 recovery block；
-- 对 motion skill 检查相机健康和 freshness；
-- 阻止没有新感知证据的连续运动；
-- 构造并发布 `SkillIntent`。
+`hey_robot.skills.models.Skill` 是当前 Skill contract 的事实源：
 
-等待策略：
+```text
+name / description / parameters / handler
+resources / timeout_sec
+supported_robots
+required_actions / required_models
+```
 
-- `wait_result`：tool call 等待最终 `SkillResult`，LLM 可在同一 turn 中继续规划；
-- `wait_acceptance`：发布后立即返回已受理，适合 stop 等短命令；
-- `return_handle`：只返回 `skill_id` 句柄。
+`SkillWorker` 负责 queue、managed task、取消、订阅者、run store 和事件投影。
+`SkillRunner` 负责：
 
-当前有限长程任务主要依赖 `wait_result`，在一个 turn 内形成多次
-“观察—动作—反馈—继续”的循环。
+1. 查找 Skill并验证 JSON Schema参数；
+2. 发布 accepted/running；
+3. 按 `(robot_id, resource)` 获取资源锁；
+4. 创建 `SkillContext` 并执行有界 handler；
+5. 归一化成功、失败、取消和 timeout；
+6. 持久化并发布 terminal event。
 
-## 5. Skill OS
+`SkillContext` 当前提供：
 
-`BaseSkill.spec` 是 Skill contract 的事实源，描述：
+- `robot`：`RobotClient`端口；
+- `models`：`ModelRouter`端口；
+- `observe()`；
+- `progress()`；
+- `raise_if_cancelled()`。
 
-- 输入和必填参数；
-- required resources；
-- dependencies 和 driver primitives；
-- required model service；
-- supported robots；
-- safety level、timeout 和 interruptibility；
-- success criteria、failure modes 和 recovery hints；
-- goal effects 和 evidence outputs。
+### Deployment surface
 
-`SkillControllerService` 接收 `SkillIntent` 后：
+`skills.modules` 决定加载哪些 registry模块，`skills.tools` 是直接投影为 Agent tool 的
+显式 allowlist。`skills.implementations` 可为同一语义 Skill选择实现。
 
-1. 解析 contract；
-2. 检查参数、robot state 和 readiness；
-3. 检查资源冲突；
-4. 创建 `SkillRun`；
-5. 通过 `SkillRuntime` 执行 plugin；
-6. 等待 RobotStatus 或 ModelService result；
-7. 发布 `SkillEvent` 和 `SkillResult`。
+`skills.mode` 当前只接受 `production` 或 `bringup`，但没有自动过滤逻辑；`Skill`也没有
+`agent_visible`字段。因此安全审查必须检查实际 `skills.tools`，不能只看 mode名称。
 
-资源可以根据参数实例化。例如 `arm=left` 会把通用 `arm` 资源转换为
-`left_arm`。相机资源是共享资源，base、arm 和 gripper 默认互斥。
+## 7. Foundation Model
 
-### Production 与 bringup
-
-- `production`：`skills.tools` 只能列出 `agent_visible=True` 的 semantic skill。
-- `bringup`：允许把 primitive/implementation skill 直接暴露给 Agent，用于联调。
-
-当前系统仍处于开发和联调阶段，仓库提供的 real/sim 主配置使用 `bringup`。
-这些配置会把 `move_base`、`turn_base`、`base_velocity_step`、`set_arm_pose`、
-`move_arm_joints`、`set_gripper`、`detect_marker` 等底层调试 skill 显式暴露出来，
-便于验证硬件、仿真和 Skill OS 到 Robot Runtime 的完整链路。
-
-最终生产 profile 仍应使用 `production`，只暴露 `agent_visible=True` 的 semantic skill。
-
-## 6. Foundation Model 层
-
-ModelService wire contract 的 source of truth 是：
+wire contract 的事实源是：
 
 ```text
 proto/hey_robot/model_service/v1/model_service.proto
 ```
 
-当前 RPC：
-
-- `GetHealth`
-- `ExecuteSkill`
-- `CancelSkill`
-
-`ModelServiceRegistry` 按 `model_services.<id>.provides` 和 `robot_id` 路由请求。
-Skill OS 在调用前检查服务是否 online、loaded 和 busy。
+RPC为 `GetHealth`、`ExecuteSkill` 和 `CancelSkill`。`ModelServiceRegistry` 按
+`model_services.<id>.provides` 与 `robot_id`选择服务。
 
 ### VLN
 
-VLN executor 是 planner-only：
+VLN Skill执行有界 observe-plan-act循环：
 
 ```text
-camera frame + instruction
-  -> ModelService
-  -> pixel_goal / heading / stop
-  -> Skill OS adapter
+Robot observation
+  -> gRPC planner request
+  -> stop / heading / pixel_goal
   -> move_base / turn_base / stop_motion
-  -> refresh observation
+  -> fresh observation
 ```
 
-它不是 SLAM 或全局路径规划器，当前输出会被转换为粗粒度局部 primitive。
+它不是 SLAM或全局路径规划器，输出被转换为粗粒度局部 primitive。
 
 ### VLA
 
-VLA Skill 的目标结构是：
+VLA Skill执行有界 observe-infer-act循环：
 
 ```text
-current observation + task prompt
-  -> one inference step
-  -> joint/gripper primitives
-  -> Robot Runtime
-  -> refresh observation
-  -> repeat
+observation + prompt
+  -> one model inference step
+  -> embodiment_native_action
+  -> RobotRuntime safety/control plane
+  -> fresh observation
 ```
 
-当前实现仍处于实验阶段：
+默认 real/sim profile 不开放 VLA；实验配置需要独立模型环境、权重、GPU和真实路由验证，
+不能表述为已交付的通用抓取能力。
 
-- `xlerobot.sim.vla_vln.yaml` 的 VLA `model_path` 为空，因此当前只能走内部接口测试路径；
-- real inference 仍构造 LeRobot RobotClient 和 camera/arm config，尚未完全成为只消费
-  injected observation 的纯推理服务；
-- `pick_object`、`place_object` 的 contract 依赖 `vla_manipulation`，但执行时按各自
-  semantic name 查询 ModelService；部署时必须确保 `provides` 与实际调用名一致。
+## 8. Robot Runtime
 
-因此默认 real/sim 配置不开放 VLA；实验配置也不应被描述为已经验证的真实 VLA 闭环。
+Skill handler 通过 `RobotClient.execute()`请求动作。`LocalRobotClient`将动作转为
+`RobotAction`并调用 `RobotRuntime.apply_action()`。RobotRuntime统一处理：
 
-## 7. Robot Runtime
+- driver lifecycle、capabilities和health；
+- RobotSafetySupervisor；
+- perception skill与observation pipeline；
+- RobotControlPlane；
+- reset、status和emergency stop。
 
-Skill OS 将 primitive 编码为 `RobotAction`。当前 skill action 的主要内容位于
-`metadata.skill`，而不是连续向量 `values`：
+`RobotManager`支持：
+
+- Mock driver；
+- XLeRobot MuJoCo driver；
+- XLeRobot native driver；
+- RoboCasa remote driver。
+
+仓库还保留 SO101/LeKiwi独立 driver代码，但当前 manager的公开配置分派以以上四类为准。
+
+## 9. Observation、Media 与事件
+
+Driver输出 `DriverObservation`。`ObservationPipeline`检查图像质量，将大对象写入
+`LocalMediaStore`，在 `RobotObservation`中只保留 `ImageRef`、`ArtifactRef`和小型
+metadata。
+
+RobotService merged loop 用一次 driver observation生成：
+
+- `robot.observation`；
+- `robot.status`；
+- `robot.camera.frame.<robot_id>` raw frame packet。
+
+Skill的内部 `skills.models.SkillEvent` 是执行事实；`SkillEventProjector`把它转换为
+`protocol.SkillEvent`并发布到 bus。投影失败不会阻塞 durable Skill执行。
+
+## 10. 持久化与一致性
+
+当前主要存储：
+
+- `JsonlEpisodeStore`：用户/Agent历史；
+- `ConversationStore`：Agent会话上下文；
+- `AgentTaskStore`：持续任务与step；
+- `FileRunStore`：Skill command、事件与artifact；
+- `RuntimeEventStore`：运行事件；
+- `LocalMediaStore`：图像和大对象。
+
+它们是本地 SQLite或文件存储，不构成跨存储事务。系统采用 persist-before-submit、幂等
+run ID和启动 reconciliation实现最终一致性，并优先避免崩溃后重复执行物理动作。
+
+## 11. 安全边界
+
+当前确定性安全链为：
 
 ```text
-RobotAction
-  metadata.action_type = "skill"
-  metadata.skill.name
-  metadata.skill.arguments
+explicit skills.tools allowlist
+  -> Agent tool argument validation
+  -> TaskCoordinator single-active-run rule
+  -> Skill JSON Schema / resource lock / timeout
+  -> RobotRuntime health / battery / estop / action checks
+  -> driver validation and hardware limits
 ```
 
-`RobotRuntime` 统一处理：
+这些机制不构成工业安全系统。系统没有完整碰撞检测、SLAM、全局避障或硬实时安全控制；
+真机仍必须隔离网络并保留物理急停或断电手段。
 
-- driver lifecycle；
-- capabilities 和 health；
-- action safety；
-- perception skill；
-- observation materialization；
-- reset 和 status。
+## 12. 当前能力边界
 
-`RobotManager` 根据 `family + environment + driver` 选择：
+真实能力以所选 YAML 的 `skills.tools` 为准。主线 XLeRobot配置目前保持一个最小移动能力
+面，主要包含 `inspect_scene`、`move_base` 和 `turn_base`；其他 Skill虽可注册在内置
+registry中，只有显式加入 `skills.tools` 才对 Agent可见。
 
-- `XLeRobotSimDriver`
-- `XLeRobotDriver`
-- `SO101Driver`
-- `LeKiwiDriver`
-
-代码中另有仅供自动化测试使用的 driver test double；它不作为对外支持的机器人环境。
-
-XLeRobot 真机 primitive 通过 `ClassicSkillExecutor` 路由到
-`NativeXLeRobotClient`，再访问 LeKiwi 底盘、SO101 机械臂、SCServo 总线和 OpenCV
-相机。MuJoCo driver 实现相同协议，因此 Agent 和 Skill 不需要区分真机与仿真。
-
-## 8. Camera、Observation 和 Scene
-
-Driver 输出 `DriverObservation`。`ObservationPipeline`：
-
-1. 检查空图、shape 和黑帧；
-2. 将图像和大 artifact 保存到 local media store；
-3. 在 `RobotObservation` 中只携带 `ImageRef`、`ArtifactRef` 和小型 metadata；
-4. 添加 `valid_image_count` 和 quality issues。
-
-RobotService 的 merged observation loop 用一次 `driver.observe()` 同时生成：
-
-- `robot.observation`：结构化、引用式 observation；
-- `robot.camera.frame.<robot_id>`：低延迟 raw frame packet。
-
-Agent、场景 captioner 和 memory 使用结构化 observation；human follow 和需要当前画面的
-Foundation consumer 使用 raw frame stream。
-
-## 9. Task、Memory、Feedback 和 Recovery
-
-主要 durable state：
-
-- `JsonlEpisodeStore`：用户和 Agent 对话；
-- `TaskRunStore`：root task、attempt、skill binding、feedback 和 recovery；
-- `RobotEpisodeStateStore`：最近 robot state；
-- `SceneMemoryStore`：场景证据；
-- Long-term memory：偏好、地点、经验和事件；
-- `RuntimeEventStore`：运行审计；`FileRunStore`：Skill command、事件和终态事实。
-
-这些存储目前是本地文件，适合单机部署和可解释审计，不等价于多节点事务数据库。
-
-SkillResult 到达 Agent 后会生成 execution feedback。反馈区分：
-
-- subgoal 是否成功；
-- root task 是否成功；
-- confidence；
-- failure reason；
-- next hint；
-- recommended action。
-
-Task Supervisor 监控 skill timeout、status/observation stale、camera quality 和 recovery
-state。重复相同失败会逐步升级为 `ask_operator` 和 `safe_abort`。
-
-当前 autonomy 仍是 turn-driven：Task Supervisor 负责监控和通知，不会在无新 turn 时
-持续唤醒 LLM。`autonomous` 表示 tool-using task execution mode，而不是永久运行的
-后台目标循环。
-
-## 10. 安全边界
-
-当前采用多层确定性 gate：
-
-```text
-task/channel safety
-  -> SkillGateway camera/recovery/consecutive-motion checks
-  -> Skill contract/readiness/resource checks
-  -> RobotRuntime health/battery/estop checks
-  -> driver contract validation
-```
-
-这些 gate 能降低 LLM 误调用风险，但不构成工业安全系统。当前没有完整碰撞检测、SLAM、
-全局避障或硬实时安全控制；Web、NATS 和 gRPC 的默认开发配置也没有认证。真机部署必须
-隔离网络，并保留物理急停或断电手段。
-
-## 11. Web 与可观察性
-
-主要页面：
-
-- `/chat`：交互入口；
-- `/tasks`：任务列表；
-- `/tasks/{episode_id}`：任务详情；
-- `/admin`：运行时总览。
-
-`/cockpit` 页面路由保留为兼容入口并重定向到 `/tasks`；
-`/cockpit/{episode_id}` 仍是 TaskSession 聚合数据 API。
-
-任务视图由 `TaskSessionQueryService` 聚合 TaskRun、robot state、scene memory、
-skill lifecycle 和 recovery。
-
-## 12. 能力边界
-
-默认 real/sim bringup 配置暴露以下非 VLA semantic skill 和底层调试 skill：
-
-```text
-inspect_scene, look_around, human_follow,
-stop_motion, reset_posture,
-detect_marker,
-move_base, turn_base, base_velocity_step,
-set_arm_pose, move_arm_joints, set_gripper
-```
-
-因此主线系统支持观察、短步底盘运动、视觉人体跟随、安全停止/复位、机械臂命名姿态、
-关节控制和夹爪控制。
-
-实验配置 `xlerobot.sim.vla_vln.yaml` 的 bringup surface 额外声明：
-
-```text
-navigate_to, approach_object,
-pick_object, place_object
-```
-
-这些能力需要独立 ModelService，且受前述 VLA/VLN 限制。当前系统不应被描述为已经具备
-稳定 SLAM、全局避障或真实通用抓取能力。
+RoboCasa365 profile暴露 `inspect_scene`和`manipulate`。VLA/VLN实验 profile需要独立
+ModelService，不能据此推断默认部署拥有稳定的通用导航或抓取能力。
 
 ## 13. 架构守卫
 
-测试明确限制：
+当前测试明确限制：
 
-- cognition 不得在 SkillGateway 之外构造 SkillIntent；
-- cognition 不得依赖 RobotAction 或 driver primitive；
-- robot_runtime 不得导入 cognition、skill_os 或 foundation backends；
-- foundation 不得导入 cognition 或 skill_os；
-- legacy package 和旧 generated contract 不得重新出现；
-- proto source 与 generated artifacts 必须保持一致。
+- Cognition不构造 `SkillIntent`或`RobotAction`；
+- `AgentRunner`不执行IO；
+- Agent只通过 `SkillClient`消费Skill事件；
+- Robot Runtime不依赖 Cognition、旧 `skill_os`或Foundation backend；
+- Foundation不依赖 Cognition或Robot Runtime；
+- event-driven Skill execution mode保持移除；
+- proto source与generated artifacts保持一致。
 
-这些约束使四层结构成为可执行的代码规则，而不只是文档约定。
+架构守卫以当前 native local拓扑为准。任何恢复跨进程Skill控制面的工作，都必须先新增
+明确的 RemoteSkillClient/RemoteRobotClient契约和端到端测试。

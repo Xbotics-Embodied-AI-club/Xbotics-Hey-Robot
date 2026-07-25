@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from hey_robot.robot_runtime.clients import RobotActionSpec, RobotClientCapabilities
+from hey_robot.robot_api import RobotActionSpec, RobotClientCapabilities
 from hey_robot.skills import Skill, SkillResult, validate_skill_surface
 
 

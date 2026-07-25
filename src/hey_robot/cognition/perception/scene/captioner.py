@@ -12,7 +12,7 @@ from hey_robot.model import (
     create_model_client,
 )
 from hey_robot.protocol import RobotObservation, RobotStatus
-from hey_robot.robot_runtime.media import MediaResolver
+from hey_robot.robot_media import MediaResolver
 from hey_robot.templates.loader import TemplateStore
 
 

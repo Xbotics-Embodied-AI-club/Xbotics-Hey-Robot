@@ -13,7 +13,7 @@ from hey_robot.human_follow.perception import (
 )
 from hey_robot.logging import HeyRobotLogger
 from hey_robot.protocol import Topics
-from hey_robot.robot_runtime.observations.frame_stream import decode_frame_packet
+from hey_robot.robot_media.frame_stream import decode_frame_packet
 
 logger = HeyRobotLogger(name="human_follow_service")
 

@@ -7,8 +7,10 @@ from hey_robot.channels import ChannelContext, WebChannel
 from hey_robot.config import ChannelSpec, DeploymentConfig
 from hey_robot.events import EventKind, RuntimeEvent
 from hey_robot.protocol import Envelope, RobotAction, RobotSkillAction, SkillIntent
-from hey_robot.robot_runtime import RobotManager, RobotRuntime, RobotSafetyError
-from hey_robot.robot_runtime.media import LocalMediaStore
+from hey_robot.robot_media import LocalMediaStore
+from hey_robot.robot_runtime.manager import RobotManager
+from hey_robot.robot_runtime.runtime import RobotRuntime
+from hey_robot.robot_runtime.safety import RobotSafetyError
 
 
 def test_runtime_event_roundtrip_and_filter() -> None:

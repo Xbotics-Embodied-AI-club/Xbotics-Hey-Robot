@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 from hey_robot.config import DeploymentConfig
 from hey_robot.foundation.transport.grpc.client import GrpcModelServiceClient
-from hey_robot.robot_runtime.robocasa_remote.client import (
+from hey_robot.robot_backends.robocasa_remote.client import (
     GrpcRoboCasaRuntimeClient,
 )
 

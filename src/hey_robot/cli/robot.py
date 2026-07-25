@@ -4,7 +4,7 @@ import argparse
 import asyncio
 
 from hey_robot.config import DeploymentConfig
-from hey_robot.robot_runtime import RobotService
+from hey_robot.robot_transport import RobotService
 from hey_robot.skills import robot_action_specs_from_config
 
 

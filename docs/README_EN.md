@@ -8,8 +8,9 @@ Hey Robot is an **Embodied Agent Harness** built for real robots without relying
 on a general-purpose LLM agent framework.
 
 It combines an asynchronous fast/slow system with a layered architecture.
-The Agent Loop drives model reasoning and tool use. Robot capabilities are not
-exposed as individual tools; they enter the Skill layer through one unified request.
+The Agent Loop drives model reasoning and tool use. Skills selected by the
+deployment are projected as individual model tools, while typed proposals enter
+execution through one `SkillClient` boundary.
 Skills are intended to be driven primarily by embodied models such as VLA and VLN,
 then applied to simulation or real hardware through the Robot Runtime.
 
@@ -22,7 +23,7 @@ embodiment, with MuJoCo simulation and real-hardware deployment.
 ## Features
 
 - Agent Loop reasoning that invokes tools as needed and replans from their results.
-- Separate Tool and Skill surfaces connected through one robot-skill request gateway.
+- Skill schemas projected as model tools and executed through one typed SkillClient boundary.
 - Perception and execution feedback from cameras and robot state.
 - MuJoCo simulation and XLeRobot real-hardware deployment.
 - Web, CLI, voice, and Feishu interaction channels.
@@ -39,7 +40,7 @@ The fast/slow system describes two decision levels:
 ```mermaid
 flowchart TD
     U[User] --> A[Agent Loop<br/>Reasoning · Tools]
-    A -->|Request Skill| S[Skill Layer<br/>Capabilities · Scheduling · Safety]
+    A -->|Typed Skill Proposal| S[Local Skill Layer<br/>Capabilities · Resources · Lifecycle]
     S -->|Model Request| F[Foundation Model<br/>VLA · VLN]
     F -->|Decision Result| S
     S -->|Guarded Execution| R[Robot Runtime<br/>MuJoCo · Real Robot]
@@ -47,6 +48,8 @@ flowchart TD
 ```
 
 See [System Architecture](architecture/system-architecture.md) for details.
+The Agent, Skill Worker, and Robot Runtime currently run in one main process;
+VLA/VLN ModelServices can be deployed independently over gRPC.
 
 ## Quick Start
 
@@ -55,12 +58,13 @@ See [System Architecture](architecture/system-architecture.md) for details.
 - Ubuntu / Linux
 - Python 3.12
 - [uv](https://docs.astral.sh/uv/)
-- NATS server, or Docker
+- NATS server or Docker when using `deployment.bus.type: nats`
 - MuJoCo
 - An available LLM API
 
-> Ubuntu is the recommended platform. Windows profiles remain in the repository,
-> but the current dependency lock supports Linux only.
+> Ubuntu is the recommended platform. The main harness, native robot, and MuJoCo
+> paths have Windows profiles; VLA/VLN, RoboCasa365, and CUDA model environments
+> primarily target Linux x86_64 and require separate validation.
 
 ### Install
 
@@ -186,6 +190,7 @@ Read the [Contribution Guide](development/contributing.md) and
 | Complete configuration | [Live configuration guide (Chinese)](https://my.feishu.cn/docx/LT3odU5yyoMOCNxXmmicvbCznBb) |
 | Runtime overview | [Deployment and Runtime Shape](overview/runtime-shape.md) |
 | Architecture | [System Architecture](architecture/system-architecture.md) |
+| Architecture audit | [Structure, Coupling, Compatibility, and Complexity Analysis (Chinese)](architecture/system-structure-coupling-compatibility-complexity-analysis.zh-CN.md) |
 | Agent and capabilities | [Agent and Skill Boundaries](architecture/agent-skill-boundaries.md) |
 | MuJoCo simulation | [XLeRobot Simulation](operations/xlerobot-sim.md) |
 | Real hardware | [XLeRobot Real Deployment](operations/xlerobot-real.md) |

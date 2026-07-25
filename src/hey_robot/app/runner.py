@@ -20,8 +20,8 @@ from hey_robot.config.validation import validate_deployment
 from hey_robot.gateway import GatewayService
 from hey_robot.human_follow import HumanFollowService
 from hey_robot.logging import HeyRobotLogger
-from hey_robot.robot_runtime import RobotService
-from hey_robot.robot_runtime.media import MediaResolver
+from hey_robot.robot_media import MediaResolver
+from hey_robot.robot_transport import RobotService
 from hey_robot.skills import robot_action_specs_from_config
 
 logger = logging.getLogger(__name__)

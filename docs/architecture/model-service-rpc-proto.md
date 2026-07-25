@@ -7,25 +7,26 @@ capability-rpc 作为系统的一等架构概念。
 ## 1. 边界目标
 
 ModelService RPC 用于把 VLA、VLN 等 Foundation Model 从主系统进程中独立部署。
-它不直接暴露 RobotDriver primitive，也不替代主 NATS 消息链。
+它不直接暴露 RobotDriver primitive，也不替代主Harness的本地Skill执行链。
 
 在快慢双系统视角中，ModelService 属于下层快系统的学习型决策组件。这里的“快”指
 短时域具身决策层级，不保证每次模型推理具有更低的绝对延迟。
 
-主链仍使用 NATS：
+当前主Skill链使用进程内端口：
 
 ```text
-UserTurn -> SkillIntent -> RobotAction
-RobotStatus / RobotObservation / SkillEvent / SkillResult
+Agent -> SkillClient -> SkillWorker -> Skill handler -> LocalRobotClient
 ```
 
-只有模型执行边界使用 gRPC：
+模型执行边界使用gRPC：
 
 ```text
-Skill OS -> ModelService -> planning or action result
+Skill handler / option runner -> ModelRouter -> ModelService -> inference result
 ```
 
-Skill OS 负责控制循环、资源锁、超时和结果归一化；Robot Runtime 仍是唯一硬件执行边界。
+SkillWorker/SkillRunner负责资源锁、超时和结果归一化；VLA/VLN option负责有界控制循环；
+Robot Runtime仍是唯一硬件执行边界。NATS承载会话、状态和事件投影，不承载生产
+ModelService调用。
 
 ## 2. Source of truth
 
@@ -107,7 +108,9 @@ service ModelService {
 - error code/message；
 - metrics 和 contract version。
 
-Skill Controller 在执行前调用 health，并拒绝 offline、unloaded 或 busy 的服务。
+ModelService client提供health接口；具体Skill执行通过ModelRouter调用服务。部署和运维应
+在放开模型驱动Skill前检查online、loaded和busy状态，不能假设本地SkillWorker已经替代
+所有启动health gate。
 
 ### ExecuteSkill
 
