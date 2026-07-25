@@ -58,8 +58,7 @@ VLA/VLN ModelServices can be deployed independently over gRPC.
 - Ubuntu / Linux
 - Python 3.12
 - [uv](https://docs.astral.sh/uv/)
-- NATS server or Docker when using `deployment.bus.type: nats`
-- MuJoCo
+- NATS server or Docker only when using `deployment.bus.type: nats`
 - An available LLM API
 
 > Ubuntu is the recommended platform. The main harness, native robot, and MuJoCo
@@ -87,27 +86,14 @@ DASHSCOPE_API_KEY
 DASHSCOPE_BASE_URL
 ```
 
-> For complete environment, model, channel, simulation, and real-hardware
-> configuration, see the
-> [live configuration guide (Chinese)](https://my.feishu.cn/docx/LT3odU5yyoMOCNxXmmicvbCznBb).
-
-### Start NATS
-
-```bash
-nats-server
-```
-
-Or use Docker:
-
-```bash
-docker compose up -d nats
-```
+See the repository-owned [Configuration Reference](reference/configuration.md)
+for core fields and environment variables, and the [Documentation Index](index.md)
+for channel, simulation, and real-hardware guides.
 
 ### Run MuJoCo Simulation
 
-The default profile also enables voice and Feishu. Disable those channels before
-a Web-only first run, or configure them as described in the
-[simulation guide](operations/xlerobot-sim.md).
+The default Ubuntu simulation profile uses an in-process bus and enables only
+the Web channel. It does not require NATS, voice, or Feishu credentials:
 
 ```bash
 uv run hey-robot inspect --config configs/xlerobot.sim.ubuntu.yaml
@@ -118,6 +104,10 @@ Open:
 
 - Chat: <http://127.0.0.1:8080/chat>
 - Tasks: <http://127.0.0.1:8080/tasks>
+
+Real-hardware, Windows simulation, and VLA/VLN experiment profiles may use
+NATS. Read the [simulation guide](operations/xlerobot-sim.md) before using those
+profiles, then run `nats-server` or `docker compose up -d nats` when required.
 
 ## XLeRobot Real Hardware
 
@@ -180,21 +170,21 @@ scripts/    diagnostics, model downloads, and maintenance
 tests/      unit and integration tests
 ```
 
-Read the [Contribution Guide](development/contributing.md) and
+Read the [Contribution Guide](../CONTRIBUTING.md) and
 [Skill Extension Guide](development/skill-extension.md) before contributing.
 
 ## Documentation
 
 | Topic | Document |
 |---|---|
-| Complete configuration | [Live configuration guide (Chinese)](https://my.feishu.cn/docx/LT3odU5yyoMOCNxXmmicvbCznBb) |
-| Runtime overview | [Deployment and Runtime Shape](overview/runtime-shape.md) |
+| Documentation entry point | [Index and sources of truth](index.md) |
+| Configuration | [Configuration Reference](reference/configuration.md) |
 | Architecture | [System Architecture](architecture/system-architecture.md) |
-| Architecture audit | [Structure, Coupling, Compatibility, and Complexity Analysis (Chinese)](architecture/system-structure-coupling-compatibility-complexity-analysis.zh-CN.md) |
-| Agent and capabilities | [Agent and Skill Boundaries](architecture/agent-skill-boundaries.md) |
 | MuJoCo simulation | [XLeRobot Simulation](operations/xlerobot-sim.md) |
 | Real hardware | [XLeRobot Real Deployment](operations/xlerobot-real.md) |
+| RoboCasa365 evaluation | [Evaluation Runbook (Chinese)](evaluation/robocasa365/runbook.zh-CN.md) |
 | Extensions | [Skill Extension Guide](development/skill-extension.md) |
+| Documentation audit | [2026-07-25 audit (Chinese)](maintenance/documentation-audit-2026-07-25.zh-CN.md) |
 
 ## License
 

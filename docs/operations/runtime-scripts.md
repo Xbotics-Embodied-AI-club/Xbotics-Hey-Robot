@@ -50,6 +50,22 @@ uv run python scripts/robots/xlerobot/scan_servos.py
 uv run python scripts/robots/xlerobot/check_arm.py
 ```
 
+只读校准检查：
+
+```bash
+uv run python scripts/robots/xlerobot/calibrate_arm.py --verify
+```
+
+读取机械臂状态：
+
+```bash
+uv run python scripts/robots/xlerobot/debug_arm.py --status
+```
+
+`calibrate_arm.py --all --yes` 会写入舵机 EEPROM，`debug_arm.py --disable-torque`
+会解除关节保持力；执行前应固定机械臂并遵循真机安全流程。这两个文件是人工运维入口，
+不会被生产代码直接导入。
+
 ### 摄像头扫描
 
 枚举所有摄像头并保存视角截图到 `outputs/diagnostic/cameras/`：
@@ -108,5 +124,5 @@ uv run python scripts/dev/clean.py test    # 清理测试产物
 也可以通过 Poe 执行：
 
 ```bash
-poe clean
+uv run poe clean
 ```

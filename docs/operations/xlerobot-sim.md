@@ -20,7 +20,7 @@ Skill；模型服务条目用于独立联调，必须把对应Skill显式加入`
 |---|---|---|
 | 音频设备 | 设备索引号 | `null`（系统默认） |
 | ASR provider | `sherpa_onnx`（本地离线） | `doubao` |
-| viewer.enabled | `false` | `false` |
+| viewer.enabled | `true` | `true` |
 
 ## 系统执行架构
 
@@ -66,7 +66,8 @@ VLA 负责操作（manipulate），VLN 负责导航（navigate_to / approach_obj
 > **关键约束**：lerobot 0.6.0 要求 `transformers >= 5.4.0, < 5.6.0`。
 > 不要使用 transformers 5.13.0+（`create_causal_mask` API 不兼容）。
 
-VLA（LeRobot Policy）直接在主进程中加载，依赖纳入 `--group vla`。
+VLA（LeRobot Policy）使用主 `.venv` 的 `vla` 依赖组，但由独立
+`hey-robot model-service` 进程加载，不在 `hey-robot run` 主进程中加载。
 VLN 使用独立 venv（transformers / huggingface-hub 版本冲突）。
 
 ## 环境创建
@@ -103,14 +104,14 @@ python3.12 -m venv .vla-venv
 uv sync --group vla --python .vla-venv/bin/python
 ```
 
-日常使用不需要此环境 — VLA 推理已集成在主环境中。
+日常使用不需要此环境；VLA 服务可以从主 `.venv` 作为独立进程启动。
 
 ## 生成仿真模型
 
 `assets/robots/xlerobot/xlerobot.xml` 是生成文件，不建议手工编辑。
 
 ```bash
-python scripts/robots/xlerobot/generate_mjcf.py
+uv run python scripts/robots/xlerobot/generate_mjcf.py
 ```
 
 ## 场景布局俯视图
@@ -133,7 +134,7 @@ MJCF 渲染得到的正俯视图，用于人工检查房间、地毯、家具和
 运行仿真测试：
 
 ```bash
-pytest tests/robot_backends/simulation/test_xlerobot_sim.py -q --no-cov
+uv run pytest tests/robot_backends/simulation/test_xlerobot_sim.py -q --no-cov
 ```
 
 ## 启动步骤
@@ -204,10 +205,7 @@ curl -s http://localhost:8080/turn -X POST \
 
 ### 6. 停止
 
-```bash
-kill $(lsof -t -i:8080)   # 主进程（含 VLA 服务）
-kill $(lsof -t -i:9091)   # VLN 服务
-```
+在三个启动终端中分别按 `Ctrl+C`，让主进程、VLA 服务和 VLN 服务执行各自的清理流程。
 
 ## VLN 配置
 
@@ -332,9 +330,12 @@ manipulate:
 `sorel/pi05-so101-record-0121` 摄像头 key 为 `observation.images.front` + `observation.images.wrist`，
 与当前仿真摄像头名称兼容，无需额外映射。
 
-## Docker 部署
+## Docker 状态
 
-项目提供 `docker-compose.yml` + 两个 Dockerfile，支持容器化部署。
+仓库包含 `docker-compose.yml` 以及 runtime、VLA、VLN、RoboCasa365 四类镜像定义。
+这些文件目前是实验性部署资产，不是经过验证的生产运行手册：compose 的 runtime command
+仍指向不存在的配置路径，而且仓库没有容器 build/start smoke test。修复这些问题前，不要
+把下面的拓扑和命令视为可用性承诺。
 
 ### 服务架构（Docker）
 
@@ -370,13 +371,14 @@ docker build -f docker/Dockerfile.vln -t hey-robot-vln:latest .
 
 ### 启动
 
-```bash
-# 仅消息总线 + 运行时（无 GPU，无模型服务）
-docker compose up -d nats runtime
+当前只有 NATS 的独立启动路径可直接使用：
 
-# 完整服务（含 VLA + VLN，需要 2 GPU）
-docker compose --profile gpu up -d
+```bash
+docker compose up -d nats
 ```
+
+`runtime` 和 `gpu` profile 需要先修复 compose 配置路径、验证锁文件安装，并增加服务健康
+检查后才能进入正式 runbook。
 
 ### 环境变量
 
@@ -456,9 +458,8 @@ python scripts/robots/xlerobot/generate_mjcf.py
 
 ### MuJoCo viewer 窗口不显示
 
-Windows 和 Ubuntu 当前配置都设置 `viewer.enabled: false`。需要交互窗口时显式改为
-`true`，并确保存在图形环境（X11/Wayland/Windows desktop）；headless 环境保持关闭并
-使用 EGL。
+Windows 和 Ubuntu 当前配置都设置 `viewer.enabled: true`，需要可用的图形桌面。
+headless 环境应先改为 `false` 并使用 EGL。
 
 ### 麦克风/语音不工作
 

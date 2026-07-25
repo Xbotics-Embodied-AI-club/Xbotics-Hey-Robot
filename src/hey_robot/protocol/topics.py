@@ -7,6 +7,8 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Topics:
+    # Compatibility names retained for the public 1.x protocol surface. The current
+    # runtime does not subscribe to the retired distributed Skill execution topics.
     user_turn: str = "user.turn"
     conversation_turn: str = "conversation.turn"
     conversation_result: str = "conversation.result"

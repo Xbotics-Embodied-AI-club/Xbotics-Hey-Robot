@@ -101,8 +101,7 @@ VLA/VLN ModelService 可通过 gRPC 独立部署。
 - Ubuntu / Linux
 - Python `3.12`
 - [uv](https://docs.astral.sh/uv/)
-- NATS server（使用 `deployment.bus.type: nats` 时）
-- MuJoCo
+- NATS server（仅使用 `deployment.bus.type: nats` 的配置时需要）
 - 可用的大模型 API
 
 > 当前推荐 Ubuntu。主 Harness、真机和 MuJoCo 路径提供 Windows 配置；VLA/VLN、
@@ -118,7 +117,7 @@ uv sync --group dev --group sim
 cp .env.example .env
 ```
 
-根据所选模型服务填写 `.env`。默认仿真配置使用：
+根据所选配置填写 `.env`。默认 Ubuntu 仿真配置使用：
 
 ```text
 DEEPSEEK_MODEL
@@ -129,25 +128,14 @@ DASHSCOPE_API_KEY
 DASHSCOPE_BASE_URL
 ```
 
-> 更完整的环境、模型、语音、飞书、仿真与真机配置，请阅读
-> [在线配置指南（持续更新）](https://my.feishu.cn/docx/LT3odU5yyoMOCNxXmmicvbCznBb)。
+核心字段和环境变量见仓库内的
+[配置参考](docs/reference/configuration.md)。语音、飞书、仿真与真机的场景化配置见
+[文档索引](docs/index.md)。
 
-### 启动 NATS
+### 检查并运行 MuJoCo 仿真
 
-```bash
-nats-server
-```
-
-也可以使用 Docker：
-
-```bash
-docker compose up -d nats
-```
-
-### 运行 MuJoCo 仿真
-
-默认仿真配置同时启用了语音和飞书。首次只使用 Web 时，请先关闭对应通道；
-具体配置见 [XLeRobot 仿真部署](docs/operations/xlerobot-sim.md)。
+`configs/xlerobot.sim.ubuntu.yaml` 默认使用进程内消息总线，只启用 Web 通道，
+不需要 NATS、语音或飞书凭据：
 
 ```bash
 uv run hey-robot inspect --config configs/xlerobot.sim.ubuntu.yaml
@@ -160,6 +148,10 @@ uv run hey-robot run --config configs/xlerobot.sim.ubuntu.yaml
 |---|---|
 | 对话界面 | <http://127.0.0.1:8080/chat> |
 | 任务看板 | <http://127.0.0.1:8080/tasks> |
+
+使用真机、Windows 仿真或 VLA/VLN 实验配置时，应先阅读
+[XLeRobot 仿真部署](docs/operations/xlerobot-sim.md)；其中部分配置使用 NATS，需要单独
+运行 `nats-server` 或 `docker compose up -d nats`。
 
 <span id="real-robot"></span>
 
@@ -221,7 +213,7 @@ scripts/    诊断、模型下载和维护脚本
 tests/      单元与集成测试
 ```
 
-贡献前请阅读 [贡献指南](docs/development/contributing.md) 和
+贡献前请阅读 [贡献指南](CONTRIBUTING.md) 和
 [Skill 扩展指南](docs/development/skill-extension.md)。
 
 <span id="documentation"></span>
@@ -230,18 +222,14 @@ tests/      单元与集成测试
 
 | 主题 | 文档 |
 |---|---|
-| 完整配置 | [在线配置指南（持续更新）](https://my.feishu.cn/docx/LT3odU5yyoMOCNxXmmicvbCznBb) |
-| 系统概览 | [部署与运行形态](docs/overview/runtime-shape.md) |
+| 文档入口 | [文档索引与事实源](docs/index.md) |
+| 配置 | [配置参考](docs/reference/configuration.md) |
 | 架构设计 | [系统架构](docs/architecture/system-architecture.md) |
-| 架构审计 | [结构、耦合、兼容性与复杂度分析](docs/architecture/system-structure-coupling-compatibility-complexity-analysis.zh-CN.md) |
-| Robot 重构 | [Robot Runtime 边界重构](docs/architecture/robot-runtime-refactor.zh-CN.md) |
-| Durable Agent baseline | [最小 Pi-shaped Durable Agent 架构](docs/architecture/minimal-pi-shaped-durable-agent.zh-CN.md) |
-| Tool/Skill 收缩重构记录 | [最小 Tool/Skill 收缩重构方案](docs/architecture/minimal-tool-skill-refactor.zh-CN.md) |
-| RoboCasa365 重构门禁 | [Tool/Skill 与 VLA 重构评估记录](docs/evaluation/robocasa365/tool-skill-vla-refactoring-evaluation-20260724.zh-CN.md) |
-| Agent 与机器人能力 | [Agent 与 Skill 边界](docs/architecture/agent-skill-boundaries.md) |
 | MuJoCo 仿真 | [XLeRobot 仿真部署](docs/operations/xlerobot-sim.md) |
 | 真实机器人 | [XLeRobot 真机部署](docs/operations/xlerobot-real.md) |
+| RoboCasa365 评测 | [评测运行手册](docs/evaluation/robocasa365/runbook.zh-CN.md) |
 | 开发扩展 | [Skill 扩展指南](docs/development/skill-extension.md) |
+| 文档审计 | [2026-07-25 文档审计](docs/maintenance/documentation-audit-2026-07-25.zh-CN.md) |
 
 ## 活动与参考
 

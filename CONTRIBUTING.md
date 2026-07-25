@@ -1,12 +1,16 @@
 # 开发流程
 
+感谢参与 Hey Robot。提交代码前，请先用 Issue 或 Pull Request 描述问题、影响范围和验证
+方式。涉及真机动作、安全边界、公开协议或配置兼容性的变更，应在 PR 中明确风险与回滚
+方式。
+
 ## 分支
 
 从 `main` 拉分支，不直接在 `main` 上提交。
 
 ```bash
 git checkout main
-git pull
+git pull --ff-only
 git checkout -b <your-branch>
 ```
 
@@ -66,16 +70,16 @@ chore: fix lint and style issues to make CI gates green
 提交前必须跑通以下三个命令，缺一不可：
 
 ```bash
-poe style
-poe lint
-poe test
+uv run poe style
+uv run poe lint
+uv run poe test
 ```
 
-- `poe style`：ruff 格式化 + 自动修复
-- `poe lint`：ruff 检查 + mypy 类型检查
-- `poe test`：全量测试（`pytest -q`）
+- `uv run poe style`：ruff 格式化 + 自动修复
+- `uv run poe lint`：配置校验 + ruff 检查 + mypy 类型检查
+- `uv run poe test`：全量测试和覆盖率收集（`pytest -q`）
 
-只有三个命令全部通过才能提交。如果 `poe test` 失败，先修测试，不要跳过。
+`style` 会修改文件，运行后应重新检查 diff，再执行 `lint` 和 `test`。
 
 ## 测试要求
 
@@ -100,7 +104,7 @@ tests/{module_name}/test_{file_name}.py
 
 ```
 src/hey_robot/cognition/core.py        -> tests/cognition/test_core.py
-src/hey_robot/skill_os/catalog.py      -> tests/skill_os/test_catalog.py
+src/hey_robot/skills/runner.py         -> tests/skills/test_runner.py
 src/hey_robot/robot_backends/xlerobot/... -> tests/robot_backends/xlerobot/...
 ```
 
@@ -108,14 +112,14 @@ src/hey_robot/robot_backends/xlerobot/... -> tests/robot_backends/xlerobot/...
 
 - 不引入新的 ruff 警告
 - 不引入新的 mypy 类型错误
-- 全量测试通过（`poe test`）
+- 全量测试通过（`uv run poe test`）
 - 新增代码有对应测试
 
 ## 开发环境
 
 ```bash
 # 安装依赖
-uv sync --dev
+uv sync --group dev
 
 # 确认版本
 uv run python -c "import sys; print(sys.version)"  # 必须是 3.12.x
@@ -124,3 +128,17 @@ uv run python -c "import sys; print(sys.version)"  # 必须是 3.12.x
 ## 代码风格
 
 项目已配置 ruff 和 mypy，不要绕过。风格和类型检查的规则在 `pyproject.toml` 中定义。不要在不理解的情况下使用 `# type: ignore`、`# noqa` 等抑制注释。
+
+## Pull Request
+
+PR 至少应包含：
+
+- 变更动机和用户可见行为；
+- 测试命令与结果；
+- 配置、协议、数据库或运行产物是否兼容；
+- 涉及真机时的仿真验证、安全措施和回滚方式；
+- 文档是否同步更新；若不需要，说明原因。
+
+不要提交 API key、访问令牌、真实用户标识、模型权重或包含敏感画面的运行产物。
+安全漏洞不要提交公开 Issue；在项目建立正式私密披露渠道前，请先通过仓库维护者的私密
+联系方式报告。

@@ -1,7 +1,7 @@
 """校验项目配置文件中的引用是否过期。
 
 用途：
-  - 开发期工具：检测 ruff.toml 和 pyproject.toml 里引用的脚本/文档路径是否还存在。
+  - 开发期工具：检测 ruff.toml 和 poe_tasks.toml 里引用的脚本/文档路径是否还存在。
   - 防止重命名/删除文件后忘记更新 poe 任务或 lint 配置。
   - CI 流水线会自动跑这个；本地改完文件结构后也建议跑一次。
 
@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def main() -> int:
     errors: list[str] = []
     errors.extend(_check_ruff_per_file_ignores())
-    errors.extend(_check_pyproject_script_refs())
+    errors.extend(_check_poe_task_refs())
     if errors:
         for e in errors:
             print(e, file=sys.stderr)
@@ -58,25 +58,44 @@ def _check_ruff_per_file_ignores() -> list[str]:
     return errors
 
 
-def _check_pyproject_script_refs() -> list[str]:
+def _check_poe_task_refs() -> list[str]:
     errors: list[str] = []
+    task_sources: list[tuple[str, dict]] = []
+
     pyproject = ROOT / "pyproject.toml"
-    if not pyproject.exists():
-        return errors
-    data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    poe_tasks = data.get("tool", {}).get("poe", {}).get("tasks", {})
-    for name, task in poe_tasks.items():
-        if not isinstance(task, dict):
-            continue
-        if "cmd" in task:
-            errors.extend(
-                _extract_stale_paths(task["cmd"], f"pyproject.toml poe.{name}")
+    if pyproject.exists():
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        tasks = data.get("tool", {}).get("poe", {}).get("tasks", {})
+        if tasks:
+            task_sources.append(("pyproject.toml", tasks))
+
+    poe_config = ROOT / "poe_tasks.toml"
+    if poe_config.exists():
+        data = tomllib.loads(poe_config.read_text(encoding="utf-8"))
+        tasks = data.get("tasks", {})
+        if tasks:
+            task_sources.append(("poe_tasks.toml", tasks))
+
+    if len(task_sources) > 1:
+        errors.append(
+            "Poe tasks are defined in both pyproject.toml and poe_tasks.toml; "
+            "keep one configuration source"
+        )
+
+    for filename, tasks in task_sources:
+        for name, task in tasks.items():
+            if not isinstance(task, dict):
+                continue
+            commands = []
+            if "cmd" in task:
+                commands.append((str(task["cmd"]), f"{filename} tasks.{name}"))
+            commands.extend(
+                (str(step["cmd"]), f"{filename} tasks.{name}[{index}]")
+                for index, step in enumerate(task.get("sequence", ()))
+                if isinstance(step, dict) and "cmd" in step
             )
-        for i, step in enumerate(task.get("sequence", ())):
-            if isinstance(step, dict) and "cmd" in step:
-                errors.extend(
-                    _extract_stale_paths(step["cmd"], f"pyproject.toml poe.{name}[{i}]")
-                )
+            for command, source in commands:
+                errors.extend(_extract_stale_paths(command, source))
     return errors
 
 

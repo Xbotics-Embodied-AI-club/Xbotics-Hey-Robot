@@ -44,7 +44,7 @@ Agent 和 Skill 层不绑定具体机器人形态。Agent 通过进程内 `Skill
 ### 1. 安装依赖
 
 ```bash
-uv sync --dev
+uv sync --group dev
 ```
 
 ### 2. 下载模型
@@ -131,14 +131,14 @@ uv run hey-robot inspect --config configs/xlerobot.real.ubuntu.yaml
 ### 9. 启动系统
 
 ```bash
-hey-robot run --config configs/xlerobot.real.ubuntu.yaml
+uv run hey-robot run --config configs/xlerobot.real.ubuntu.yaml
 ```
 
 > **Linux 用户注意**：串口需要 `dialout` 组权限。如果遇到 `Permission denied: '/dev/ttyACM0'`：
 >
 > **一次性生效**（不用登出）：
 > ```bash
-> sg dialout -c "hey-robot run --config configs/xlerobot.real.ubuntu.yaml"
+> sg dialout -c "uv run hey-robot run --config configs/xlerobot.real.ubuntu.yaml"
 > ```
 >
 > **永久修复**：

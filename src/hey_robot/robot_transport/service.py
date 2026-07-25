@@ -9,28 +9,22 @@ from typing import Any
 
 from hey_robot.bus.factory import create_bus_client
 from hey_robot.config import DeploymentConfig
-from hey_robot.events import EventKind, RuntimeEvent, Severity
+from hey_robot.events import EventKind, RuntimeEvent
 from hey_robot.events.bus import BusEventPublisher
 from hey_robot.logging import HeyRobotLogger
-from hey_robot.protocol import (
-    RobotAction,
-    RobotObservation,
-    RobotStatus,
-    Topics,
-)
-from hey_robot.protocol.messages import from_payload, to_payload
+from hey_robot.protocol import RobotObservation, RobotStatus, Topics
+from hey_robot.protocol.messages import to_payload
 from hey_robot.robot_api import BaseVelocityStreamDriver, RobotActionSpec
 from hey_robot.robot_media import LocalMediaStore
 from hey_robot.robot_media.frame_stream import encode_frame_packet
 from hey_robot.robot_runtime.manager import RobotManager
 from hey_robot.robot_runtime.runtime import RobotRuntime, SceneCaptioner
-from hey_robot.robot_runtime.safety import RobotSafetyError
 
 logger = HeyRobotLogger(name="robot")
 
 
 class RobotService:
-    """运行机器人驱动，并通过机器人动作 Topic 暴露它们。"""
+    """运行机器人驱动并发布观测与状态。"""
 
     def __init__(
         self,
@@ -76,7 +70,7 @@ class RobotService:
         self._base_streams: dict[str, dict[str, Any]] = {}
 
     def get(self, robot_id: str):
-        """返回指定 robot_id 的原始驱动，供 SkillController 注入 VLA I/O adapter。"""
+        """返回指定 robot_id 的原始驱动，供集成方访问兼容驱动接口。"""
         return self.manager.get(robot_id)
 
     async def start(self) -> None:
@@ -105,17 +99,13 @@ class RobotService:
                 )
             )
         await self.bus.subscribe(
-            [self.topics.robot_action],
-            self._on_bus_message,
-        )
-        await self.bus.subscribe(
             [
                 self.topics.for_robot(self.topics.base_velocity_stream, robot_id)
                 for robot_id in self.runtimes
             ],
             self._on_base_velocity_stream,
         )
-        logger.info(f"robot service 就绪, 已订阅 {self.topics.robot_action}")
+        logger.info("robot service 就绪")
         await asyncio.gather(self._observation_loops(), self._stop.wait())
 
     async def stop(self) -> None:
@@ -217,93 +207,6 @@ class RobotService:
                 watchdog_ms=int(payload.get("watchdog_ms") or 400),
             )
 
-    async def _on_bus_message(self, topic: str, payload: dict) -> None:
-        await self._on_action(topic, payload)
-
-    async def _on_action(self, _topic: str, payload: dict) -> None:
-        action = from_payload(RobotAction, payload)
-        robot_id = action.envelope.robot_id
-        if not robot_id:
-            return
-        action_metadata = dict(action.metadata or {})
-        raw_skill_payload = action_metadata.get("skill")
-        skill_payload = raw_skill_payload if isinstance(raw_skill_payload, dict) else {}
-        await self.events.publish(
-            RuntimeEvent.make(
-                EventKind.ROBOT_SKILL_RECEIVED,
-                source="robot",
-                trace_id=action.envelope.trace_id,
-                episode_id=action.envelope.episode_id,
-                agent_id=action.envelope.agent_id,
-                robot_id=robot_id,
-                channel=action.envelope.channel,
-                payload={
-                    "summary": f"received {skill_payload.get('name') or action.skill_id or 'robot action'}",
-                    "action_id": action.action_id,
-                    "skill_id": action.skill_id or None,
-                    "skill": skill_payload,
-                },
-            )
-        )
-        try:
-            status = await self._runtime(robot_id).apply_action(action)
-        except RobotSafetyError as exc:
-            logger.warning(f"robot action 被安全策略阻止 robot={robot_id} error={exc}")
-            status = RobotStatus(
-                envelope=action.envelope,
-                frame_id=None,
-                state="failed",  # type: ignore[arg-type]
-                task=None,
-                skill_id=action.skill_id or None,
-                success=False,
-                error=str(exc),
-                metrics={"source": "robot.safety"},
-            )
-        status = self._status_for_publish(status, action.envelope)
-        status_metrics = dict(status.metrics or {})
-        logger.info(
-            "robot_status_trace publishing_action_status "
-            f"robot={robot_id} action_id={action.action_id} "
-            f"action_skill_id={action.skill_id or None} status_skill_id={status.skill_id or None} "
-            f"success={status.success} state={status.state} frame={status.frame_id} "
-            f"trace={status.envelope.trace_id} episode={status.envelope.episode_id}"
-        )
-        await self.bus.publish(self.topics.robot_status, to_payload(status))
-        await self.events.publish(
-            RuntimeEvent.make(
-                "robot.skill.executed",
-                source="robot",
-                severity=Severity.INFO if status.success else Severity.ERROR,
-                trace_id=action.envelope.trace_id,
-                episode_id=action.envelope.episode_id,
-                agent_id=action.envelope.agent_id,
-                robot_id=robot_id,
-                channel=action.envelope.channel,
-                payload={
-                    "summary": f"{skill_payload.get('name') or action.skill_id or 'robot action'} "
-                    f"{'completed' if status.success else 'failed'}",
-                    "action_id": action.action_id,
-                    "skill_id": status.skill_id,
-                    "state": status.state,
-                    "success": status.success,
-                    "error": status.error,
-                    "last_skill_result": status_metrics.get("last_skill_result"),
-                    "base_control": status_metrics.get("base_control"),
-                },
-            )
-        )
-        observation = await self._runtime(robot_id).observe()
-        observation = self._observation_for_publish(observation, action.envelope)
-        if self._should_publish_observation(observation):
-            await self.bus.publish(
-                self.topics.robot_observation, to_payload(observation)
-            )
-        if self._should_log_status(robot_id, status):
-            logger.info(
-                f"{robot_id} 已执行 skill={action.skill_id!r} "
-                f"dims={len(action.values)} state={status.state} success={status.success}"
-            )
-
     def _runtime(self, robot_id: str) -> RobotRuntime:
         runtime = self.runtimes.get(robot_id)
         if runtime is None:
@@ -339,33 +242,6 @@ class RobotService:
             success=status.success,
             error=status.error,
             metrics=status.metrics,
-        )
-
-    @staticmethod
-    def _observation_for_publish(
-        observation: RobotObservation, envelope
-    ) -> RobotObservation:
-        return RobotObservation(
-            envelope=observation.envelope.child(
-                trace_id=envelope.trace_id,
-                episode_id=envelope.episode_id,
-                agent_id=envelope.agent_id,
-                channel=envelope.channel,
-                account_id=envelope.account_id,
-                chat_id=envelope.chat_id,
-                chat_type=envelope.chat_type,
-                sender_id=envelope.sender_id,
-                robot_id=envelope.robot_id or observation.envelope.robot_id,
-                deployment_id=envelope.deployment_id
-                or observation.envelope.deployment_id,
-            ),
-            frame_id=observation.frame_id,
-            images=observation.images,
-            artifacts=observation.artifacts,
-            proprioception=observation.proprioception,
-            task=observation.task,
-            entities=observation.entities,
-            raw=observation.raw,
         )
 
     def _should_log_status(self, robot_id: str, status: RobotStatus) -> bool:

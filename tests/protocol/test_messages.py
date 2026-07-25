@@ -383,6 +383,7 @@ class TestTopics:
     def test_default_topics(self) -> None:
         t = Topics()
         assert t.user_turn == "user.turn"
+        assert t.conversation_turn == "conversation.turn"
         assert t.agent_reply == "agent.reply"
         assert t.runtime_event == "runtime.event"
 
@@ -403,4 +404,4 @@ class TestTopics:
 
         t = Topics()
         with pytest.raises(FrozenInstanceError):
-            t.user_turn = "other"  # type: ignore[misc]
+            t.conversation_turn = "other"  # type: ignore[misc]

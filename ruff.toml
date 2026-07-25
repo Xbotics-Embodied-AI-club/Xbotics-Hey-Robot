@@ -115,9 +115,6 @@ ignore = [
 # - T201：CLI 输出允许使用 print
 "scripts/**/*.py" = ["INP001", "T201"]
 
-# 发布脚本调用固定命令，属于受控运维脚本，不是接收外部任意输入的执行器。
-"scripts/dev/publish.py" = ["S603"]
-
 # 这些硬件/Build 脚本需要先做 sys.path bootstrap，再导入本地模块。
 # S314：XML 解析仅处理项目捆绑的本地资产文件，不存在不受信输入。
 "scripts/robots/xlerobot/*.py" = ["E402", "S314"]

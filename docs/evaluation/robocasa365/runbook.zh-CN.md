@@ -11,7 +11,7 @@ RoboCasa365 用于在仿真厨房中评估 Hey Robot 完整 embodied-agent 系�
 用户根任务
   -> DeepSeek Agent / 快系统规划
   -> DashScope 场景理解
-  -> Skill OS: inspect_scene / manipulate
+  -> native Skill layer: inspect_scene / manipulate
   -> 标准 ModelService RPC（每次只推理一个 action）
   -> lerobot/pi052_robocasa（12D action）
   -> RobotAction / Robot Runtime
@@ -180,7 +180,7 @@ PI052 checkpoint 约 10.9 GB，当前宿主首次冷加载通常需要 4～5 分
 - `b1`：使用正常层级规划并在 option 边界重新观察；
 - `b2`：冻结“观察—根目标操作—再观察”的 oracle pattern。
 
-三者只是同一 Agent 入口的实验提示，共用相同 Gateway、Skill OS、RPC、VLA 和
+三者只是同一 Agent 入口的实验提示，共用相同 Gateway、SkillWorker、RPC、VLA 和
 EpisodeManager，不存在 condition 专属 runner 或动作路径。
 
 ## 7. 批量评测
@@ -227,7 +227,7 @@ runtime_metadata.json
 video.mp4
 ```
 
-其中已删除重复且没有独立事实来源的 `model_service_events.jsonl`；option 生命周期以 Skill OS
+其中已删除重复且没有独立事实来源的 `model_service_events.jsonl`；option 生命周期以 Skill
 的 `options.jsonl` 为准，动作以 evaluator-only action ledger 的 `actions.jsonl` 为准。
 
 最重要的字段位于 `result.json`：
@@ -255,7 +255,7 @@ video.mp4
   evaluation/robocasa365 \
   src/hey_robot/robot_backends/robocasa_remote \
   src/hey_robot/robocasa_backend \
-  src/hey_robot/skill_os/builtins/manipulation.py
+  src/hey_robot/skills/builtins/manipulation.py
 ```
 
 常见现象：

@@ -40,9 +40,7 @@ from hey_robot.protocol import (
     ConversationTurn,
     Envelope,
     RobotStatus,
-    SkillControl,
     SkillEvent,
-    SkillResult,
     Topics,
     UserTurn,
 )
@@ -120,11 +118,9 @@ class GatewayService:
         await self.bus.subscribe([self.topics.runtime_event], self._on_runtime_event)
         await self.bus.subscribe([self.topics.robot_status], self._on_robot_status)
         await self.bus.subscribe([self.topics.skill_event], self._on_skill_event)
-        await self.bus.subscribe([self.topics.skill_result], self._on_skill_result)
         logger.info(
             f"gateway subscribed {self.topics.agent_reply}, {self.topics.conversation_result}, {self.topics.runtime_event}, "
-            f"{self.topics.robot_status}, {self.topics.skill_event}, {self.topics.skill_result}, "
-            f"{self.topics.skill_control_result}"
+            f"{self.topics.robot_status}, {self.topics.skill_event}"
         )
         await self.channels.start_all(self._on_user_turn)
         self._log_channel_ready()
@@ -236,17 +232,17 @@ class GatewayService:
             "\u7d27\u6025\u505c\u6b62",
         }
         if compact in {item.replace(" ", "") for item in emergency}:
-            command = SkillControl(
-                envelope,
-                self._command_id(envelope, interaction_id, "emergency_stop"),
-                "emergency_stop",
-                target_skill_id=None,
-                task_id=None,
-                reason="gateway emergency stop",
-            )
-            await self.bus.publish(self.topics.skill_control, to_payload(command))
-            await self._send_reply(
-                AgentReply(envelope=envelope, text="EMERGENCY_STOP_REQUESTED")
+            await self.bus.publish(
+                self.topics.agent_control,
+                to_payload(
+                    AgentControl(
+                        envelope,
+                        session_key,
+                        interaction_id,
+                        "emergency_stop",
+                        "gateway emergency stop",
+                    )
+                ),
             )
             return True
 
@@ -345,11 +341,6 @@ class GatewayService:
         return hashlib.sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
-
-    @staticmethod
-    def _command_id(envelope: Envelope, interaction_id: str, action: str) -> str:
-        raw = "|".join((str(envelope.deployment_id or ""), interaction_id, action))
-        return hashlib.sha256(raw.encode()).hexdigest()
 
     async def _send_reply(self, reply: AgentReply) -> None:
         await self.bus.publish(self.topics.agent_reply, to_payload(reply))
@@ -455,9 +446,6 @@ class GatewayService:
                 },
             )
         )
-
-    async def _on_skill_result(self, _topic: str, payload: dict) -> None:
-        from_payload(SkillResult, payload)
 
     async def _web_history(self, envelope: Envelope, limit: int) -> dict:
         agent_id = self._agent_id(envelope.agent_id)
@@ -832,28 +820,6 @@ def _compact_status_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
     if isinstance(base_control, dict):
         compact["base_control"] = _compact_base_control(base_control)
     return compact
-
-
-def _robot_state_name(last_status: Any) -> str:
-    if isinstance(last_status, dict):
-        return str(last_status.get("state") or "unknown")
-    if isinstance(last_status, str):
-        return last_status or "unknown"
-    return "unknown"
-
-
-def _robot_status_summary(last_status: Any) -> dict[str, Any]:
-    if not isinstance(last_status, dict):
-        return {}
-    metrics = last_status.get("metrics")
-    metrics = metrics if isinstance(metrics, dict) else {}
-    return {
-        "frame_id": last_status.get("frame_id"),
-        "success": last_status.get("success"),
-        "error": last_status.get("error"),
-        "battery": metrics.get("battery"),
-        "readiness": metrics.get("readiness"),
-    }
 
 
 def _runtime_event_summary(event: dict[str, Any]) -> str:

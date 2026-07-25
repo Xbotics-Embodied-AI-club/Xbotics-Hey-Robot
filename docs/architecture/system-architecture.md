@@ -1,13 +1,8 @@
 # Hey Robot 系统架构
 
 本文描述当前代码的实际运行结构。历史设计稿中的 `RobotAgentCore`、`AgentRuntime`、
-`SkillGateway`、`SkillControllerService`、`TaskSupervisorService` 和 NATS
-`skill.intent` 控制链已经不属于当前生产拓扑。
-
-更完整的工程审计见
-[系统结构、耦合、兼容性与复杂度分析](system-structure-coupling-compatibility-complexity-analysis.zh-CN.md)。
-Robot 子系统的物理包边界、惰性 Driver 加载和旧代码删除清单见
-[Robot Runtime 边界重构](robot-runtime-refactor.zh-CN.md)。
+`SkillGateway`、`SkillControllerService`、`TaskSupervisorService` 和 event-driven Skill
+控制链均已删除，不属于当前生产拓扑。
 
 ## 1. 系统定位
 
@@ -83,8 +78,10 @@ LocalRobotClient -> RobotRuntime -> RobotDriver
 - Skill执行事实写入 `FileRunStore`，再异步投影到 bus；
 - RobotService 独立发布 observation、status 和 raw camera frame。
 
-`protocol.Topics` 仍保留 `skill.intent` 和 `robot.action`。前者不再是生产 Skill提交
-入口；后者仍由 RobotService订阅，属于兼容/外部动作入口，不是主 Harness执行路径。
+运行时已经停用旧 `skill.intent` 与 `robot.action` 总线控制入口。物理能力只通过进程内
+`SkillClient -> LocalRobotClient -> RobotRuntime` 主链提交；Human Follow 的受限速度流
+仍使用独立 topic。项目已经发布 `1.0.0`，对应 DTO 和 `Topics` 名称暂时仅作为 1.x
+源码兼容面保留；它们没有生产订阅者，不表示仍支持旧执行拓扑。
 
 ## 4. 默认部署形态
 

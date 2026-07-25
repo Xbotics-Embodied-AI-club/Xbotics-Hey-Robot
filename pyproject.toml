@@ -120,26 +120,6 @@ name = "robosuite"
 version = "1.5.2"
 requires-dist = []
 
-[tool.poe.executor]
-type = "simple"
-
-[tool.black]
-line-length = 88
-target-version = ["py312"]
-
-[tool.mypy]
-python_version = "3.12"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-exclude = [
-    "foundation/contract/v1/model_service_pb2(_grpc)?[.]py$",
-    "robocasa_backend/rpc/v1/robocasa_runtime_pb2(_grpc)?[.]py$",
-]
-
-[tool.coverage.run]
-data_file = "artifacts/test/.coverage"
-
 [dependency-groups]
 sim = ["mujoco>=3.3.0"]
 
@@ -243,39 +223,3 @@ dev = [
     "pytest-env>=1.6.0",
     "grpcio-tools>=1.62.0",
 ]
-
-[tool.poe.tasks._validate-config]
-help = "Validate config file references are not stale"
-cmd = "uv run --no-sync python scripts/dev/validate_config.py"
-
-[tool.poe.tasks.style]
-help = "Format and auto-fix the repository"
-sequence = [
-    { cmd = "uv run --no-sync ruff format ." },
-    { cmd = "uv run --no-sync ruff check . --fix" },
-]
-
-[tool.poe.tasks.lint]
-help = "Run lint and type checks"
-sequence = [
-    { ref = "_validate-config" },
-    { cmd = "uv run --no-sync ruff check ." },
-    { cmd = "uv run --no-sync mypy src" },
-]
-
-[tool.poe.tasks.test]
-help = "Run the test suite with coverage"
-cmd = "uv run --no-sync python -m pytest -q"
-
-[tool.poe.tasks.clean]
-help = "Clean pyc, build, test, and lint artifacts"
-sequence = [
-    { cmd = "python scripts/dev/clean.py pyc" },
-    { cmd = "python scripts/dev/clean.py build" },
-    { cmd = "python scripts/dev/clean.py test" },
-    { cmd = "python scripts/dev/clean.py lint" },
-]
-
-[tool.poe.tasks.proto]
-help = "Regenerate model service protobuf and gRPC contract artifacts"
-cmd = "powershell -ExecutionPolicy Bypass -File scripts/dev/generate_model_service_proto.ps1"

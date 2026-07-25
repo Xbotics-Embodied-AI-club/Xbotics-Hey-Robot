@@ -17,7 +17,6 @@ from hey_robot.protocol import (
     Envelope,
     RobotStatus,
     SkillEvent,
-    SkillResult,
     UserTurn,
 )
 from hey_robot.protocol.messages import to_payload
@@ -109,7 +108,6 @@ def test_gateway_publishes_goal_prefixed_text_as_ordinary_turn(
     asyncio.run(gateway._on_user_turn(turn))
 
     fake_bus = cast(FakeBus, gateway.bus)
-    assert all(topic != gateway.topics.user_turn for topic, _ in fake_bus.published)
     conversation = next(
         payload
         for topic, payload in fake_bus.published
@@ -243,7 +241,7 @@ def test_gateway_routes_natural_language_emergency_stop_without_provider(
     commands = [
         payload
         for topic, payload in fake_bus.published
-        if topic == gateway.topics.skill_control
+        if topic == gateway.topics.agent_control
     ]
     assert len(commands) == 1
     assert commands[0]["action"] == "emergency_stop"
@@ -389,7 +387,7 @@ def test_gateway_identity_binding_links_web_and_feishu_without_forwarding_task(
     forwarded_payloads = [
         payload
         for topic, payload in fake_bus.published
-        if topic == gateway.topics.user_turn
+        if topic == gateway.topics.conversation_turn
     ]
     status = asyncio.run(gateway.identity_binding_status(created["code"]))
     resolved = gateway.identity.resolve(
@@ -440,13 +438,13 @@ def test_gateway_identity_binding_rejects_invalid_code(tmp_path) -> None:
     )
 
     fake_bus = cast(FakeBus, gateway.bus)
-    user_turn_payloads = [
+    conversation_payloads = [
         payload
         for topic, payload in fake_bus.published
-        if topic == gateway.topics.user_turn
+        if topic == gateway.topics.conversation_turn
     ]
 
-    assert user_turn_payloads == []
+    assert conversation_payloads == []
     assert "无效" in replies[-1].text
 
 
@@ -532,20 +530,6 @@ def test_gateway_publishes_runtime_and_skill_events_to_channels(tmp_path) -> Non
     asyncio.run(
         gateway._on_skill_event(gateway.topics.skill_event, to_payload(skill_event))
     )
-    asyncio.run(
-        gateway._on_skill_result(
-            gateway.topics.skill_result,
-            to_payload(
-                SkillResult(
-                    envelope=skill_event.envelope,
-                    skill_id="cmd1",
-                    status="completed",
-                    success=True,
-                )
-            ),
-        )
-    )
-
     assert web is not None
     assert any(item["kind"] == "robot.status" for item in web._events)  # type: ignore[attr-defined]
     assert any(item["kind"] == "skill.lifecycle" for item in web._events)  # type: ignore[attr-defined]
@@ -725,7 +709,6 @@ def test_gateway_start_and_stop_publish_lifecycle_and_manage_channels(
         [gateway.topics.runtime_event],
         [gateway.topics.robot_status],
         [gateway.topics.skill_event],
-        [gateway.topics.skill_result],
     ]
     assert {event["kind"] for event in stored} >= {"gateway.start", "gateway.ready"}
 

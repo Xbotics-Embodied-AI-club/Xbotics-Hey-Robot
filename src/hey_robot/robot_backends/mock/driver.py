@@ -585,21 +585,6 @@ class _MockRobotDriverBase:
         self._record_world_event("base_moved", base_pose=dict(self.base_pose))
         return self._ok(skill, "base moved", {"base_pose": dict(self.base_pose)})
 
-    def _set_joint(
-        self, skill: RobotSkillAction, joint: str, angle: float
-    ) -> RobotSkillResult:
-        if joint not in self._JOINT_LIMITS:
-            return self._fail(skill, f"unknown joint: {joint}", "invalid_joint")
-        low, high = self._JOINT_LIMITS[joint]
-        if angle < low or angle > high:
-            return self._fail(
-                skill, f"joint {joint} outside limit [{low}, {high}]", "joint_limit"
-            )
-        self.arm_joints[joint] = angle
-        if joint == "gripper":
-            self.gripper_opening_pct = angle
-        return self._ok(skill, "joint set", {"joint": joint, "angle": angle})
-
     def _set_joints(
         self, skill: RobotSkillAction, values: dict[str, Any], *, absolute: bool
     ) -> RobotSkillResult:
@@ -619,57 +604,6 @@ class _MockRobotDriverBase:
         self.arm_joints.update(next_values)
         self.gripper_opening_pct = self.arm_joints["gripper"]
         return self._ok(skill, "joints set", {"joint_states": dict(self.arm_joints)})
-
-    def _mock_vla_grasp(self, skill: RobotSkillAction, target: str) -> RobotSkillResult:
-        obj = self._object(target)
-        if obj is None:
-            return self._fail(skill, f"object not found: {target}", "target_not_found")
-        if not self._object_visible(target):
-            return self._fail(
-                skill, f"object not visible: {target}", "target_not_found"
-            )
-        if not bool(obj.get("graspable", True)):
-            return self._fail(
-                skill, f"object is not graspable: {target}", "not_graspable"
-            )
-        self.arm_joints.update(self._named_pose("pregrasp"))
-        self.gripper_opening_pct = 0.0
-        self.arm_joints["gripper"] = 0.0
-        self.object_held = target
-        obj["held"] = True
-        obj["visible"] = False
-        obj["location"] = "gripper"
-        self._record_world_event("picked", object=target)
-        return self._ok(
-            skill,
-            "object picked",
-            {"object_held": self.object_held, "world": self._world_snapshot()},
-        )
-
-    def _mock_vla_place(
-        self, skill: RobotSkillAction, location: str
-    ) -> RobotSkillResult:
-        target = self.object_held
-        if not target:
-            return self._fail(skill, "no held object to place", "no_held_object")
-        obj = self._object(target)
-        if obj is None:
-            self.object_held = None
-            return self._fail(
-                skill, f"held object missing from world: {target}", "target_not_found"
-            )
-        obj["held"] = False
-        obj["visible"] = location != "bin"
-        obj["location"] = location
-        self.object_held = None
-        self.gripper_opening_pct = 80.0
-        self.arm_joints["gripper"] = 80.0
-        self._record_world_event("placed", object=target, location=location)
-        return self._ok(
-            skill,
-            f"object placed in {location}",
-            {"object": target, "location": location, "world": self._world_snapshot()},
-        )
 
     def _proprioception(self) -> list[float]:
         return [
