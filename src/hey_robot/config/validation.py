@@ -125,11 +125,7 @@ def validate_deployment(config: DeploymentConfig) -> list[ValidationIssue]:
             )
             continue
         known_tools.append(skill_name)
-    try:
-        deployment_skills = registry.resolve_dependencies(known_tools)
-    except ValueError as exc:
-        issues.append(ValidationIssue("error", str(exc)))
-        deployment_skills = ()
+    deployment_skills = registry.select(known_tools)
     skill_robots = _skill_robots(config)
     for skill in deployment_skills:
         skill_name = skill.name

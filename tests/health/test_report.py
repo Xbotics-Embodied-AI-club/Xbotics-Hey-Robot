@@ -213,7 +213,6 @@ def test_health_report_helper_branches_describe_actionable_failures() -> None:
     assert "inspect" in (_task_fix_hint(None) or "")
     assert _skills_for_resources(("camera", "base", "arm")) == (
         "inspect_scene",
-        "look_around",
         "move_base",
         "turn_base",
         "base_velocity_step",

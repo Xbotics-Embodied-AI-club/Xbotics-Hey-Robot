@@ -302,38 +302,6 @@ def test_validate_deployment_allows_configured_driver_primitive(
     assert validate_deployment(config) == []
 
 
-def test_validate_deployment_rejects_invalid_nested_skill_dependency(
-    tmp_path, monkeypatch
-) -> None:
-    module_name = "hey_robot.skills.fake_nested_dependency"
-    module = types.ModuleType(module_name)
-
-    def register(registry) -> None:
-        registry.register(
-            Skill(
-                "root",
-                "Root.",
-                {},
-                _noop_skill,
-                dependencies=("missing",),
-            )
-        )
-
-    setattr(module, "register", register)
-    monkeypatch.setitem(sys.modules, module_name, module)
-    config = DeploymentConfig.from_dict(
-        {
-            "resources": {"runtime_dir": str(tmp_path / "runtime")},
-            "robots": {"mock0": {"type": "mock"}},
-            "skills": {"modules": [module_name], "tools": ["root"]},
-        }
-    )
-
-    messages = [issue.message for issue in validate_deployment(config)]
-
-    assert "skill 'root' depends on unknown skill 'missing'" in messages
-
-
 def test_validate_deployment_rejects_multiple_enabled_agents(tmp_path) -> None:
     config = DeploymentConfig.from_dict(
         {

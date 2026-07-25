@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
-from hey_robot.contracts import SkillContractCatalog
 from hey_robot.foundation.catalog.models import (
     RobotSkillSurface,
     SkillSurfaceManifest,
@@ -25,7 +24,7 @@ class SkillSurfaceLoader:
         self,
         *,
         tools: ToolRegistryLike | None = None,
-        robot_skills: RuntimeSkillCatalogLike | SkillContractCatalog | None = None,
+        robot_skills: RuntimeSkillCatalogLike | tuple[Any, ...] | None = None,
     ) -> None:
         self.tools = tools
         self.robot_skills = robot_skills
@@ -63,50 +62,39 @@ class SkillSurfaceLoader:
     def _robot_skills(self, robot_type: str | None) -> tuple[RobotSkillSurface, ...]:
         if self.robot_skills is None:
             return ()
-        if isinstance(self.robot_skills, SkillContractCatalog):
-            return tuple(
-                RobotSkillSurface(
-                    name=item.name,
-                    description=item.description,
-                    input_schema=item.input_schema,
-                    safety_level=item.safety_level,
-                    required_resources=item.required_resources,
-                    preconditions=item.preconditions,
-                    success_criteria=item.success_criteria,
-                    failure_modes=item.failure_modes,
-                    recovery_hints=item.recovery_hints,
-                    timeout_sec=item.timeout_sec,
-                    interruptible=item.interruptible,
-                    feedback_mode=item.feedback_mode,
-                    refresh_observation=_refresh_observation(item),
-                )
-                for item in self.robot_skills.list(robot_type=robot_type)
-            )
-        return self._runtime_catalog_skills(
-            cast(RuntimeSkillCatalogLike, self.robot_skills)
+        del robot_type
+        items = (
+            self.robot_skills
+            if isinstance(self.robot_skills, tuple)
+            else tuple(self.robot_skills.list())
         )
+        return self._runtime_catalog_skills(items)
 
     def _runtime_catalog_skills(
         self,
-        catalog: RuntimeSkillCatalogLike,
+        items: tuple[Any, ...] | list[Any],
     ) -> tuple[RobotSkillSurface, ...]:
         return tuple(
             RobotSkillSurface(
                 name=item.name,
                 description=item.description,
-                input_schema=item.input_schema,
-                safety_level=item.safety_level,
-                required_resources=item.required_resources,
-                preconditions=item.preconditions,
-                success_criteria=item.success_criteria,
-                failure_modes=item.failure_modes,
-                recovery_hints=item.recovery_hints,
+                input_schema=dict(
+                    getattr(item, "input_schema", getattr(item, "parameters", {}))
+                ),
+                safety_level=str(getattr(item, "safety_level", "normal")),
+                required_resources=tuple(
+                    getattr(item, "required_resources", getattr(item, "resources", ()))
+                ),
+                preconditions=tuple(getattr(item, "preconditions", ())),
+                success_criteria=tuple(getattr(item, "success_criteria", ())),
+                failure_modes=tuple(getattr(item, "failure_modes", ())),
+                recovery_hints=tuple(getattr(item, "recovery_hints", ())),
                 timeout_sec=item.timeout_sec,
-                interruptible=item.interruptible,
-                feedback_mode=item.feedback_mode,
+                interruptible=bool(getattr(item, "interruptible", True)),
+                feedback_mode=str(getattr(item, "feedback_mode", "status")),
                 refresh_observation=_refresh_observation(item),
             )
-            for item in catalog.list()
+            for item in items
         )
 
 

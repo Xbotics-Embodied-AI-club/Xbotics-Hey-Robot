@@ -77,7 +77,7 @@ class MockRobotDriver:
         self.context = context
         self.robot_id = context.robot_id
         self.settings = dict(context.spec.settings or {})
-        self.contracts = SkillAdmissionGate(context.skill_catalog)
+        self.contracts = SkillAdmissionGate(context.action_specs)
         self.frame_id = 0
         self.observe_count = 0
         self.action_attempts = 0

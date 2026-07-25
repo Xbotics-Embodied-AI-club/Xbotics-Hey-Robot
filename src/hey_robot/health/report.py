@@ -203,7 +203,7 @@ class HealthReportService:
                         f"{task.status}: {reason}"
                     ),
                     impacted_skills=tuple(
-                        step.proposal.skill_name
+                        step.proposal.name
                         for step in self.task_store.recent_steps(task.task_id, 50)
                     ),
                     fix_hint=_task_fix_hint(str(reason)),
@@ -321,7 +321,7 @@ class HealthReportService:
                     (
                         "diagnostics.xlerobot.full",
                         "scripts/robots/xlerobot/diagnose.py",
-                        ("inspect_scene", "look_around", "move_base", "set_arm_pose"),
+                        ("inspect_scene", "move_base", "set_arm_pose"),
                     ),
                     (
                         "diagnostics.xlerobot.servos",
@@ -336,7 +336,7 @@ class HealthReportService:
                     (
                         "diagnostics.xlerobot.camera",
                         "scripts/robots/xlerobot/scan_cameras.py",
-                        ("inspect_scene", "look_around"),
+                        ("inspect_scene",),
                     ),
                 ]
             )
@@ -548,7 +548,7 @@ def _component_reports_for_robot(
                 status="configured" if ok else "missing",
                 severity="info" if ok else "warning",
                 evidence=f"device_id={device_id} backend={backend}",
-                impacted_skills=("inspect_scene", "look_around"),
+                impacted_skills=("inspect_scene",),
                 fix_hint=None
                 if ok
                 else "Run camera scan and set components.camera.device_id.",
@@ -568,7 +568,6 @@ def _component_reports_for_robot(
                     "move_base",
                     "turn_base",
                     "base_velocity_step",
-                    "look_around",
                 ),
                 fix_hint="Run xlerobot diagnose or servo scan before live motion.",
                 source="robot.component_config",
@@ -601,9 +600,9 @@ def _component_reports_for_robot(
 def _skills_for_resources(resources: tuple[str, ...]) -> tuple[str, ...]:
     skills: list[str] = []
     if "camera" in resources:
-        skills.extend(["inspect_scene", "look_around"])
+        skills.append("inspect_scene")
     if "base" in resources:
-        skills.extend(["move_base", "turn_base", "base_velocity_step", "look_around"])
+        skills.extend(["move_base", "turn_base", "base_velocity_step"])
     if "arm" in resources:
         skills.extend(["set_arm_pose", "set_gripper"])
     return tuple(dict.fromkeys(skills))

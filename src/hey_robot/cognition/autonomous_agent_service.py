@@ -7,7 +7,6 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Literal
 
-from hey_robot.app.runtime_components import SkillToolCatalog
 from hey_robot.bus.factory import create_bus_client
 from hey_robot.cognition.runtime.agent import (
     Agent,
@@ -26,7 +25,6 @@ from hey_robot.cognition.runtime.task_coordinator import (
 from hey_robot.cognition.tools.executor import AgentToolExecutor
 from hey_robot.cognition.tools.models import AgentTool
 from hey_robot.cognition.tools.registry import (
-    SkillCatalogView,
     ToolDependencies,
     ToolRegistry,
 )
@@ -42,7 +40,7 @@ from hey_robot.protocol import (
 from hey_robot.protocol.messages import from_payload, to_payload
 from hey_robot.skills import registry_from_config
 from hey_robot.skills.client import SkillClient
-from hey_robot.skills.models import SkillEvent
+from hey_robot.skills.models import Skill, SkillEvent
 from hey_robot.templates.loader import TemplateStore
 
 
@@ -55,7 +53,7 @@ class AutonomousAgentService:
         *,
         agent_id: str,
         skill_client: SkillClient | None = None,
-        skill_catalog: SkillCatalogView | None = None,
+        agent_skills: tuple[Skill, ...] | None = None,
         extra_tools: tuple[AgentTool, ...] = (),
     ) -> None:
         self.config = config
@@ -67,12 +65,10 @@ class AutonomousAgentService:
         root.mkdir(parents=True, exist_ok=True)
         self.conversations = ConversationStore(root / "conversations.sqlite3")
         self.tasks = AgentTaskStore(root / "sustained_tasks.sqlite3")
-        catalog = (
-            skill_catalog
-            if skill_catalog is not None
-            else SkillToolCatalog(
-                registry_from_config(config).select(config.skills.tool_names)
-            )
+        skills = (
+            agent_skills
+            if agent_skills is not None
+            else registry_from_config(config).select(config.skills.tool_names)
         )
         agent_spec = config.agents.get(agent_id)
         configured_template_root = (
@@ -84,7 +80,7 @@ class AutonomousAgentService:
             and configured_template_root.strip()
             else None
         )
-        self.tools = ToolRegistry(ToolDependencies(catalog, extra_tools))
+        self.tools = ToolRegistry(ToolDependencies(skills, extra_tools))
         model_client = create_model_client(config, agent_id, purpose="agent")
         self.runner = AgentRunner(model_client, self.tools)
         if skill_client is None:

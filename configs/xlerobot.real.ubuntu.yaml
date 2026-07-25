@@ -34,16 +34,8 @@ skills:
   mode: bringup
   tools:
   - inspect_scene
-  - look_around
-  - detect_marker
   - move_base
   - turn_base
-  - base_velocity_step
-  - stop_motion
-  - reset_posture
-  - set_arm_pose
-  - move_arm_joints
-  - set_gripper
   execution_mode: local
 identity:
   enabled: true

@@ -22,7 +22,7 @@ from hey_robot.human_follow import HumanFollowService
 from hey_robot.logging import HeyRobotLogger
 from hey_robot.robot_runtime import RobotService
 from hey_robot.robot_runtime.media import MediaResolver
-from hey_robot.skills import skill_contract_catalog_from_config
+from hey_robot.skills import robot_action_specs_from_config
 
 logger = logging.getLogger(__name__)
 
@@ -137,11 +137,11 @@ class DeploymentRunner:
         services: list[ManagedService] = []
         robot = None
         runtime_components: RuntimeComponents | None = None
-        skill_catalog = skill_contract_catalog_from_config(self.config)
+        action_specs = robot_action_specs_from_config(self.config)
         if self.config.robots:
             robot = RobotService(
                 self.config,
-                skill_catalog=skill_catalog,
+                action_specs=action_specs,
                 scene_captioner_factory=lambda store: build_scene_captioner(
                     self.config,
                     self.config.default_agent_id(),
@@ -183,8 +183,8 @@ class DeploymentRunner:
                     if runtime_components is not None
                     else None
                 ),
-                skill_catalog=(
-                    runtime_components.tool_catalog
+                agent_skills=(
+                    runtime_components.agent_skills
                     if runtime_components is not None
                     else None
                 ),

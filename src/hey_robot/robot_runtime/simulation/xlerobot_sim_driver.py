@@ -253,7 +253,7 @@ class XLeRobotSimDriver:
             angular_speed=self._angular_speed,
             embodiment=context.embodiment,
         )
-        self.contracts = SkillAdmissionGate(context.skill_catalog)
+        self.contracts = SkillAdmissionGate(context.action_specs)
 
         self.model: Any = None
         self.data: Any = None

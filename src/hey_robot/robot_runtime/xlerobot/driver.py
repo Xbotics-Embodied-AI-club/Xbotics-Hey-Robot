@@ -57,7 +57,7 @@ class XLeRobotDriver:
             motion_time_scale=float(settings.get("motion_time_scale", 2.0)),
         )
         self.executor = XLeRobotSkillExecutor(self.client)
-        self.contracts = SkillAdmissionGate(context.skill_catalog)
+        self.contracts = SkillAdmissionGate(context.action_specs)
         self.state = "created"
         self.frame_id = 0
         self.last_error: str | None = None

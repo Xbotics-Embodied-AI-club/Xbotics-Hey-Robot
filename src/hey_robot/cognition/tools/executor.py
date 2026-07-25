@@ -13,11 +13,9 @@ from hey_robot.cognition.runtime.agent_task_store import (
 )
 from hey_robot.cognition.runtime.task_coordinator import TaskCoordinator
 from hey_robot.cognition.tools.models import (
-    CompleteTaskProposal,
-    ControlTaskProposal,
     HarnessToolCall,
+    PhysicalToolCall,
     PreparedToolCall,
-    SkillCallProposal,
 )
 from hey_robot.config import DeploymentConfig
 from hey_robot.protocol import AgentControl, Envelope, ToolOutcome
@@ -58,24 +56,9 @@ class AgentToolExecutor:
         proposal: PreparedToolCall,
         tool_call_id: str,
     ) -> ToolExecution:
-        if isinstance(proposal, SkillCallProposal):
+        if isinstance(proposal, PhysicalToolCall):
             return await self._execute_skill(
                 session_key, envelope, objective, proposal, tool_call_id
-            )
-        if isinstance(proposal, CompleteTaskProposal):
-            return await self._execute_completion(session_key, proposal)
-        if isinstance(proposal, ControlTaskProposal):
-            text = await self._apply_control(
-                session_key,
-                cast(Literal["cancel", "block", "emergency_stop"], proposal.action),
-                proposal.reason,
-                agent_id=envelope.agent_id,
-            )
-            return ToolExecution(
-                "finish",
-                ToolOutcome("completed", text),
-                proposal,
-                final_text=text,
             )
         if isinstance(proposal, HarnessToolCall):
             try:
@@ -107,7 +90,7 @@ class AgentToolExecutor:
         session_key: str,
         envelope: Envelope,
         objective: str,
-        proposal: SkillCallProposal,
+        proposal: PhysicalToolCall,
         tool_call_id: str,
     ) -> ToolExecution:
         task = self._tasks.active_task(session_key)
@@ -157,37 +140,6 @@ class AgentToolExecutor:
                 final_text=outcome.user_summary or "这次操作没有完成。",
             )
         return ToolExecution("continue", outcome, proposal, step=step, task=task)
-
-    async def _execute_completion(
-        self, session_key: str, proposal: CompleteTaskProposal
-    ) -> ToolExecution:
-        task = self._tasks.active_task(session_key)
-        if task is None:
-            outcome = ToolOutcome(
-                "failed", "当前没有进行中的持续任务。", retryable=True
-            )
-            return ToolExecution("continue", outcome, proposal)
-        final_check = self._tasks.complete_task(
-            task.task_id,
-            recap=proposal.recap,
-        )
-        if not final_check.accepted:
-            outcome = ToolOutcome(
-                "failed",
-                f"任务还不能确认完成：{final_check.reason}",
-                operation_id=task.task_id,
-                retryable=True,
-            )
-            return ToolExecution("continue", outcome, proposal, task=task)
-        outcome = ToolOutcome(
-            "completed",
-            proposal.recap,
-            {"task_id": task.task_id},
-            operation_id=task.task_id,
-        )
-        return ToolExecution(
-            "finish", outcome, proposal, task=task, final_text=proposal.recap
-        )
 
     async def _apply_control(
         self,

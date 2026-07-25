@@ -28,33 +28,17 @@ from hey_robot.skills import SkillRegistry, registry_from_config
 from hey_robot.skills.context import SkillContext
 from hey_robot.skills.models import Skill, SkillCommand, SkillEvent
 from hey_robot.skills.resources import ResourceManager
-from hey_robot.skills.transport import LocalSkillClient
-
-
-@dataclass(frozen=True)
-class SkillToolCatalog:
-    """Selected native skills exposed as Agent tools."""
-
-    skills: tuple[Skill, ...]
-
-    def list(self) -> tuple[Skill, ...]:
-        return self.skills
-
-    def get(self, name: str) -> Skill:
-        for skill in self.skills:
-            if skill.name == name:
-                return skill
-        raise KeyError(f"unknown skill tool: {name}")
+from hey_robot.skills.worker import SkillWorker
 
 
 @dataclass(frozen=True)
 class RuntimeComponents:
     registry: SkillRegistry
-    tool_catalog: SkillToolCatalog
+    agent_skills: tuple[Skill, ...]
     robot_client: RobotClient
     model_router: RegistryModelRouter
     run_store: FileRunStore
-    skill_client: LocalSkillClient
+    skill_client: SkillWorker
 
 
 class SkillEventProjector:
@@ -124,7 +108,7 @@ def build_local_runtime_components(
     robot_service: RobotService,
 ) -> RuntimeComponents:
     registry = registry_from_config(config)
-    tool_catalog = SkillToolCatalog(registry.select(config.skills.tool_names))
+    agent_skills = registry.select(config.skills.tool_names)
     robot_client = LocalRobotClient(robot_service.runtimes)
     model_router = RegistryModelRouter(ModelServiceRegistry(config))
     event_projector = SkillEventProjector(
@@ -152,7 +136,7 @@ def build_local_runtime_components(
             models=model_router,
         )
 
-    skill_client = LocalSkillClient(
+    skill_client = SkillWorker(
         registry,
         resources=ResourceManager(),
         context_factory=context_factory,
@@ -168,7 +152,7 @@ def build_local_runtime_components(
     )
     return RuntimeComponents(
         registry=registry,
-        tool_catalog=tool_catalog,
+        agent_skills=agent_skills,
         robot_client=robot_client,
         model_router=model_router,
         run_store=run_store,

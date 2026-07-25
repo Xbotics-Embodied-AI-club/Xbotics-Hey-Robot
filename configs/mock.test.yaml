@@ -33,9 +33,6 @@ skills:
   execution_mode: local
   tools:
     - inspect_scene
-    - look_around
-    - detect_marker
-    - stop_motion
 
 agent_runtime:
   enabled: true

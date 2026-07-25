@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import inspect
 
+from hey_robot.robot_runtime.base import RobotActionSpec
 from hey_robot.skills.registry import SkillRegistry
 
 
@@ -13,6 +14,19 @@ def registry_from_config(config: object) -> SkillRegistry:
     return load_skill_registry(
         getattr(skills, "modules", ("hey_robot.skills.builtins",)),
         implementations=dict(getattr(skills, "implementations", {}) or {}),
+    )
+
+
+def robot_action_specs_from_config(config: object) -> tuple[RobotActionSpec, ...]:
+    """Project native Skills onto the minimal Robot Runtime admission boundary."""
+    return tuple(
+        RobotActionSpec(
+            skill.name,
+            dict(skill.parameters),
+            resources=skill.resources,
+            motion="robot_control" in skill.resources and skill.name != "stop_motion",
+        )
+        for skill in registry_from_config(config).list()
     )
 
 

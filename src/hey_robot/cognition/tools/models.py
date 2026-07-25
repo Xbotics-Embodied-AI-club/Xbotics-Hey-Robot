@@ -5,10 +5,10 @@ from __future__ import annotations
 import inspect
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 
 from hey_robot.protocol import ToolOutcome
-from hey_robot.skills.runner import validate_arguments
+from hey_robot.tool_schema import validate_arguments
 
 
 @dataclass(frozen=True)
@@ -32,28 +32,11 @@ class ToolSpec:
 
 
 @dataclass(frozen=True)
-class SkillCallProposal:
-    """Cognition-internal proposal for one bounded robot skill call."""
+class PhysicalToolCall:
+    """Validated call that must cross the durable physical boundary."""
 
-    intent_kind: Literal["skill", "observation"]
     name: str
-    objective: str
     arguments: dict[str, Any]
-
-    @property
-    def skill_name(self) -> str:
-        return self.name
-
-
-@dataclass(frozen=True)
-class CompleteTaskProposal:
-    recap: str
-
-
-@dataclass(frozen=True)
-class ControlTaskProposal:
-    action: str
-    reason: str
 
 
 HarnessToolHandler = Callable[
@@ -82,9 +65,7 @@ class HarnessToolCall:
         return result
 
 
-PreparedToolCall = (
-    HarnessToolCall | SkillCallProposal | CompleteTaskProposal | ControlTaskProposal
-)
+PreparedToolCall = HarnessToolCall | PhysicalToolCall
 
 
 class AgentTool(Protocol):

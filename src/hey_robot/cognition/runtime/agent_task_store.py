@@ -10,11 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from hey_robot.cognition.tools.skill_tools import (
-    SkillCallProposal,
-    skill_call_from_payload,
-    skill_call_payload,
-)
+from hey_robot.cognition.tools.models import PhysicalToolCall
 from hey_robot.protocol import Envelope, ToolOutcome
 from hey_robot.protocol.messages import to_payload
 
@@ -51,7 +47,7 @@ class AgentTaskStep:
     step_id: str
     task_id: str
     sequence: int
-    proposal: SkillCallProposal
+    proposal: PhysicalToolCall
     outcome: ToolOutcome
     started_at: float
     completed_at: float | None
@@ -60,12 +56,6 @@ class AgentTaskStep:
     run_id: str | None = None
     tool_call_id: str | None = None
     last_event_sequence: int = 0
-
-
-@dataclass(frozen=True)
-class CompletionCheck:
-    accepted: bool
-    reason: str
 
 
 class AgentTaskStore:
@@ -101,18 +91,6 @@ class AgentTaskStore:
                 final_recap TEXT,
                 resume_required INTEGER NOT NULL DEFAULT 0,
                 resume_after_sequence INTEGER NOT NULL DEFAULT 0
-            )
-            """
-        )
-        self._db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS task_amendments (
-                task_id TEXT NOT NULL,
-                sequence INTEGER NOT NULL,
-                text TEXT NOT NULL,
-                created_at REAL NOT NULL,
-                PRIMARY KEY(task_id, sequence),
-                FOREIGN KEY(task_id) REFERENCES sustained_tasks(task_id)
             )
             """
         )
@@ -262,50 +240,6 @@ class AgentTaskStore:
         ).fetchone()
         return int(row[0]) if row is not None else 0
 
-    def append_amendment(self, task_id: str, text: str) -> None:
-        normalized = text.strip()
-        task = self.task(task_id)
-        if task is None or task.status not in {"active", "paused"}:
-            raise ValueError("cannot amend a terminal task")
-        if not normalized:
-            raise ValueError("task amendment must be non-empty")
-        sequence = int(
-            self._db.execute(
-                "SELECT COALESCE(MAX(sequence), 0) + 1 FROM task_amendments "
-                "WHERE task_id=?",
-                (task_id,),
-            ).fetchone()[0]
-        )
-        self._db.execute(
-            "INSERT INTO task_amendments VALUES (?, ?, ?, ?)",
-            (task_id, sequence, normalized, time.time()),
-        )
-        self._db.execute(
-            "UPDATE sustained_tasks SET updated_at=? WHERE task_id=?",
-            (time.time(), task_id),
-        )
-        self._db.commit()
-
-    def amendments(self, task_id: str) -> tuple[str, ...]:
-        rows = self._db.execute(
-            "SELECT text FROM task_amendments WHERE task_id=? ORDER BY sequence ASC",
-            (task_id,),
-        ).fetchall()
-        return tuple(str(row[0]) for row in rows)
-
-    def effective_objective(self, task_id: str) -> str:
-        task = self.task(task_id)
-        if task is None:
-            raise ValueError("unknown task")
-        amendments = self.amendments(task_id)
-        if not amendments:
-            return task.objective
-        return (
-            task.objective
-            + "\n\n用户后续修正：\n"
-            + "\n".join(f"- {item}" for item in amendments)
-        )
-
     def task(self, task_id: str) -> AgentTask | None:
         row = self._db.execute(
             """
@@ -367,14 +301,14 @@ class AgentTaskStore:
         )
 
     def add_step(
-        self, task_id: str, proposal: SkillCallProposal, outcome: ToolOutcome
+        self, task_id: str, proposal: PhysicalToolCall, outcome: ToolOutcome
     ) -> AgentTaskStep:
         task = self.task(task_id)
         if task is None or task.status != "active":
             raise ValueError("cannot append a step to a non-active task")
         sequence = int(task.step_count) + 1
         step_id = f"step_{uuid.uuid4().hex}"
-        evidence_ids = _evidence_ids(step_id, proposal, outcome)
+        evidence_ids = _evidence_ids(step_id, outcome)
         now = time.time()
         self._db.execute(
             """
@@ -389,7 +323,7 @@ class AgentTaskStore:
                 task_id,
                 sequence,
                 json.dumps(
-                    skill_call_payload(proposal), ensure_ascii=False, sort_keys=True
+                    _physical_call_payload(proposal), ensure_ascii=False, sort_keys=True
                 ),
                 json.dumps(to_payload(outcome), ensure_ascii=False, sort_keys=True),
                 now,
@@ -421,7 +355,7 @@ class AgentTaskStore:
     def add_pending_step(
         self,
         task_id: str,
-        proposal: SkillCallProposal,
+        proposal: PhysicalToolCall,
         *,
         run_id: str,
         tool_call_id: str,
@@ -446,14 +380,14 @@ class AgentTaskStore:
                 task_id,
                 sequence,
                 json.dumps(
-                    skill_call_payload(proposal), ensure_ascii=False, sort_keys=True
+                    _physical_call_payload(proposal), ensure_ascii=False, sort_keys=True
                 ),
                 json.dumps(to_payload(outcome), ensure_ascii=False, sort_keys=True),
                 now,
                 json.dumps([], ensure_ascii=False),
                 run_id,
                 tool_call_id,
-                proposal.skill_name,
+                proposal.name,
                 json.dumps(
                     dict(proposal.arguments), ensure_ascii=False, sort_keys=True
                 ),
@@ -501,8 +435,8 @@ class AgentTaskStore:
         ).fetchone()
         if row is None or int(row[11]) >= event_sequence:
             return None
-        proposal = skill_call_from_payload(json.loads(row[3]))
-        evidence_ids = _evidence_ids(str(row[0]), proposal, outcome)
+        proposal = _physical_call_from_payload(json.loads(row[3]))
+        evidence_ids = _evidence_ids(str(row[0]), outcome)
         completed_at = (
             time.time() if status in {"completed", "failed", "cancelled"} else None
         )
@@ -634,12 +568,9 @@ class AgentTaskStore:
             raise ValueError("cannot resume a non-paused task")
         return task
 
-    def complete_task(self, task_id: str, *, recap: str) -> CompletionCheck:
-        check = self.check_completion(task_id)
-        if not check.accepted:
-            return check
+    def close_task(self, task_id: str, *, recap: str) -> None:
+        """Close an active durable turn after the model returns final text."""
         self._finish(task_id, "completed", final_recap=recap)
-        return check
 
     def complete_from_environment(self, task_id: str, *, recap: str) -> None:
         """Accept an authoritative environment terminal without LLM re-verification."""
@@ -653,12 +584,6 @@ class AgentTaskStore:
             raise ValueError("control_task status must be terminal")
         self._finish(task_id, status, last_error=reason, final_recap=reason)
 
-    def check_completion(self, task_id: str) -> CompletionCheck:
-        steps = self.recent_steps(task_id, limit=200)
-        if not any(step.outcome.status == "completed" for step in steps):
-            return CompletionCheck(False, "当前任务还没有成功完成的步骤。")
-        return CompletionCheck(True, "当前任务已有成功步骤。")
-
     def projection(self, session_key: str) -> str:
         task = self.active_task(session_key)
         if task is None:
@@ -667,8 +592,7 @@ class AgentTaskStore:
         lines = [
             (
                 "当前持续任务："
-                f"id={task.task_id}；objective={task.objective}；"
-                f"status={task.status}；steps={task.step_count}。"
+                f"id={task.task_id}；status={task.status}；steps={task.step_count}。"
             )
         ]
         if steps:
@@ -677,7 +601,7 @@ class AgentTaskStore:
                 summary = step.outcome.user_summary or step.outcome.status
                 ids = ", ".join(step.evidence_ids) or "无"
                 lines.append(
-                    f"- #{step.sequence} {step.proposal.skill_name} "
+                    f"- #{step.sequence} {step.proposal.name} "
                     f"status={step.outcome.status} evidence={ids} summary={summary}"
                 )
         return "\n".join(lines)
@@ -729,7 +653,7 @@ def _task_from_row(row: tuple[Any, ...]) -> AgentTask:
 
 
 def _step_from_row(row: tuple[Any, ...]) -> AgentTaskStep:
-    proposal = skill_call_from_payload(json.loads(row[3]))
+    proposal = _physical_call_from_payload(json.loads(row[3]))
     outcome = ToolOutcome(**json.loads(row[4]))
     evidence_ids = tuple(str(item) for item in json.loads(row[7]))
     return AgentTaskStep(
@@ -748,16 +672,27 @@ def _step_from_row(row: tuple[Any, ...]) -> AgentTaskStep:
     )
 
 
-def _evidence_ids(
-    step_id: str, proposal: SkillCallProposal, outcome: ToolOutcome
-) -> tuple[str, ...]:
+def _evidence_ids(step_id: str, outcome: ToolOutcome) -> tuple[str, ...]:
     ids = [f"step:{step_id}"]
     if outcome.operation_id:
-        prefix = "observation" if proposal.intent_kind == "observation" else "skill"
-        ids.append(f"{prefix}:{outcome.operation_id}")
+        ids.append(f"tool:{outcome.operation_id}")
     ids.extend(
         item.strip()
         for item in outcome.data.get("evidence_ids", ()) or ()
         if isinstance(item, str) and item.strip()
     )
     return tuple(dict.fromkeys(ids))
+
+
+def _physical_call_payload(call: PhysicalToolCall) -> dict[str, Any]:
+    return {"name": call.name, "arguments": dict(call.arguments)}
+
+
+def _physical_call_from_payload(payload: dict[str, Any]) -> PhysicalToolCall:
+    name = payload.get("name")
+    if not isinstance(name, str) or not name:
+        raise ValueError("physical tool payload must include name")
+    arguments = payload.get("arguments", {})
+    if not isinstance(arguments, dict):
+        raise ValueError("physical tool payload arguments must be an object")
+    return PhysicalToolCall(name, dict(arguments))

@@ -6,7 +6,7 @@ import pytest
 
 from hey_robot.cognition.runtime.agent_task_store import AgentTaskStore
 from hey_robot.cognition.runtime.task_coordinator import TaskCoordinator
-from hey_robot.cognition.tools.skill_tools import SkillCallProposal
+from hey_robot.cognition.tools.models import PhysicalToolCall
 from hey_robot.persistence import FileRunStore
 from hey_robot.protocol import Envelope, ToolOutcome
 from hey_robot.skills import SkillRegistry, SkillWorker
@@ -43,7 +43,7 @@ async def test_coordinator_persists_before_submit_and_applies_terminal_event(
     coordinator = TaskCoordinator(store, client)  # type: ignore[arg-type]
     step = await coordinator.submit(
         task_id=task.task_id,
-        proposal=SkillCallProposal("observation", "inspect_scene", "inspect", {}),
+        proposal=PhysicalToolCall("inspect_scene", {}),
         envelope=Envelope(robot_id="robot"),
         tool_call_id="call-1",
     )
@@ -76,7 +76,7 @@ async def test_coordinator_rejects_second_concurrent_skill_run(tmp_path) -> None
     )
     store.add_pending_step(
         task.task_id,
-        SkillCallProposal("skill", "move_base", "move", {}),
+        PhysicalToolCall("move_base", {}),
         run_id="run-active",
         tool_call_id="call-1",
     )
@@ -86,7 +86,7 @@ async def test_coordinator_rejects_second_concurrent_skill_run(tmp_path) -> None
     with pytest.raises(RuntimeError, match="already has an active skill run"):
         await coordinator.submit(
             task_id=task.task_id,
-            proposal=SkillCallProposal("skill", "turn_base", "turn", {}),
+            proposal=PhysicalToolCall("turn_base", {}),
             envelope=Envelope(robot_id="robot"),
             tool_call_id="call-2",
         )
@@ -105,7 +105,7 @@ async def test_environment_done_converges_step_and_task_terminal_state(
     coordinator = TaskCoordinator(store, Client())  # type: ignore[arg-type]
     step = await coordinator.submit(
         task_id=task.task_id,
-        proposal=SkillCallProposal("skill", "manipulate", "pick", {}),
+        proposal=PhysicalToolCall("manipulate", {}),
         envelope=Envelope(robot_id="robot"),
         tool_call_id="call-1",
     )
@@ -143,7 +143,7 @@ def test_task_store_lists_only_active_run_ids(tmp_path) -> None:
     )
     pending = store.add_pending_step(
         task.task_id,
-        SkillCallProposal("skill", "move_base", "move", {}),
+        PhysicalToolCall("move_base", {}),
         run_id="run-pending",
         tool_call_id="call-1",
     )
@@ -156,7 +156,7 @@ def test_task_store_lists_only_active_run_ids(tmp_path) -> None:
 
     next_pending = store.add_pending_step(
         task.task_id,
-        SkillCallProposal("skill", "turn_base", "turn", {}),
+        PhysicalToolCall("turn_base", {}),
         run_id="run-active",
         tool_call_id="call-2",
     )
@@ -176,7 +176,7 @@ async def test_coordinator_marks_step_failed_when_submit_is_rejected(tmp_path) -
 
     step = await coordinator.submit(
         task_id=task.task_id,
-        proposal=SkillCallProposal("observation", "inspect_scene", "inspect", {}),
+        proposal=PhysicalToolCall("inspect_scene", {}),
         envelope=Envelope(robot_id="robot"),
         tool_call_id="call-1",
     )
@@ -195,7 +195,7 @@ async def test_coordinator_reconciles_transport_known_terminal_event(tmp_path) -
     )
     pending = store.add_pending_step(
         task.task_id,
-        SkillCallProposal("observation", "inspect_scene", "inspect", {}),
+        PhysicalToolCall("inspect_scene", {}),
         run_id="run-reconcile",
         tool_call_id="call-1",
     )
@@ -232,7 +232,7 @@ async def test_coordinator_reconciles_restarted_worker_without_replaying_action(
     run_id = "run-crashed"
     tasks.add_pending_step(
         task.task_id,
-        SkillCallProposal("observation", "inspect_scene", "inspect", {}),
+        PhysicalToolCall("inspect_scene", {}),
         run_id=run_id,
         tool_call_id="call-1",
     )
@@ -279,7 +279,7 @@ def test_terminal_step_persists_wakeup_until_next_physical_receipt(tmp_path) -> 
         envelope=Envelope(robot_id="sim_robot"),
         objective="inspect",
     )
-    proposal = SkillCallProposal("observation", "inspect_scene", "inspect", {})
+    proposal = PhysicalToolCall("inspect_scene", {})
     store.add_pending_step(
         task.task_id, proposal, run_id="run-1", tool_call_id="call-1"
     )
@@ -302,19 +302,17 @@ def test_terminal_step_persists_wakeup_until_next_physical_receipt(tmp_path) -> 
     restarted.close()
 
 
-def test_pause_keeps_one_open_task_and_persists_ordered_amendments(tmp_path) -> None:
+def test_pause_keeps_one_open_task(tmp_path) -> None:
     store = AgentTaskStore(tmp_path / "tasks.sqlite3")
     task = store.create_task(
         session_key="session-1",
         envelope=Envelope(robot_id="sim_robot"),
         objective="put the cup in the kitchen",
     )
-    store.append_amendment(task.task_id, "put it on the dining table instead")
     store.pause_task(task.task_id, "paused")
 
     assert store.active_task("session-1") is None
     assert store.current_task("session-1").status == "paused"  # type: ignore[union-attr]
-    assert "dining table" in store.effective_objective(task.task_id)
     with pytest.raises(ValueError, match="\u5df2有"):
         store.create_task(
             session_key="session-1",

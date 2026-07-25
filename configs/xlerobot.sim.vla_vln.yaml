@@ -5,7 +5,7 @@ deployment:
     url: nats://127.0.0.1:4222
     options:
       robot_publish_hz: 2.0
-      robot_status_log_every_frames: 5
+      robot_status_log_every_frames: 30
 agent_runtime:
   enabled: true
   robot_id: sim_robot
@@ -32,18 +32,8 @@ skills:
   mode: bringup
   tools:
   - inspect_scene
-  - look_around
-  - detect_marker
   - move_base
   - turn_base
-  - base_velocity_step
-  - navigate_to
-  - approach_object
-  - stop_motion
-  - reset_posture
-  - set_arm_pose
-  - move_arm_joints
-  - set_gripper
   execution_mode: local
 identity:
   enabled: true

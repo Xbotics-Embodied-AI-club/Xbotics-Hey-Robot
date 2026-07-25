@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from hey_robot.skills.builtins.common import execute_robot_action
+from hey_robot.skills.builtins.navigation import approach_object
+from hey_robot.skills.builtins.vla import manipulate
 from hey_robot.skills.context import SkillContext
 from hey_robot.skills.models import Skill, SkillResult
 from hey_robot.skills.registry import SkillRegistry
@@ -53,8 +55,8 @@ async def classic_place(ctx: SkillContext, arguments: dict[str, Any]) -> SkillRe
 async def vla_pick(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResult:
     target = arguments.get("object") or arguments.get("target") or "object"
     task_prompt = arguments.get("task_prompt") or f"grasp {target}"
-    return await ctx.run(
-        "manipulate",
+    return await manipulate(
+        ctx,
         {
             "task_prompt": task_prompt,
             "max_steps": int(arguments.get("max_attempts", 1)),
@@ -65,8 +67,8 @@ async def vla_pick(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResult:
 async def vla_place(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResult:
     location = arguments.get("location") or arguments.get("target") or "target"
     task_prompt = arguments.get("task_prompt") or f"place at {location}"
-    return await ctx.run(
-        "manipulate",
+    return await manipulate(
+        ctx,
         {
             "task_prompt": task_prompt,
             "max_steps": int(arguments.get("max_attempts", 1)),
@@ -75,7 +77,7 @@ async def vla_place(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResult
 
 
 async def hybrid_pick(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResult:
-    staged = await ctx.run("approach_object", dict(arguments))
+    staged = await approach_object(ctx, dict(arguments))
     if not staged.success:
         return staged
     return await vla_pick(ctx, arguments)
@@ -102,11 +104,6 @@ def pick_skill(*, implementation: str = "classic") -> Skill:
         timeout_sec=180.0,
         required_actions=() if implementation in {"vla", "hybrid"} else ("pick",),
         required_models=("manipulate",) if implementation in {"vla", "hybrid"} else (),
-        dependencies={
-            "classic": (),
-            "vla": ("manipulate",),
-            "hybrid": ("approach_object", "manipulate"),
-        }[implementation],
     )
 
 
@@ -127,7 +124,6 @@ def place_skill(*, implementation: str = "classic") -> Skill:
         timeout_sec=180.0,
         required_actions=() if implementation in {"vla", "hybrid"} else ("place",),
         required_models=("manipulate",) if implementation in {"vla", "hybrid"} else (),
-        dependencies=() if implementation == "classic" else ("manipulate",),
     )
 
 

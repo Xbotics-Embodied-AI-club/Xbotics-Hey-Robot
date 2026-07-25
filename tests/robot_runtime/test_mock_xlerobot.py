@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 from hey_robot.config import DeploymentConfig
-from hey_robot.contracts import SkillContract, SkillContractCatalog
 from hey_robot.protocol import (
     Envelope,
     RobotAction,
@@ -11,6 +10,7 @@ from hey_robot.protocol import (
     SkillIntent,
 )
 from hey_robot.robot_runtime import RobotManager, RobotRuntime
+from hey_robot.robot_runtime.base import RobotActionSpec
 from hey_robot.robot_runtime.media import LocalMediaStore
 
 
@@ -19,51 +19,19 @@ def _runtime(tmp_path, settings: dict | None = None) -> RobotRuntime:
         {"robots": {"mock0": {"type": "mock", **(settings or {})}}}
     )
     return RobotRuntime(
-        RobotManager(config, skill_catalog=_test_skill_catalog()).require("mock0"),
+        RobotManager(config, action_specs=_test_action_specs()).require("mock0"),
         LocalMediaStore(tmp_path),
     )
 
 
-def _test_skill_catalog() -> SkillContractCatalog:
-    return SkillContractCatalog(
-        (
-            SkillContract(
-                name="move_base",
-                description="Move base.",
-                required_resources=("base",),
-                safety_level="motion",
-            ),
-            SkillContract(
-                name="turn_base",
-                description="Turn base.",
-                required_resources=("base",),
-                safety_level="motion",
-            ),
-            SkillContract(
-                name="move_arm_joints",
-                description="Move arm joints.",
-                required_resources=("arm",),
-                safety_level="motion",
-            ),
-            SkillContract(
-                name="set_gripper",
-                description="Set gripper state.",
-                required_resources=("gripper",),
-                safety_level="motion",
-            ),
-            SkillContract(
-                name="inspect_scene",
-                description="Inspect scene.",
-                required_resources=("camera",),
-                safety_level="observe",
-            ),
-            SkillContract(
-                name="stop_motion",
-                description="Stop motion.",
-                required_resources=("robot",),
-                safety_level="stop",
-            ),
-        )
+def _test_action_specs() -> tuple[RobotActionSpec, ...]:
+    return (
+        RobotActionSpec("move_base", {}, ("base",), motion=True),
+        RobotActionSpec("turn_base", {}, ("base",), motion=True),
+        RobotActionSpec("move_arm_joints", {}, ("arm",), motion=True),
+        RobotActionSpec("set_gripper", {}, ("gripper",), motion=True),
+        RobotActionSpec("inspect_scene", {}, ("camera",)),
+        RobotActionSpec("stop_motion", {}, ("robot",)),
     )
 
 

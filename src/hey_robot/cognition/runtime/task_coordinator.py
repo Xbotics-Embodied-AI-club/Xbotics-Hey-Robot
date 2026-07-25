@@ -11,7 +11,7 @@ from hey_robot.cognition.runtime.agent_task_store import (
     AgentTaskStore,
     TaskStatus,
 )
-from hey_robot.cognition.tools.skill_tools import SkillCallProposal
+from hey_robot.cognition.tools.models import PhysicalToolCall
 from hey_robot.protocol import Envelope, ToolOutcome
 from hey_robot.skills.client import SkillClient
 from hey_robot.skills.models import SkillCommand, SkillEvent
@@ -36,12 +36,12 @@ class TaskCoordinator:
         self,
         *,
         task_id: str,
-        proposal: SkillCallProposal,
+        proposal: PhysicalToolCall,
         envelope: Envelope,
         tool_call_id: str,
         deadline_at: float | None = None,
     ) -> AgentTaskStep:
-        if not isinstance(proposal, SkillCallProposal):
+        if not isinstance(proposal, PhysicalToolCall):
             raise TypeError(f"unsupported skill proposal: {type(proposal)!r}")
         task = self._tasks.task(task_id)
         if task is None or task.status != "active":
@@ -164,24 +164,7 @@ class TaskCoordinator:
             status = "cancelled"
         else:
             return None
-        outcome = ToolOutcome(
-            "completed" if event.result.success else "failed",
-            event.result.summary,
-            {
-                **event.result.data,
-                "evidence_ids": list(event.result.evidence_ids),
-                "artifacts": [
-                    {
-                        "uri": artifact.uri,
-                        "artifact_type": artifact.artifact_type,
-                        "role": artifact.role,
-                    }
-                    for artifact in event.result.artifacts
-                ],
-            },
-            operation_id=event.run_id,
-            retryable=event.result.failure_mode in {"timeout", "unavailable"},
-        )
+        outcome = event.result.to_tool_outcome(operation_id=event.run_id)
         return self._tasks.apply_skill_event(
             event.run_id,
             outcome=outcome,

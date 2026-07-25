@@ -250,15 +250,15 @@ async def test_native_builtin_registry_loads_core_skill_names() -> None:
     }.issubset(names)
 
 
-async def test_native_perception_skill_uses_robot_observation() -> None:
+async def test_native_perception_skill_uses_canonical_robot_action() -> None:
     robot = Robot()
     sink = Sink()
     result = await _runner(robot, sink).execute(_command("inspect_scene", {}))
 
     assert result.success is True
-    assert result.summary == "desk"
-    assert result.data["frame_id"] == 12
-    assert result.evidence_ids == ("observation:run-1",)
+    assert result.summary == "inspect_scene done"
+    assert result.data["frame_id"] == 9
+    assert robot.calls == [("mock0", "inspect_scene", {}, "run-1")]
 
 
 async def test_native_base_and_manipulation_skills_call_robot_actions() -> None:

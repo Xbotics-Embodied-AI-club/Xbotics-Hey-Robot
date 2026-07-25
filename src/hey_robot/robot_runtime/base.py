@@ -4,10 +4,25 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from hey_robot.config import RobotSpec
-from hey_robot.contracts import SkillContractCatalog
 from hey_robot.protocol import RobotAction, RobotStatus
 from hey_robot.robot_runtime.embodiments.base import EmbodimentProfile
 from hey_robot.robot_runtime.observations import DriverObservation
+
+
+@dataclass(frozen=True)
+class RobotActionSpec:
+    name: str
+    parameters: dict[str, Any]
+    resources: tuple[str, ...] = ()
+    motion: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "parameters": dict(self.parameters),
+            "resources": list(self.resources),
+            "motion": self.motion,
+        }
 
 
 @dataclass(frozen=True)
@@ -16,7 +31,7 @@ class RobotDriverContext:
     spec: RobotSpec
     deployment_id: str
     embodiment: EmbodimentProfile | None = None
-    skill_catalog: SkillContractCatalog | None = None
+    action_specs: tuple[RobotActionSpec, ...] = ()
 
 
 @dataclass(frozen=True)

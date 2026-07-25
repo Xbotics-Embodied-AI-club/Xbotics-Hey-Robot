@@ -9,7 +9,7 @@ from hey_robot.cognition.tools import (
     HarnessToolCall,
     ToolSpec,
 )
-from hey_robot.cognition.tools.models import SkillCallProposal
+from hey_robot.cognition.tools.models import PhysicalToolCall
 from hey_robot.cognition.tools.registry import ToolDependencies, ToolRegistry
 from hey_robot.protocol import ToolOutcome
 from hey_robot.skills.models import Skill, SkillResult
@@ -46,7 +46,7 @@ def _skill() -> Skill:
 
 def test_skill_tool_schema_is_projected_from_skill() -> None:
     skill = _skill()
-    registry = ToolRegistry(ToolDependencies(_Catalog((skill,))))
+    registry = ToolRegistry(ToolDependencies((skill,)))
 
     definition = next(
         item for item in registry.definitions if item["function"]["name"] == "pick"
@@ -55,9 +55,7 @@ def test_skill_tool_schema_is_projected_from_skill() -> None:
     assert definition["function"]["description"] == skill.description
     assert definition["function"]["parameters"] == skill.parameters
     proposal = registry.prepare("pick", {"object": "mug"})
-    assert proposal == SkillCallProposal(
-        "skill", "pick", "execute pick", {"object": "mug"}
-    )
+    assert proposal == PhysicalToolCall("pick", {"object": "mug"})
 
 
 @pytest.mark.asyncio
@@ -81,7 +79,7 @@ async def test_registry_accepts_harness_and_skill_tools() -> None:
         ),
         remember,
     )
-    registry = ToolRegistry(ToolDependencies(_Catalog((_skill(),)), (memory,)))
+    registry = ToolRegistry(ToolDependencies((_skill(),), (memory,)))
 
     call = registry.prepare("remember", {"value": "blue cup"})
 
@@ -111,7 +109,7 @@ def test_harness_tool_rejects_unknown_arguments_before_handler() -> None:
         ),
         handler,
     )
-    registry = ToolRegistry(ToolDependencies(_Catalog(()), (tool,)))
+    registry = ToolRegistry(ToolDependencies((), (tool,)))
 
     with pytest.raises(ValueError, match="unexpected arguments"):
         registry.prepare("bounded", {"unsafe": True})

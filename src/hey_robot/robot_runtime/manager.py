@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from hey_robot.config import DeploymentConfig
-from hey_robot.contracts import SkillContractCatalog
-from hey_robot.robot_runtime.base import RobotDriver, RobotDriverContext
+from hey_robot.robot_runtime.base import (
+    RobotActionSpec,
+    RobotDriver,
+    RobotDriverContext,
+)
 from hey_robot.robot_runtime.embodiments import get_embodiment_profile
 from hey_robot.robot_runtime.mock import MockRobotDriver
 from hey_robot.robot_runtime.robocasa_remote import (
@@ -18,10 +21,10 @@ class RobotManager:
         self,
         config: DeploymentConfig,
         *,
-        skill_catalog: SkillContractCatalog | None = None,
+        action_specs: tuple[RobotActionSpec, ...] = (),
     ) -> None:
         self.config = config
-        self.skill_catalog = skill_catalog
+        self.action_specs = action_specs
         self._drivers: dict[str, RobotDriver] = {}
         self._build_drivers()
 
@@ -46,7 +49,7 @@ class RobotManager:
                 spec=spec,
                 deployment_id=self.config.deployment.id,
                 embodiment=get_embodiment_profile(spec),
-                skill_catalog=self.skill_catalog,
+                action_specs=self.action_specs,
             )
             if spec.driver_kind == "mock":
                 self._drivers[robot_id] = MockRobotDriver(context)

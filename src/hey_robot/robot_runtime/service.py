@@ -7,7 +7,6 @@ from typing import Any
 
 from hey_robot.bus.factory import create_bus_client
 from hey_robot.config import DeploymentConfig
-from hey_robot.contracts import SkillContractCatalog
 from hey_robot.events import EventKind, RuntimeEvent, Severity
 from hey_robot.events.bus import BusEventPublisher
 from hey_robot.logging import HeyRobotLogger
@@ -18,6 +17,7 @@ from hey_robot.protocol import (
     Topics,
 )
 from hey_robot.protocol.messages import from_payload, to_payload
+from hey_robot.robot_runtime.base import RobotActionSpec
 from hey_robot.robot_runtime.manager import RobotManager
 from hey_robot.robot_runtime.media import LocalMediaStore
 from hey_robot.robot_runtime.observations.frame_stream import encode_frame_packet
@@ -34,13 +34,13 @@ class RobotService:
         self,
         config: DeploymentConfig,
         *,
-        skill_catalog: SkillContractCatalog | None = None,
+        action_specs: tuple[RobotActionSpec, ...] = (),
         scene_captioner_factory: Callable[[LocalMediaStore], SceneCaptioner]
         | None = None,
     ) -> None:
         self.config = config
         self.topics = Topics()
-        self.manager = RobotManager(config, skill_catalog=skill_catalog)
+        self.manager = RobotManager(config, action_specs=action_specs)
         self.bus = create_bus_client(config.deployment.bus, role="robot")
         self.events = BusEventPublisher(self.bus, self.topics)
         self.media_store = LocalMediaStore(

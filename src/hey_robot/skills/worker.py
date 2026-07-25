@@ -6,7 +6,7 @@ import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from hey_robot.skills.context import SkillContext
 from hey_robot.skills.models import SkillCommand, SkillEvent, SkillResult
@@ -32,7 +32,11 @@ class SkillWorker:
         run_store: RunStore,
         subscriber_queue_size: int = 128,
         cancel_model: Callable[[str], Awaitable[None]] | None = None,
+        emergency_stop: Callable[[str, str], Awaitable[None]] | None = None,
         project_event: Callable[[SkillEvent], Awaitable[None]] | None = None,
+        start_projection: Callable[[], Awaitable[None]] | None = None,
+        stop_projection: Callable[[], Awaitable[None]] | None = None,
+        projection_health: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self._commands: asyncio.Queue[SkillCommand] = asyncio.Queue()
         self._pending: dict[str, SkillCommand] = {}
@@ -41,7 +45,18 @@ class SkillWorker:
         self._subscriber_queue_size = max(1, int(subscriber_queue_size))
         self._status_lock = asyncio.Lock()
         self._cancel_model = cancel_model
+        self._emergency_stop = emergency_stop
         self._project_event = project_event
+        self._start_projection = start_projection
+        self._stop_projection = stop_projection
+        self._projection_health = projection_health
+        self._projection_published = 0
+        self._projection_failed = 0
+        self._projection_dropped = 0
+        self._projection_queue: asyncio.Queue[SkillEvent] = asyncio.Queue(
+            maxsize=self._subscriber_queue_size
+        )
+        self._projection_task: asyncio.Task[object] | None = None
         self._cancelling: set[str] = set()
         self._run_store = run_store
         self._runner = SkillRunner(
@@ -57,6 +72,12 @@ class SkillWorker:
         if self._closed:
             raise RuntimeError("skill worker is closed")
         if self._consumer is None:
+            if self._start_projection is not None:
+                await self._start_projection()
+            if self._project_event is not None:
+                self._projection_task = asyncio.create_task(
+                    self._projection_loop(), name="skill-event-projection"
+                )
             self._consumer = asyncio.create_task(
                 self._consume(), name="skill-worker:commands"
             )
@@ -64,6 +85,8 @@ class SkillWorker:
     async def submit(self, command: SkillCommand) -> str:
         if self._closed:
             raise RuntimeError("skill worker is closed")
+        if self._consumer is None:
+            await self.start()
         existing = self._pending.get(command.run_id)
         if existing is not None:
             if existing != command:
@@ -111,6 +134,17 @@ class SkillWorker:
         await asyncio.gather(
             *(self.cancel(run_id, reason=reason) for run_id in run_ids)
         )
+
+    async def emergency_stop(self, robot_id: str, *, reason: str) -> None:
+        if self._emergency_stop is None:
+            raise RuntimeError("robot emergency-stop control plane is unavailable")
+        stop_result, _ = await asyncio.gather(
+            self._emergency_stop(robot_id, reason),
+            self.cancel_robot(robot_id, reason=reason),
+            return_exceptions=True,
+        )
+        if isinstance(stop_result, BaseException):
+            raise stop_result
 
     async def events(self) -> AsyncIterator[SkillEvent]:
         queue: asyncio.Queue[SkillEvent] = asyncio.Queue(
@@ -172,6 +206,12 @@ class SkillWorker:
             self._tasks[run_id].cancel()
         if self._tasks:
             await asyncio.gather(*self._tasks.values(), return_exceptions=True)
+        if self._projection_task is not None:
+            self._projection_task.cancel()
+            await asyncio.gather(self._projection_task, return_exceptions=True)
+            self._projection_task = None
+        if self._stop_projection is not None:
+            await self._stop_projection()
         self._tasks.clear()
         self._pending.clear()
         self._cancelling.clear()
@@ -196,11 +236,49 @@ class SkillWorker:
     async def _emit(self, event: SkillEvent) -> None:
         event = self._run_store.append_event(event)
         if self._project_event is not None:
-            await self._project_event(event)
+            self._enqueue_projection(event)
         for queue in tuple(self._subscribers):
             if queue.full():
                 queue.get_nowait()
             queue.put_nowait(event)
+
+    def _enqueue_projection(self, event: SkillEvent) -> None:
+        if self._projection_queue.full():
+            self._projection_queue.get_nowait()
+            self._projection_dropped += 1
+            self._report_projection_health()
+        self._projection_queue.put_nowait(event)
+
+    async def _projection_loop(self) -> None:
+        assert self._project_event is not None
+        while True:
+            event = await self._projection_queue.get()
+            try:
+                await self._project_event(event)
+            except Exception as exc:
+                self._projection_failed += 1
+                self._report_projection_health()
+                logger.warning(
+                    "skill event projection failed for run %s: %s",
+                    event.run_id,
+                    exc,
+                )
+            else:
+                self._projection_published += 1
+                self._report_projection_health()
+
+    @property
+    def projection_stats(self) -> dict[str, int]:
+        return {
+            "published": self._projection_published,
+            "failed": self._projection_failed,
+            "dropped": self._projection_dropped,
+            "queued": self._projection_queue.qsize(),
+        }
+
+    def _report_projection_health(self) -> None:
+        if self._projection_health is not None:
+            self._projection_health(self.projection_stats)
 
 
 class _WorkerEventSink(SkillEventSink):

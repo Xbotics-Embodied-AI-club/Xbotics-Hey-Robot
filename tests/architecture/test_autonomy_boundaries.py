@@ -31,12 +31,9 @@ def _cognition_source_files() -> list[Path]:
 
 
 def test_robot_agent_has_one_canonical_tool_registry() -> None:
-    registry = ToolRegistry(ToolDependencies(SkillList(())))
+    registry = ToolRegistry(ToolDependencies(()))
     names = {definition["function"]["name"] for definition in registry.definitions}
-    assert names == {
-        "complete_task",
-        "control_task",
-    }
+    assert names == set()
 
 
 def test_cognition_path_does_not_import_legacy_tools() -> None:

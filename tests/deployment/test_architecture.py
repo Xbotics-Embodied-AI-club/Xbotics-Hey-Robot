@@ -21,15 +21,7 @@ XLEROBOT_DEV_CONFIGS = (
     "configs/xlerobot.sim.windows.yaml",
 )
 
-DEV_LOW_LEVEL_SKILLS = {
-    "move_base",
-    "turn_base",
-    "base_velocity_step",
-    "set_arm_pose",
-    "move_arm_joints",
-    "set_gripper",
-    "detect_marker",
-}
+MINIMAL_MOBILE_SKILLS = {"inspect_scene", "move_base", "turn_base"}
 
 
 def test_configs_do_not_use_direct_agent_mode() -> None:
@@ -86,15 +78,15 @@ def test_inspect_cli_uses_skill_surface_command_name() -> None:
     assert '"capabilities"' not in text
 
 
-def test_xlerobot_runtime_configs_use_bringup_skill_surface_for_development() -> None:
+def test_xlerobot_runtime_configs_use_minimal_mobile_skill_surface() -> None:
     offenders: dict[str, list[str]] = {}
     for path in XLEROBOT_DEV_CONFIGS:
         config = DeploymentConfig.from_yaml(path)
-        missing_low_level = sorted(DEV_LOW_LEVEL_SKILLS - set(config.skills.tools))
-        if config.skills.mode != "bringup" or missing_low_level:
+        visible = set(config.skills.tools)
+        if config.skills.mode != "bringup" or visible != MINIMAL_MOBILE_SKILLS:
             offenders[path] = [
                 f"mode={config.skills.mode}",
-                f"missing_low_level={','.join(missing_low_level)}",
+                f"visible={','.join(sorted(visible))}",
             ]
 
     assert offenders == {}

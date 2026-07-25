@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
-from hey_robot.protocol import ArtifactRef, Envelope, ImageRef
+from hey_robot.protocol import ArtifactRef, Envelope, ImageRef, ToolOutcome
 
 if TYPE_CHECKING:
     from hey_robot.skills.context import SkillContext
@@ -35,6 +35,29 @@ class SkillResult:
     failure_mode: str | None = None
     error: str | None = None
 
+    def to_tool_outcome(self, *, operation_id: str) -> ToolOutcome:
+        """Project one physical terminal result onto the Agent Tool boundary."""
+        return ToolOutcome(
+            "completed" if self.success else "failed",
+            self.summary,
+            {
+                **self.data,
+                "evidence_ids": list(self.evidence_ids),
+                "artifacts": [
+                    {
+                        "uri": artifact.uri,
+                        "artifact_type": artifact.artifact_type,
+                        "role": artifact.role,
+                    }
+                    for artifact in self.artifacts
+                ],
+                "failure_mode": self.failure_mode,
+                "error": self.error,
+            },
+            operation_id=operation_id,
+            retryable=self.failure_mode in {"timeout", "unavailable"},
+        )
+
 
 SkillHandler = Callable[["SkillContext", dict[str, Any]], Awaitable[SkillResult]]
 
@@ -52,7 +75,6 @@ class Skill:
     supported_robots: tuple[str, ...] = ()
     required_actions: tuple[str, ...] = ()
     required_models: tuple[str, ...] = ()
-    dependencies: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -77,7 +77,7 @@ def _tools():
                         handler=_noop,
                     ),
                 )
-            ),
+            ).list(),
         )
     )
 
@@ -89,7 +89,7 @@ async def test_conversation_can_return_text_with_the_shared_runner() -> None:
     result = await runner.run(
         AgentTurnRequest(
             (ModelMessage("user", "你好"),),
-            frozenset({"move", "complete_task"}),
+            frozenset({"move"}),
             time.monotonic() + 1,
             "turn-1",
         )
@@ -284,5 +284,5 @@ async def test_one_valid_skill_call_returns_one_proposal() -> None:
     )
     assert result.status == "action_proposed"
     assert result.proposal is not None
-    assert result.proposal.skill_name == "move"
+    assert result.proposal.name == "move"
     assert len(model.calls) == 1

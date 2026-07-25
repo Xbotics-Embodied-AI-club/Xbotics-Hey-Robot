@@ -4,14 +4,13 @@ import time
 from types import SimpleNamespace
 
 from hey_robot.config import DeploymentConfig
-from hey_robot.contracts import SkillContract, SkillContractCatalog
 from hey_robot.protocol import (
     Envelope,
     RobotSkillAction,
     SkillIntent,
 )
 from hey_robot.robot_runtime import RobotManager, get_embodiment_profile
-from hey_robot.robot_runtime.base import RobotDriverContext
+from hey_robot.robot_runtime.base import RobotActionSpec, RobotDriverContext
 from hey_robot.robot_runtime.classic.primitives import SUPPORTED_CLASSIC_PRIMITIVES
 from hey_robot.robot_runtime.lekiwi import LeKiwiDriver
 from hey_robot.robot_runtime.lekiwi.base import LeKiwiBase
@@ -286,15 +285,8 @@ async def test_xlerobot_driver_rejects_action_when_contract_readiness_fails() ->
             "xlerobot",
             config.robots["xlerobot"],
             "test",
-            skill_catalog=SkillContractCatalog(
-                (
-                    SkillContract(
-                        name="set_gripper",
-                        description="Set gripper state.",
-                        required_resources=("gripper",),
-                        safety_level="motion",
-                    ),
-                )
+            action_specs=(
+                RobotActionSpec("set_gripper", {}, ("gripper",), motion=True),
             ),
         )
     )

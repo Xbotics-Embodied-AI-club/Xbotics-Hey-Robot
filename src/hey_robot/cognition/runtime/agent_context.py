@@ -12,8 +12,7 @@ from hey_robot.cognition.runtime.agent_task_store import (
     AgentTaskStore,
 )
 from hey_robot.cognition.runtime.conversation_store import ConversationStore
-from hey_robot.cognition.tools.models import PreparedToolCall
-from hey_robot.cognition.tools.skill_tools import SkillCallProposal
+from hey_robot.cognition.tools.models import PhysicalToolCall, PreparedToolCall
 from hey_robot.model import ModelMessage, ModelToolCall
 from hey_robot.protocol import ToolOutcome
 
@@ -73,7 +72,7 @@ class AgentContextBuilder:
                 tool_calls=[
                     ModelToolCall(
                         tool_call_id,
-                        step.proposal.skill_name,
+                        step.proposal.name,
                         dict(step.proposal.arguments),
                     )
                 ],
@@ -85,7 +84,6 @@ class AgentContextBuilder:
                 ),
                 tool_call_id=tool_call_id,
             ),
-            ModelMessage(role="user", content=self.continuation_message(task)),
         ]
 
     def tool_result_messages(
@@ -99,7 +97,7 @@ class AgentContextBuilder:
         step: AgentTaskStep | None,
         task: AgentTask | None,
     ) -> tuple[ModelMessage, ModelMessage]:
-        if isinstance(proposal, SkillCallProposal):
+        if isinstance(proposal, PhysicalToolCall):
             content = self.outcome_context(proposal, outcome, step=step, task=task)
         else:
             content = (
@@ -116,18 +114,9 @@ class AgentContextBuilder:
             ModelMessage(role="tool", content=content, tool_call_id=tool_call_id),
         )
 
-    def continuation_message(self, task: AgentTask) -> str:
-        objective = self._tasks.effective_objective(task.task_id)
-        return (
-            "继续当前 active task，不要把阶段性文本当作最终回复。\n\n"
-            f"任务目标：{objective}\n\n"
-            "根据已有证据继续观察或执行一个有界 Skill。只有证据直接支持"
-            "完整目标时才能结束任务；确实无法继续时使用可用的任务控制能力。"
-        )
-
     def outcome_context(
         self,
-        proposal: SkillCallProposal,
+        proposal: PhysicalToolCall,
         outcome: ToolOutcome,
         *,
         step: AgentTaskStep | None = None,
@@ -138,20 +127,11 @@ class AgentContextBuilder:
         if step is not None and step.evidence_ids:
             evidence = "; evidence_ids=" + ",".join(step.evidence_ids)
         context = (
-            f"tool_result status={outcome.status}; skill={proposal.skill_name}; "
-            f"intent={proposal.intent_kind}; summary={summary}{evidence}"
+            f"tool_result status={outcome.status}; skill={proposal.name}; "
+            f"summary={summary}{evidence}"
         )
         if task is not None:
-            context += (
-                f"\nactive_task id={task.task_id}; "
-                f"objective={self._tasks.effective_objective(task.task_id)}; "
-                "继续根据真实工具结果推进；阶段性结果不会自动结束任务。"
-            )
-        if proposal.intent_kind == "observation":
-            context += (
-                "\n这次观察只更新证据，不自动完成用户的原始动作请求。"
-                "继续根据原始请求推进，或在缺少不可替代参数时询问用户。"
-            )
+            context += f"\nactive_task id={task.task_id}"
         return context
 
     def _policy(self, view: AgentSessionView) -> str:

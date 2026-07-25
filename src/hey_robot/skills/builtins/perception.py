@@ -11,22 +11,7 @@ from hey_robot.skills.registry import SkillRegistry
 
 
 async def inspect_scene(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResult:
-    del arguments
-    observation = await ctx.observe()
-    summary = observation.task or "scene inspected"
-    return SkillResult(
-        True,
-        summary,
-        "completed",
-        data={
-            "frame_id": observation.frame_id,
-            "images": [image.uri for image in observation.images],
-            "entities": [entity.entity_id for entity in observation.entities],
-        },
-        evidence_ids=(f"observation:{ctx.run_id}",),
-        observations=tuple(observation.images),
-        artifacts=tuple(observation.artifacts),
-    )
+    return await execute_robot_action(ctx, "inspect_scene", arguments)
 
 
 async def look_around(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResult:

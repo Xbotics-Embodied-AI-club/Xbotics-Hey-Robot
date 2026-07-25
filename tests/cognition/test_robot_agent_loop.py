@@ -18,11 +18,7 @@ from hey_robot.cognition.runtime.agent_task_store import AgentTaskStore
 from hey_robot.cognition.runtime.conversation_store import ConversationStore
 from hey_robot.cognition.runtime.task_coordinator import TaskCoordinator
 from hey_robot.cognition.tools.executor import AgentToolExecutor, ToolExecution
-from hey_robot.cognition.tools.models import (
-    CompleteTaskProposal,
-    HarnessToolCall,
-)
-from hey_robot.cognition.tools.skill_tools import SkillCallProposal
+from hey_robot.cognition.tools.models import HarnessToolCall, PhysicalToolCall
 from hey_robot.protocol import AgentControl, Envelope, ToolOutcome
 from hey_robot.skills.models import SkillEvent, SkillResult
 
@@ -71,7 +67,7 @@ class _SteerRunner:
 
 
 class _Tools:
-    names = frozenset({"inspect_scene", "move_base", "complete_task", "control_task"})
+    names = frozenset({"inspect_scene", "move_base"})
 
 
 class _Templates:
@@ -130,7 +126,7 @@ class _InlineExecutor:
 
     async def execute(self, **_kwargs):
         execution = next(self.executions)
-        if isinstance(execution.proposal, SkillCallProposal):
+        if isinstance(execution.proposal, PhysicalToolCall):
             task = self.tasks.active_task("session-1")
             if task is None:
                 task = self.tasks.create_task(
@@ -143,13 +139,6 @@ class _InlineExecutor:
                     task.task_id, execution.proposal, execution.outcome
                 )
                 return dataclass_replace(execution, step=step, task=task)
-            return dataclass_replace(execution, task=task)
-        if isinstance(execution.proposal, CompleteTaskProposal):
-            task = self.tasks.active_task("session-1")
-            if task is not None and execution.directive == "finish":
-                self.tasks.complete_from_environment(
-                    task.task_id, recap=execution.final_text or "done"
-                )
             return dataclass_replace(execution, task=task)
         return execution
 
@@ -180,11 +169,7 @@ def _agent(
 
 
 def _decision(call_id: str, proposal) -> AgentTurnResult:
-    name = (
-        proposal.skill_name
-        if isinstance(proposal, SkillCallProposal)
-        else "complete_task"
-    )
+    name = proposal.name
     return AgentTurnResult(
         "action_proposed",
         None,
@@ -196,7 +181,7 @@ def _decision(call_id: str, proposal) -> AgentTurnResult:
 
 @pytest.mark.asyncio
 async def test_agent_returns_waiting_after_physical_submit(tmp_path) -> None:
-    move = SkillCallProposal("skill", "move_base", "move", {})
+    move = PhysicalToolCall("move_base", {})
     runner = _Runner([_decision("move-1", move)])
     waiting = ToolExecution(
         "wait",
@@ -212,23 +197,22 @@ async def test_agent_returns_waiting_after_physical_submit(tmp_path) -> None:
     assert result.status == "waiting"
     assert result.operation_id == "run-1"
     assert len(runner.requests) == 1
+    assert [message.role for message in conversations.recent("session-1")] == ["user"]
     conversations.close()
     tasks.close()
 
 
 @pytest.mark.asyncio
 async def test_agent_continues_from_tool_outcome_until_complete(tmp_path) -> None:
-    observe = SkillCallProposal("observation", "inspect_scene", "inspect", {})
-    complete = CompleteTaskProposal("done")
-    runner = _Runner([_decision("observe-1", observe), _decision("done-1", complete)])
+    observe = PhysicalToolCall("inspect_scene", {})
+    runner = _Runner(
+        [
+            _decision("observe-1", observe),
+            AgentTurnResult("returned", "done", "model_returned"),
+        ]
+    )
     executions = [
         ToolExecution("continue", ToolOutcome("completed", "seen"), observe),
-        ToolExecution(
-            "finish",
-            ToolOutcome("completed", "done"),
-            complete,
-            final_text="done",
-        ),
     ]
     agent, tasks, conversations = _agent(tmp_path, runner, executions)
 
@@ -255,7 +239,7 @@ async def test_steer_during_skill_waits_for_safe_point(tmp_path) -> None:
     )
     tasks.add_pending_step(
         task.task_id,
-        SkillCallProposal("skill", "move_base", "move", {}),
+        PhysicalToolCall("move_base", {}),
         run_id="run-active",
         tool_call_id="move-1",
     )
@@ -272,7 +256,10 @@ async def test_steer_during_skill_waits_for_safe_point(tmp_path) -> None:
     assert result.status == "waiting"
     assert result.operation_id == "run-active"
     assert runner.requests == []
-    assert tasks.amendments(task.task_id) == ("go to the dining table instead",)
+    transcript = conversations.recent("session-1")
+    assert [(message.role, message.content) for message in transcript] == [
+        ("user", "go to the dining table instead")
+    ]
     conversations.close()
     tasks.close()
 
@@ -312,9 +299,9 @@ async def test_steer_during_inference_rebuilds_context(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_pauses_at_one_wakeup_turn_bound(tmp_path) -> None:
+async def test_active_task_does_not_prevent_natural_text_stop(tmp_path) -> None:
     returned = AgentTurnResult("returned", "still working", "model_returned")
-    runner = _Runner([returned] * 8)
+    runner = _Runner([returned])
     agent, tasks, conversations = _agent(tmp_path, runner, [])
     task = tasks.create_task(
         session_key="session-1",
@@ -331,10 +318,10 @@ async def test_agent_pauses_at_one_wakeup_turn_bound(tmp_path) -> None:
         )
     )
 
-    assert result.status == "blocked"
-    assert "单次唤醒" in result.text
-    assert len(runner.requests) == 8
-    assert tasks.task(task.task_id).status == "paused"  # type: ignore[union-attr]
+    assert result.status == "completed"
+    assert result.text == "still working"
+    assert len(runner.requests) == 1
+    assert tasks.task(task.task_id).status == "completed"  # type: ignore[union-attr]
     conversations.close()
     tasks.close()
 
@@ -351,9 +338,7 @@ async def test_tool_executor_creates_task_and_persists_original_proposal(
         coordinator,  # type: ignore[arg-type]
         _SkillClient(),  # type: ignore[arg-type]
     )
-    proposal = SkillCallProposal(
-        "skill", "move_base", "move precisely to the red table", {"meters": 0.2}
-    )
+    proposal = PhysicalToolCall("move_base", {"meters": 0.2})
 
     execution = await executor.execute(
         session_key="session-1",
@@ -366,43 +351,8 @@ async def test_tool_executor_creates_task_and_persists_original_proposal(
     assert execution.directive == "wait"
     assert execution.outcome.operation_id == "run-submitted"
     assert execution.step is not None
-    assert execution.step.proposal.objective == "move precisely to the red table"
+    assert execution.step.proposal == proposal
     assert coordinator.proposals == [proposal]
-    tasks.close()
-
-
-@pytest.mark.asyncio
-async def test_tool_executor_completes_evidence_grounded_task(tmp_path) -> None:
-    tasks = AgentTaskStore(tmp_path / "tasks.sqlite3")
-    task = tasks.create_task(
-        session_key="session-1",
-        envelope=Envelope(robot_id="sim_robot"),
-        objective="inspect the desk",
-    )
-    tasks.add_step(
-        task.task_id,
-        SkillCallProposal("observation", "inspect_scene", "inspect", {}),
-        ToolOutcome("completed", "a cup is on the desk"),
-    )
-    executor = AgentToolExecutor(
-        _Config(),  # type: ignore[arg-type]
-        tasks,
-        SimpleNamespace(),  # type: ignore[arg-type]
-        _SkillClient(),  # type: ignore[arg-type]
-    )
-    proposal = CompleteTaskProposal("a cup is on the desk")
-
-    execution = await executor.execute(
-        session_key="session-1",
-        envelope=Envelope(robot_id="sim_robot"),
-        objective=task.objective,
-        proposal=proposal,
-        tool_call_id="complete-1",
-    )
-
-    assert execution.directive == "finish"
-    assert execution.outcome.status == "completed"
-    assert tasks.task(task.task_id).status == "completed"  # type: ignore[union-attr]
     tasks.close()
 
 
@@ -444,7 +394,7 @@ async def test_control_pause_resume_and_cancel_are_durable(tmp_path) -> None:
     )
     tasks.add_pending_step(
         task.task_id,
-        SkillCallProposal("skill", "move_base", "move", {}),
+        PhysicalToolCall("move_base", {}),
         run_id="run-1",
         tool_call_id="call-1",
     )
@@ -489,7 +439,7 @@ async def test_resume_waits_for_cancelled_run_terminal(tmp_path) -> None:
     )
     tasks.add_pending_step(
         task.task_id,
-        SkillCallProposal("skill", "move_base", "move", {}),
+        PhysicalToolCall("move_base", {}),
         run_id="run-stopping",
         tool_call_id="call-1",
     )
@@ -609,7 +559,7 @@ async def test_startup_resumes_terminal_undeliberated_step(tmp_path) -> None:
     )
     pending = original.add_pending_step(
         task.task_id,
-        SkillCallProposal("observation", "inspect_scene", "inspect", {}),
+        PhysicalToolCall("inspect_scene", {}),
         run_id="run-1",
         tool_call_id="call-1",
     )
@@ -647,7 +597,7 @@ async def test_terminal_event_resumes_once_and_replay_is_ignored(tmp_path) -> No
     )
     pending = tasks.add_pending_step(
         task.task_id,
-        SkillCallProposal("observation", "inspect_scene", "inspect", {}),
+        PhysicalToolCall("inspect_scene", {}),
         run_id="run-1",
         tool_call_id="call-1",
     )
@@ -689,7 +639,7 @@ async def test_environment_done_publishes_without_agent_resume(
     )
     pending = tasks.add_pending_step(
         task.task_id,
-        SkillCallProposal("skill", "move_base", "finish", {}),
+        PhysicalToolCall("move_base", {}),
         run_id="run-1",
         tool_call_id="call-1",
     )

@@ -5,7 +5,7 @@ from typing import cast
 
 import pytest
 
-from hey_robot.cognition.tools.skill_tools import SkillCallProposal
+from hey_robot.cognition.tools.models import PhysicalToolCall
 from hey_robot.config import DeploymentConfig
 from hey_robot.episode.scope import EpisodeScope
 from hey_robot.events import EventKind, RuntimeEvent
@@ -308,7 +308,7 @@ def test_gateway_web_cockpit_exposes_sustained_task_view(tmp_path) -> None:
     )
     step = gateway.task_store.add_pending_step(
         task.task_id,
-        SkillCallProposal("observation", "inspect_scene", "inspect", {}),
+        PhysicalToolCall("inspect_scene", {}),
         run_id="run-1",
         tool_call_id="call-1",
     )

@@ -4,6 +4,7 @@ from hey_robot.cognition.tools.models import (
     AgentTool,
     HarnessTool,
     HarnessToolCall,
+    PhysicalToolCall,
     PreparedToolCall,
     ToolSpec,
 )
@@ -11,21 +12,13 @@ from hey_robot.cognition.tools.registry import (
     ToolDependencies,
     ToolRegistry,
 )
-from hey_robot.cognition.tools.skill_tools import SkillCallProposal, SkillTool
-from hey_robot.cognition.tools.task_tools import (
-    CompleteTaskTool,
-    ControlTaskTool,
-)
 
 __all__ = [
     "AgentTool",
-    "CompleteTaskTool",
-    "ControlTaskTool",
     "HarnessTool",
     "HarnessToolCall",
+    "PhysicalToolCall",
     "PreparedToolCall",
-    "SkillCallProposal",
-    "SkillTool",
     "ToolDependencies",
     "ToolRegistry",
     "ToolSpec",

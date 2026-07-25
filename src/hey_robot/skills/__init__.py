@@ -2,11 +2,11 @@
 
 from hey_robot.skills.client import SkillClient
 from hey_robot.skills.context import SkillContext
-from hey_robot.skills.contracts import (
-    skill_contract_catalog_from_config,
-    skill_contract_from_native,
+from hey_robot.skills.loader import (
+    load_skill_registry,
+    registry_from_config,
+    robot_action_specs_from_config,
 )
-from hey_robot.skills.loader import load_skill_registry, registry_from_config
 from hey_robot.skills.models import (
     Skill,
     SkillCancel,
@@ -35,7 +35,6 @@ __all__ = [
     "SkillWorker",
     "load_skill_registry",
     "registry_from_config",
-    "skill_contract_catalog_from_config",
-    "skill_contract_from_native",
+    "robot_action_specs_from_config",
     "validate_skill_surface",
 ]

@@ -14,8 +14,8 @@ from hey_robot.skills import (
     SkillRegistry,
     SkillResult,
     SkillRunner,
+    SkillWorker,
 )
-from hey_robot.skills.transport import LocalSkillClient
 
 
 @dataclass
@@ -119,38 +119,6 @@ async def test_runner_normalizes_an_inconsistent_failure_status() -> None:
     assert sink.events[-1].phase == "failed"
 
 
-async def test_nested_skill_reuses_root_resource_owner() -> None:
-    registry = SkillRegistry()
-    calls: list[str] = []
-
-    async def child(_ctx, _arguments):
-        calls.append("child")
-        return SkillResult(True, "child", "completed")
-
-    async def parent(ctx, _arguments):
-        calls.append("parent")
-        return await ctx.run("child")
-
-    registry.register(Skill("child", "Child.", {}, child, resources=("arm",)))
-    registry.register(
-        Skill(
-            "parent",
-            "Parent.",
-            {},
-            parent,
-            resources=("arm",),
-            dependencies=("child",),
-        )
-    )
-
-    result = await asyncio.wait_for(
-        _runner(registry, EventSink()).execute(_command("parent", {})), timeout=0.5
-    )
-
-    assert result.success is True
-    assert calls == ["parent", "child"]
-
-
 async def test_runner_cancelled_skill_emits_cancelled_terminal_event() -> None:
     registry = SkillRegistry()
     started = asyncio.Event()
@@ -212,7 +180,7 @@ async def test_local_client_submits_once_and_streams_terminal_event(tmp_path) ->
             handler,
         )
     )
-    client = LocalSkillClient(registry, run_store=FileRunStore(tmp_path / "runs"))
+    client = SkillWorker(registry, run_store=FileRunStore(tmp_path / "runs"))
     stream = client.events()
     first_event = asyncio.create_task(anext(stream))
     await asyncio.sleep(0)
@@ -249,7 +217,7 @@ async def test_local_client_emergency_stop_preempts_blocked_skill(tmp_path) -> N
     registry = SkillRegistry()
     registry.register(Skill("wait", "Wait.", {}, handler, resources=("arm",)))
     store = FileRunStore(tmp_path / "runs")
-    client = LocalSkillClient(
+    client = SkillWorker(
         registry,
         run_store=store,
         cancel_model=cancel_model,
@@ -289,7 +257,7 @@ async def test_event_projection_never_blocks_durable_execution(tmp_path) -> None
 
     registry = SkillRegistry()
     registry.register(Skill("wait", "Wait.", {}, handler))
-    client = LocalSkillClient(
+    client = SkillWorker(
         registry,
         run_store=store,
         project_event=project,

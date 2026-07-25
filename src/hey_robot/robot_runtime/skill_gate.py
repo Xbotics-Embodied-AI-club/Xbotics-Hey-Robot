@@ -4,9 +4,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
-from hey_robot.contracts import SkillContract, SkillContractCatalog
 from hey_robot.protocol.messages import RobotStatus
 from hey_robot.protocol.skills import RobotSkillAction
+from hey_robot.robot_runtime.base import RobotActionSpec
 
 
 @dataclass(frozen=True)
@@ -38,21 +38,20 @@ class SkillAdmissionGate:
 
     SHARED_RESOURCES: ClassVar[set[str]] = {"camera"}
 
-    def __init__(self, catalog: SkillContractCatalog | None = None) -> None:
-        self.catalog = catalog
+    def __init__(self, specs: tuple[RobotActionSpec, ...] = ()) -> None:
+        self.specs = {spec.name: spec for spec in specs}
 
     def resolve(
         self, name: str | None, *, robot_type: str | None = None
-    ) -> SkillContract:
-        if self.catalog is None:
+    ) -> RobotActionSpec:
+        del robot_type
+        if not self.specs:
             if not name:
                 raise KeyError("robot skill action name is required")
-            return SkillContract(
-                name=name,
-                description="Uncataloged robot skill action.",
-                required_resources=("robot",),
-            )
-        return self.catalog.resolve(name, robot_type=robot_type)
+            return RobotActionSpec(name, {}, resources=("robot",))
+        if not name or name not in self.specs:
+            raise KeyError(f"unknown robot skill action: {name}")
+        return self.specs[name]
 
     def validate_action(
         self,
@@ -61,15 +60,13 @@ class SkillAdmissionGate:
         robot_type: str | None = None,
         status: RobotStatus | None = None,
         readiness: dict[str, Any] | None = None,
-    ) -> tuple[SkillContract, SkillAdmissionDecision]:
+    ) -> tuple[RobotActionSpec, SkillAdmissionDecision]:
         try:
             contract = self.resolve(action.name, robot_type=robot_type)
         except KeyError as exc:
             return (
-                SkillContract(
-                    name=action.name or "unknown_skill",
-                    description="Unknown skill action.",
-                    required_resources=("robot",),
+                RobotActionSpec(
+                    action.name or "unknown_skill", {}, resources=("robot",)
                 ),
                 SkillAdmissionDecision.reject(str(exc), failure_mode="unknown_skill"),
             )
@@ -80,7 +77,7 @@ class SkillAdmissionGate:
 
     def acceptance_decision(
         self,
-        contract: SkillContract,
+        contract: RobotActionSpec,
         *,
         status: RobotStatus | None = None,
         readiness: dict[str, Any] | None = None,
@@ -92,7 +89,10 @@ class SkillAdmissionGate:
             return SkillAdmissionDecision.reject(
                 f"skill {contract.name} missing required arguments: {','.join(missing)}",
                 failure_mode="invalid_arguments",
-                metadata={"missing_arguments": missing, "contract": contract.to_dict()},
+                metadata={
+                    "missing_arguments": missing,
+                    "contract": contract.to_dict(),
+                },
             )
         readiness_block = self.readiness_block(
             contract, readiness, arguments=resolved_arguments
@@ -106,9 +106,9 @@ class SkillAdmissionGate:
 
     @staticmethod
     def missing_required_arguments(
-        contract: SkillContract, arguments: dict[str, Any]
+        contract: RobotActionSpec, arguments: dict[str, Any]
     ) -> list[str]:
-        required = contract.input_schema.get("required")
+        required = contract.parameters.get("required")
         if not isinstance(required, list):
             return []
         return [
@@ -119,7 +119,7 @@ class SkillAdmissionGate:
 
     def readiness_block(
         self,
-        contract: SkillContract,
+        contract: RobotActionSpec,
         readiness: dict[str, Any] | None,
         *,
         arguments: dict[str, Any] | None = None,
@@ -142,7 +142,7 @@ class SkillAdmissionGate:
             battery_status = str(battery.get("status") or "").lower()
             if battery_status == "critical":
                 issues.append("battery critical")
-            elif battery_status == "low" and contract.safety_level == "motion":
+            elif battery_status == "low" and contract.motion:
                 issues.append("battery low")
         if not issues:
             return None
@@ -158,16 +158,16 @@ class SkillAdmissionGate:
 
     @staticmethod
     def precondition_block(
-        contract: SkillContract, status: RobotStatus | None
+        contract: RobotActionSpec, status: RobotStatus | None
     ) -> SkillAdmissionDecision | None:
         if status is None:
             return None
         state = str(status.state or "").lower()
-        if contract.safety_level in {"observe", "stop", "emergency"}:
+        if not contract.motion or contract.name == "stop_motion":
             return None
         if state in {"failed", "degraded", "interrupted", "emergency", "estop"}:
             return SkillAdmissionDecision.reject(
-                f"robot state {state!r} blocks {contract.safety_level} skill {contract.name}",
+                f"robot state {state!r} blocks motion action {contract.name}",
                 failure_mode="precondition_failed",
                 metadata={"state": state, "contract": contract.to_dict()},
             )
@@ -180,7 +180,7 @@ class SkillAdmissionGate:
                     failure_mode="precondition_failed",
                     metadata={"battery": battery, "contract": contract.to_dict()},
                 )
-            if battery_status == "low" and contract.safety_level == "motion":
+            if battery_status == "low" and contract.motion:
                 return SkillAdmissionDecision.reject(
                     f"battery low blocks motion skill {contract.name}",
                     failure_mode="precondition_failed",
@@ -190,8 +190,8 @@ class SkillAdmissionGate:
 
     def resources_conflict(
         self,
-        left: SkillContract,
-        right: SkillContract,
+        left: RobotActionSpec,
+        right: RobotActionSpec,
         *,
         left_arguments: dict[str, Any] | None = None,
         right_arguments: dict[str, Any] | None = None,
@@ -207,8 +207,8 @@ class SkillAdmissionGate:
 
     def shared_or_global_resources(
         self,
-        left: SkillContract,
-        right: SkillContract,
+        left: RobotActionSpec,
+        right: RobotActionSpec,
         *,
         left_arguments: dict[str, Any] | None = None,
         right_arguments: dict[str, Any] | None = None,
@@ -232,11 +232,11 @@ class SkillAdmissionGate:
 
     @staticmethod
     def normalized_resources(
-        contract: SkillContract, *, arguments: dict[str, Any] | None = None
+        contract: RobotActionSpec, *, arguments: dict[str, Any] | None = None
     ) -> set[str]:
         resources = {
             str(resource).strip().lower()
-            for resource in contract.required_resources
+            for resource in contract.resources
             if str(resource).strip()
         }
         return SkillAdmissionGate._instance_resources(resources, arguments=arguments)
@@ -268,11 +268,8 @@ class SkillAdmissionGate:
         return resolved or {"robot"}
 
     @staticmethod
-    def _is_exempt_from_readiness(contract: SkillContract) -> bool:
-        return (
-            contract.safety_level in {"stop", "emergency"}
-            or contract.name == "stop_motion"
-        )
+    def _is_exempt_from_readiness(contract: RobotActionSpec) -> bool:
+        return contract.name == "stop_motion"
 
     @staticmethod
     def _resource_ready(resource: str, readiness: dict[str, Any]) -> bool:

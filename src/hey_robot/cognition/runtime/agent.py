@@ -84,12 +84,12 @@ class Agent:
     ) -> AgentRunResult:
         task = self._tasks.current_task(self.session_key)
         if task is not None:
-            self._tasks.append_amendment(task.task_id, command.text)
             active_runs = self._tasks.active_run_ids(task.task_id)
             if active_runs:
-                text = "已记录你的修改，将在当前机器人操作结束后从安全点继续。"
+                # Conversation is the only source of user intent. The returned
+                # text is transient UI feedback and is not written back into it.
                 self._conversations.append(command.session_key, "user", command.text)
-                self._conversations.append(command.session_key, "assistant", text)
+                text = "已记录你的修改，将在当前机器人操作结束后从安全点继续。"
                 return AgentRunResult("waiting", text, active_runs[0])
         await self.abort_inference()
         return await self._launch(command, on_text_delta=on_text_delta)
@@ -127,7 +127,7 @@ class Agent:
             messages,
             envelope,
             interaction_id,
-            self._tasks.effective_objective(task.task_id),
+            task.objective,
         )
 
     async def abort_inference(self) -> None:
@@ -191,7 +191,7 @@ class Agent:
             async with self._state_lock:
                 if self._run_task is task:
                     self._run_task = None
-        if result.text:
+        if result.text and result.status != "waiting":
             self._conversations.append(self.session_key, "assistant", result.text)
         return result
 
@@ -243,18 +243,10 @@ class Agent:
                 return AgentRunResult("failed", f"这次请求没有完成：{detail}")
             if decision.status == "returned":
                 text = decision.final_text or ""
-                if active_task is None:
-                    return AgentRunResult("responded", text)
-                messages.extend(
-                    (
-                        ModelMessage(role="assistant", content=text),
-                        ModelMessage(
-                            role="user",
-                            content=self._context.continuation_message(active_task),
-                        ),
-                    )
-                )
-                continue
+                if active_task is not None:
+                    self._tasks.close_task(active_task.task_id, recap=text)
+                    return AgentRunResult("completed", text, active_task.task_id)
+                return AgentRunResult("responded", text)
             proposal = decision.proposal
             if proposal is None or not decision.tool_calls:
                 return AgentRunResult("failed", "工具没有产生有效调用。")

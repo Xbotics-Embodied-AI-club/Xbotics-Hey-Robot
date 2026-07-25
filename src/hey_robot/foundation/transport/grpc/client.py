@@ -80,7 +80,7 @@ class GrpcModelServiceClient:
             trace_id=request.intent.envelope.trace_id,
             episode_id=request.intent.envelope.episode_id or "",
             skill_id=request.intent.skill_id,
-            skill_name=request.intent.name or request.contract.name,
+            skill_name=request.intent.name,
             robot_id=request.intent.envelope.robot_id or self.spec.robot_id,
             objective=request.intent.objective,
             arguments=_dict_to_struct(dict(arguments)),

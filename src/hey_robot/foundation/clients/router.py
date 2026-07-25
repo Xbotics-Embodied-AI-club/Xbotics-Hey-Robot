@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 
-from hey_robot.contracts import SkillContract
 from hey_robot.foundation.clients.manager import ModelServiceRegistry
 from hey_robot.foundation.clients.models import (
     ModelInferenceResult,
@@ -46,11 +45,6 @@ class RegistryModelRouter:
                     name=capability,
                     arguments=dict(request),
                     objective=f"infer {capability}",
-                ),
-                contract=SkillContract(
-                    name=capability,
-                    description=f"Model capability {capability}",
-                    required_model_service=capability,
                 ),
                 timeout_sec=timeout_sec or spec.timeout_sec,
                 arguments=dict(request),

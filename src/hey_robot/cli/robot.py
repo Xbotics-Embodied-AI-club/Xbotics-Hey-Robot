@@ -5,7 +5,7 @@ import asyncio
 
 from hey_robot.config import DeploymentConfig
 from hey_robot.robot_runtime import RobotService
-from hey_robot.skills import skill_contract_catalog_from_config
+from hey_robot.skills import robot_action_specs_from_config
 
 
 async def async_main() -> None:
@@ -16,7 +16,7 @@ async def async_main() -> None:
     config = DeploymentConfig.from_yaml(args.config)
     service = RobotService(
         config,
-        skill_catalog=skill_contract_catalog_from_config(config),
+        action_specs=robot_action_specs_from_config(config),
     )
     try:
         await service.start()

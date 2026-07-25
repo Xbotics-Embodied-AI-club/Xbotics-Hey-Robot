@@ -14,15 +14,8 @@ from hey_robot.protocol import (
     RobotSkillAction,
     SkillIntent,
 )
+from hey_robot.robot_runtime.base import RobotActionSpec
 from hey_robot.robot_runtime.runtime import RobotRuntime
-
-
-@dataclass(frozen=True)
-class RobotActionSpec:
-    name: str
-    parameters: dict[str, Any]
-    resources: tuple[str, ...] = ()
-    motion: bool = False
 
 
 @dataclass(frozen=True)
