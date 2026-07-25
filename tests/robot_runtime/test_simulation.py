@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import importlib.util
+import threading
 from pathlib import Path
 
 import pytest
@@ -247,6 +249,35 @@ class TestXLeRobotSimDriver:
         assert driver.state == "created"
 
     @pytest.mark.asyncio
+    async def test_cancelled_simulation_work_waits_until_writer_stops(
+        self, sim_context: RobotDriverContext
+    ) -> None:
+        from hey_robot.robot_runtime.simulation.xlerobot_sim_driver import (
+            XLeRobotSimDriver,
+        )
+
+        driver = XLeRobotSimDriver(sim_context)
+        started = threading.Event()
+        stopped = threading.Event()
+
+        def work(stop_event: threading.Event) -> bool:
+            started.set()
+            stop_event.wait(timeout=1.0)
+            stopped.set()
+            return False
+
+        task = asyncio.create_task(driver._run_simulation_work(work))
+        assert await asyncio.to_thread(started.wait, 1.0)
+        task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert stopped.is_set()
+        assert driver._active_motion_stop is None
+        assert driver.state == "idle"
+
+    @pytest.mark.asyncio
     async def test_driver_start_and_capabilities(
         self, sim_context: RobotDriverContext
     ) -> None:
@@ -338,6 +369,7 @@ class TestXLeRobotSimDriver:
         status = await driver.apply_action(action)
         assert status.success is True
         assert status.state == "idle"
+        assert status.metrics["base_pose"] == driver._base_pose()
 
         await driver.close()
 

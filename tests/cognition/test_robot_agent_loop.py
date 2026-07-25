@@ -542,6 +542,12 @@ class _ResumeAgent:
         return SimpleNamespace(text="resumed")
 
 
+class _WaitingResumeAgent(_ResumeAgent):
+    async def resume(self, trigger: ResumeTrigger):
+        self.triggers.append(trigger)
+        return SimpleNamespace(text="still running", status="waiting")
+
+
 class _NoReconciliation:
     @staticmethod
     async def reconcile_active_run_results() -> tuple[Any, ...]:
@@ -624,6 +630,43 @@ async def test_terminal_event_resumes_once_and_replay_is_ignored(tmp_path) -> No
     resume_agent = service._agents["session-1"]
     assert len(resume_agent.triggers) == 1
     assert service.bus.published[-1][1]["text"] == "resumed"
+    tasks.close()
+
+
+@pytest.mark.asyncio
+async def test_chained_physical_wait_is_not_published_as_final(tmp_path) -> None:
+    tasks = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    task = tasks.create_task(
+        session_key="session-1",
+        envelope=Envelope(channel="web", robot_id="sim_robot"),
+        objective="move twice",
+    )
+    pending = tasks.add_pending_step(
+        task.task_id,
+        PhysicalToolCall("move_base", {}),
+        run_id="run-1",
+        tool_call_id="call-1",
+    )
+    service = object.__new__(AutonomousAgentService)
+    service.tasks = tasks
+    service.task_coordinator = TaskCoordinator(tasks, SimpleNamespace())  # type: ignore[arg-type]
+    service._agents = {"session-1": _WaitingResumeAgent()}
+    service.bus = _Bus()
+    service.topics = SimpleNamespace(conversation_result="conversation.result")
+    event = SkillEvent(
+        Envelope(robot_id="sim_robot"),
+        pending.run_id or "",
+        2,
+        "move_base",
+        "completed",
+        0.0,
+        result=SkillResult(True, "moved", "completed"),
+    )
+
+    await service._handle_skill_event(event)
+
+    assert service.bus.published[-1][1]["text"] == "still running"
+    assert service.bus.published[-1][1]["final"] is False
     tasks.close()
 
 

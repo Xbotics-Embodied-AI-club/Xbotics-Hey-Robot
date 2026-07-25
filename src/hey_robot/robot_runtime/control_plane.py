@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -38,6 +39,7 @@ class RobotControlPlane:
         self.current_action_id: str | None = None
         self.last_watchdog: dict[str, Any] | None = None
         self.preemptions: list[dict[str, Any]] = []
+        self._action_lock = asyncio.Lock()
 
     async def apply_action(
         self,
@@ -74,22 +76,35 @@ class RobotControlPlane:
                 }
             )
 
-        entry = self._buffer_entry(action)
-        self.action_buffer.append(entry)
-        self.current_action_id = action.action_id
-        started_at = time.time()
-        status = await apply_fn(action)
-        self.last_watchdog = {
-            "action_id": action.action_id,
-            "skill_id": action.skill_id,
-            "duration_sec": round(time.time() - started_at, 6),
-            "deadline_at": entry.deadline_at,
-            "deadline_missed": entry.deadline_at is not None
-            and time.time() > entry.deadline_at,
-            "success": status.success,
-        }
-        if self.current_action_id == action.action_id:
-            self.current_action_id = None
+        async with self._action_lock:
+            entry = self._buffer_entry(action)
+            self.action_buffer.append(entry)
+            self.current_action_id = action.action_id
+            started_at = time.time()
+            result_status: RobotStatus | None = None
+            cancelled = False
+            try:
+                result_status = await apply_fn(action)
+            except asyncio.CancelledError:
+                cancelled = True
+                raise
+            finally:
+                self.last_watchdog = {
+                    "action_id": action.action_id,
+                    "skill_id": action.skill_id,
+                    "duration_sec": round(time.time() - started_at, 6),
+                    "deadline_at": entry.deadline_at,
+                    "deadline_missed": entry.deadline_at is not None
+                    and time.time() > entry.deadline_at,
+                    "success": (
+                        result_status.success if result_status is not None else False
+                    ),
+                    "cancelled": cancelled,
+                }
+                if self.current_action_id == action.action_id:
+                    self.current_action_id = None
+        assert result_status is not None
+        status = result_status
         return RobotStatus(
             envelope=status.envelope,
             frame_id=status.frame_id,

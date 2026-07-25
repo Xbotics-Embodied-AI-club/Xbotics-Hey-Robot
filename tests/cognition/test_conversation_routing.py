@@ -62,6 +62,28 @@ def test_durable_task_closes_on_final_assistant_text(tmp_path) -> None:
     store.close()
 
 
+def test_failed_physical_step_closes_task_as_failed(tmp_path) -> None:
+    store = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    task = store.create_task(
+        session_key="session-1",
+        envelope=Envelope(robot_id="sim_robot"),
+        objective="turn left",
+    )
+    store.add_step(
+        task.task_id,
+        PhysicalToolCall("turn_base", {"direction": "left", "angle_deg": 90}),
+        ToolOutcome("failed", "turn failed"),
+    )
+
+    store.close_task(task.task_id, recap="无法完成左转。")
+
+    closed = store.task(task.task_id)
+    assert closed is not None
+    assert closed.status == "failed"
+    assert closed.final_recap == "无法完成左转。"
+    store.close()
+
+
 def test_task_store_persists_pending_run_and_ignores_replayed_events(tmp_path) -> None:
     store = AgentTaskStore(tmp_path / "tasks.sqlite3")
     task = store.create_task(

@@ -32,7 +32,7 @@ INSPECT_SCENE = Skill(
     },
     handler=inspect_scene,
     resources=("camera",),
-    timeout_sec=20.0,
+    timeout_sec=45.0,
     supported_robots=("xlerobot", "so101", "so101_mobile", "robocasa"),
     required_actions=("inspect_scene",),
 )

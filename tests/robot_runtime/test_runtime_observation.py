@@ -109,6 +109,23 @@ async def test_robot_runtime_routes_motion_through_control_plane(tmp_path) -> No
     assert runtime.control_plane.action_buffer[-1].action_type == "skill"
 
 
+def test_robot_service_preserves_motion_status_fields() -> None:
+    service = object.__new__(RobotService)
+    status = RobotStatus(
+        Envelope(robot_id="mock0"),
+        state="executing",
+        location_id="room:living_room",
+        motion_state="moving",
+        battery_percentage=72.0,
+    )
+
+    projected = service._status_for_publish(status)
+
+    assert projected.location_id == "room:living_room"
+    assert projected.motion_state == "moving"
+    assert projected.battery_percentage == 72.0
+
+
 async def test_robot_runtime_observe_always_refreshes_from_driver(
     tmp_path,
 ) -> None:

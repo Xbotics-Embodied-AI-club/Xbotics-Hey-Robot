@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 
 import pytest
@@ -53,6 +54,28 @@ async def test_control_plane_buffers_action_and_records_watchdog() -> None:
     assert status.metrics["control_plane"]["buffer_size"] == 1
     assert plane.last_watchdog is not None
     assert plane.last_watchdog["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_control_plane_cancellation_clears_active_action() -> None:
+    plane = RobotControlPlane()
+    started = asyncio.Event()
+
+    async def apply(_action: RobotAction) -> RobotStatus:
+        started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    task = asyncio.create_task(plane.apply_action(_action(), apply_fn=apply))
+    await started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert plane.current_action_id is None
+    assert plane.last_watchdog is not None
+    assert plane.last_watchdog["cancelled"] is True
 
 
 @pytest.mark.asyncio

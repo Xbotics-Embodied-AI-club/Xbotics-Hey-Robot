@@ -61,7 +61,7 @@ MOVE_BASE = Skill(
     },
     handler=move_base,
     resources=("base",),
-    timeout_sec=8.0,
+    timeout_sec=20.0,
     required_actions=("move_base",),
 )
 
@@ -79,7 +79,7 @@ TURN_BASE = Skill(
     },
     handler=turn_base,
     resources=("base",),
-    timeout_sec=8.0,
+    timeout_sec=20.0,
     required_actions=("turn_base",),
 )
 

@@ -309,14 +309,17 @@ class AgentTaskStore:
         sequence = int(task.step_count) + 1
         step_id = f"step_{uuid.uuid4().hex}"
         evidence_ids = _evidence_ids(step_id, outcome)
+        step_status: StepStatus = (
+            "failed" if outcome.status == "failed" else "completed"
+        )
         now = time.time()
         self._db.execute(
             """
             INSERT INTO task_steps (
                 step_id, task_id, sequence, proposal_json, outcome_json,
-                started_at, completed_at, evidence_json
+                started_at, completed_at, evidence_json, status
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 step_id,
@@ -329,6 +332,7 @@ class AgentTaskStore:
                 now,
                 now,
                 json.dumps(list(evidence_ids), ensure_ascii=False),
+                step_status,
             ),
         )
         self._db.execute(
@@ -350,6 +354,7 @@ class AgentTaskStore:
             now,
             now,
             evidence_ids,
+            status=step_status,
         )
 
     def add_pending_step(
@@ -570,6 +575,13 @@ class AgentTaskStore:
 
     def close_task(self, task_id: str, *, recap: str) -> None:
         """Close an active durable turn after the model returns final text."""
+        recent = self.recent_steps(task_id, limit=1)
+        if recent and recent[-1].status == "failed":
+            self._finish(task_id, "failed", last_error=recap, final_recap=recap)
+            return
+        if recent and recent[-1].status == "cancelled":
+            self._finish(task_id, "cancelled", last_error=recap, final_recap=recap)
+            return
         self._finish(task_id, "completed", final_recap=recap)
 
     def complete_from_environment(self, task_id: str, *, recap: str) -> None:

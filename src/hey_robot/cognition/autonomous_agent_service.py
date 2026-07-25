@@ -159,7 +159,12 @@ class AutonomousAgentService:
                 result = await agent.prompt(command, on_text_delta=publish_text_delta)
         except asyncio.CancelledError:
             return
-        await self._publish_result(turn.envelope, turn.interaction_id, result.text)
+        await self._publish_result(
+            turn.envelope,
+            turn.interaction_id,
+            result.text,
+            final=result.status != "waiting",
+        )
 
     async def _on_control(self, _topic: str, payload: dict) -> None:
         command = from_payload(AgentControl, payload)
@@ -216,7 +221,12 @@ class AutonomousAgentService:
         )
         envelope = self.tasks.task_envelope(task.task_id)
         if envelope is not None:
-            await self._publish_result(envelope, interaction_id, result.text)
+            await self._publish_result(
+                envelope,
+                interaction_id,
+                result.text,
+                final=getattr(result, "status", None) != "waiting",
+            )
 
     async def _resume_task(
         self,
@@ -236,6 +246,7 @@ class AutonomousAgentService:
                 envelope,
                 f"resume_{task.task_id}_{self.tasks.resume_after_sequence(task.task_id)}",
                 result.text,
+                final=getattr(result, "status", None) != "waiting",
             )
         return result
 
