@@ -1,8 +1,8 @@
 # 文档审计：2026-07-25
 
-> 基线：提交 `f70e118`，分支 `refactor/simple-tool-skill-harness`。这是带日期的审计快照，
-> 不是持续更新的架构规范；当前行为以代码、配置和 [系统架构](../architecture/system-architecture.md)
-> 为准。
+> 初始基线：提交 `f70e118`，分支 `refactor/simple-tool-skill-harness`。本文随后记录同一轮
+> 文档治理的实际处理结果，但仍不是架构规范；当前行为以代码、配置和
+> [系统架构](../architecture/system-architecture.md) 为准。
 
 ## 结论
 
@@ -10,8 +10,8 @@
 
 - README 曾链接 7 个已经删除的文档，并把外部飞书页面当作“完整配置”；
 - 默认仿真说明与 YAML 相反：实际是 `in_memory` + Web-only，不需要 NATS/Voice/Feishu；
-- 当前架构已收敛为 local Skill execution，但论文草稿和部分评测文档仍使用旧 Skill OS、
-  `RobotAgentCore`、`SkillGateway` 等名称；
+- 当前架构已收敛为 local Skill execution；论文草稿已重写为当前 `AgentTaskStore`、
+  `TaskCoordinator`、`SkillWorker` 和 `RobotRuntime` 主链；
 - 生产运行手册、重构记录、架构审计、论文全文转录并列在 `docs/`，没有稳定/历史/第三方
   材料边界；
 - 开源治理文档和自动化检查不足，文档漂移没有 CI 阻止。
@@ -24,7 +24,7 @@
 | 问题 | 代码证据 | 建议 |
 |---|---|---|
 | Docker runtime 文档声称可启动，但 compose 使用不存在的 `/app/configs/deployment/mock.dev.yaml` | `docker-compose.yml` | 修复 compose 后增加 build/start smoke test；修复前把整套 Docker 部署标为实验性 |
-| 第三方论文全文曾直接存放在 `docs/references/` | `docs/references/*.md` | 本次已删除全文，只保留项目原创的参考链接，避免根许可证暗示覆盖第三方内容 |
+| 第三方论文全文/转录仍存放在 `docs/references/` | `docs/references/*.md` | 逐份补充来源和再分发许可；不能确认权利时删除全文，只保留题录、上游链接和原创摘要 |
 | 没有私密漏洞披露入口和 `SECURITY.md` | 仓库根目录、`.github/` | 启用 GitHub Private Vulnerability Reporting，再写明支持版本、响应目标和披露流程 |
 | 没有 CI workflow | `.github/workflows/` 不存在 | 至少自动运行链接检查、`poe lint`、`poe test` 和 Docker/config smoke |
 | 两套 Poe 任务定义曾经冲突 | `pyproject.toml` 与 `poe_tasks.toml` | 本次已收敛到独立 `poe_tasks.toml`，并增加重复定义检查 |
@@ -74,8 +74,8 @@
 | 内容 | 处理建议 | 原因 |
 |---|---|---|
 | 已删除实现对应的重构计划 | 删除或移到外部设计记录 | 用户无法执行，且容易被搜索结果当成现状 |
-| 旧 `paper-draft.md` | 本次已删除，可从 Git 历史追溯 | 包含过时类名、目录和未持续复核的测试数字 |
-| 第三方论文全文/转录 | 本次已删除，只保留项目参考链接 | MIT 根许可证不应暗示覆盖第三方内容 |
+| 旧 `paper-draft.md` 内容 | 本次已按当前代码重写，并明确标记为非规范性草稿 | 原稿包含已删除类名、目录和未经验证的能力表述 |
+| 第三方论文全文/转录 | 建议完成许可审查；不能确认时删除全文 | MIT 根许可证不应暗示覆盖第三方内容 |
 | 精确测试数、覆盖率、GPU 显存和耗时 | 只保留在带 SHA 的报告/CI artifact | 高频变化，不适合常青文档 |
 | 外部飞书“完整配置指南” | 降级为补充教程 | fork、离线和长期可维护性差，无法随 PR 原子更新 |
 

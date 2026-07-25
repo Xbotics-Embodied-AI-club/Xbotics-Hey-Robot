@@ -1,71 +1,172 @@
-# Hey Robot
-
 <div align="center">
-  <sub><a href="../README.md">简体中文</a> | English</sub>
+
+  <pre>
+  ██╗  ██╗██████╗  ██████╗ ████████╗██╗ ██████╗███████╗
+  ╚██╗██╔╝██╔══██╗██╔═══██╗╚══██╔══╝██║██╔════╝██╔════╝
+   ╚███╔╝ ██████╔╝██║   ██║   ██║   ██║██║     ███████╗
+   ██╔██╗ ██╔══██╗██║   ██║   ██║   ██║██║     ╚════██║
+  ██╔╝ ██╗██████╔╝╚██████╔╝   ██║   ██║╚██████╗███████║
+  ╚═╝  ╚═╝╚═════╝  ╚═════╝    ╚═╝   ╚═╝ ╚═════╝╚══════╝
+  </pre>
+
+<img src="images/hey-robot-icon.png" alt="Hey Robot project icon" width="300" />
+
+<h1>Hey Robot</h1>
+
+<p>
+  <em>An Embodied Agent Harness for real robots · Fast–slow dual-system architecture · Distributed coordination</em>
+</p>
+
+<p><strong>Build interactive robots that can stay on task.</strong></p>
+
+<p>
+  An open-source <strong>Embodied Agent Harness</strong> for real robots:<br />
+  a slow system maintains goals and interaction, while a fast system executes
+  bounded skills, observes the world, and controls the robot.
+</p>
+
+<p>
+  <a href="#why">Why Hey Robot</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="#quick-start">Quick Start</a> ·
+  <a href="#status">Capability Status</a> ·
+  <a href="index.md">Docs</a> ·
+  <a href="references/paper-draft.md">Paper Draft</a> ·
+  <a href="../README.md">简体中文</a>
+</p>
+
+<p>
+  <a href="../LICENSE"><img src="https://img.shields.io/badge/License-MIT-0b7285?style=flat-square" alt="MIT License" /></a>
+  <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.12" />
+  <img src="https://img.shields.io/badge/Harness-Embodied_Agent-6f42c1?style=flat-square" alt="Embodied Agent Harness" />
+  <img src="https://img.shields.io/badge/Embodiment-XLeRobot-f59f00?style=flat-square" alt="XLeRobot" />
+</p>
+
 </div>
 
-Hey Robot is an **Embodied Agent Harness** built for real robots without relying
-on a general-purpose LLM agent framework.
+<br />
 
-It combines an asynchronous fast/slow system with a layered architecture.
-The Agent Loop drives model reasoning and tool use. Skills selected by the
-deployment are projected as individual model tools, while typed proposals enter
-execution through one `SkillClient` boundary.
-Skills are intended to be driven primarily by embodied models such as VLA and VLN,
-then applied to simulation or real hardware through the Robot Runtime.
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <h3>💬 Continuous interaction</h3>
+      <p>Ask, correct, pause, resume, cancel, or emergency-stop while physical work is in progress.</p>
+    </td>
+    <td width="33%" valign="top">
+      <h3>🧭 Long-horizon tasks</h3>
+      <p>Persist goals, steps, runs, and recovery points; resume reasoning from terminal skill events.</p>
+    </td>
+    <td width="33%" valign="top">
+      <h3>🧩 Agent harness</h3>
+      <p>Keep cognition, capabilities, models, safety, robot drivers, observations, and operations replaceable and auditable.</p>
+    </td>
+  </tr>
+</table>
 
-[XLeRobot](https://github.com/Vector-Wangel/XLeRobot) is the current primary
-embodiment, with MuJoCo simulation and real-hardware deployment.
+<blockquote>
+  <strong>Status:</strong> the harness, MuJoCo path, XLeRobot drivers, interaction
+  channels, and durable task machinery are under active development. VLA/VLN and
+  complex real-robot long-horizon tasks remain experimental.
+</blockquote>
 
-> **Status:** active development. VLA/VLN capabilities are experimental.
-> Validate all robot motion in simulation before using real hardware.
+<h2 id="why">Why Hey Robot</h2>
 
-## Features
+<p>
+A conventional LLM tool loop can choose the next call, but real robots add state
+that prompts do not solve: observations become stale, hardware stays busy, actions
+are costly to undo, users revise requests mid-execution, and processes may restart
+before a physical task is complete.
+</p>
 
-- Agent Loop reasoning that invokes tools as needed and replans from their results.
-- Skill schemas projected as model tools and executed through one typed SkillClient boundary.
-- Perception and execution feedback from cameras and robot state.
-- MuJoCo simulation and XLeRobot real-hardware deployment.
-- Web, CLI, voice, and Feishu interaction channels.
-- Task tracking, execution history, recovery, and a Tasks UI.
-- Embodied-model-driven skills, with VLA/VLN as the primary direction.
+<table>
+  <thead>
+    <tr><th>Robotics problem</th><th>Harness mechanism</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Work spans multiple model calls and actions</td><td>Durable tasks, step/run correlation, event-driven continuation, startup recovery</td></tr>
+    <tr><td>Users interact during execution</td><td>Unified sessions plus pause, resume, cancel, and emergency-stop controls</td></tr>
+    <tr><td>Models can propose infeasible actions</td><td>Explicit skill surface, validation, resource exclusion, timeouts, and readiness gates</td></tr>
+    <tr><td>Models, simulation, and hardware evolve separately</td><td>Agent, Skill, ModelService, Robot Runtime, and Driver boundaries</td></tr>
+    <tr><td>A successful call is not task completion</td><td>Skill lifecycle, robot status/observation, task timeline, and recovery context</td></tr>
+  </tbody>
+</table>
 
-## Architecture
+<h2 id="long-horizon">Interactive long-horizon tasks</h2>
 
-The fast/slow system describes two decision levels:
+<p>
+Hey Robot represents a long-horizon objective as durable state rather than an
+ever-growing chat transcript. Each session has at most one non-terminal task,
+with persisted steps, skill runs, results, pause state, and resume position.
+</p>
 
-- **Slow system:** language understanding, task planning, memory, and recovery.
-- **Fast system:** perception, local decisions, safety checks, and execution.
-
-```mermaid
-flowchart TD
-    U[User] --> A[Agent Loop<br/>Reasoning · Tools]
-    A -->|Typed Skill Proposal| S[Local Skill Layer<br/>Capabilities · Resources · Lifecycle]
-    S -->|Model Request| F[Foundation Model<br/>VLA · VLN]
-    F -->|Decision Result| S
-    S -->|Guarded Execution| R[Robot Runtime<br/>MuJoCo · Real Robot]
-    R -.Execution Feedback.-> A
+```text
+user objective
+  → reason and select a visible tool / skill
+  → execute the skill asynchronously
+  → persist its terminal result
+  → wake the agent from the terminal event
+  → continue, pause for the user, cancel, fail, or complete
 ```
 
-See [System Architecture](architecture/system-architecture.md) for details.
-The Agent, Skill Worker, and Robot Runtime currently run in one main process;
-VLA/VLN ModelServices can be deployed independently over gRPC.
+<h2 id="architecture">Embodied Agent Harness: fast and slow</h2>
 
-## Quick Start
+<p>
+Fast and slow describe decision horizons, not hard real-time guarantees.
+The slow system owns semantic continuity; the fast system turns one bounded
+capability into guarded model, simulation, or hardware execution.
+</p>
 
-### Requirements
+<table>
+  <thead>
+    <tr><th></th><th>Slow · deliberative</th><th>Fast · embodied execution</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Horizon</strong></td><td>Across turns, skills, and service restarts</td><td>One bounded skill and its local control process</td></tr>
+    <tr><td><strong>Responsibilities</strong></td><td>Goals, tool choice, task progress, pause, recovery</td><td>Perception, admission, local model inference, safety, robot execution</td></tr>
+    <tr><td><strong>Implementation</strong></td><td><code>Agent</code>, <code>AgentRunner</code>, <code>AgentTaskStore</code>, <code>TaskCoordinator</code></td><td><code>SkillWorker</code>, VLA/VLN options, <code>RobotRuntime</code>, drivers</td></tr>
+  </tbody>
+</table>
 
-- Ubuntu / Linux
-- Python 3.12
-- [uv](https://docs.astral.sh/uv/)
-- NATS server or Docker only when using `deployment.bus.type: nats`
-- An available LLM API
+<p align="center">
+  <img src="images/architecture.png"
+       alt="Hey Robot Embodied Agent Harness architecture"
+       width="100%" />
+</p>
 
-> Ubuntu is the recommended platform. The main harness, native robot, and MuJoCo
-> paths have Windows profiles; VLA/VLN, RoboCasa365, and CUDA model environments
-> primarily target Linux x86_64 and require separate validation.
+<p align="center">
+  <sub>Interaction continues while a Skill runs; terminal events resume the slow system at a safe boundary, while physical actions follow one execution path.</sub>
+</p>
 
-### Install
+<p>
+The default deployment composes the Agent, Skill Worker, and Robot Runtime in one
+asyncio process. VLA/VLN ModelServices can run independently over gRPC. See the
+<a href="architecture/system-architecture.md">system architecture</a> and
+<a href="references/paper-draft.md">paper draft</a>.
+</p>
+
+<h2 id="status">Capability status</h2>
+
+<table>
+  <thead>
+    <tr><th>Capability</th><th>Status</th><th>Boundary</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Web / CLI / Voice / Feishu</td><td>Implemented</td><td>Shared Gateway, identity, and episode model</td></tr>
+    <tr><td>Durable long-horizon tasks</td><td>Implemented</td><td>SQLite task/step state, continuation, pause/resume, startup recovery</td></tr>
+    <tr><td>Skill harness</td><td>Implemented</td><td>Explicit tools, validation, resources, timeout, cancellation, events, run store</td></tr>
+    <tr><td>Mock / MuJoCo / real drivers</td><td>Integrated</td><td>Real robots still require per-machine calibration and diagnosis</td></tr>
+    <tr><td>VLA / VLN ModelService</td><td>Experimental</td><td>Contract and profiles exist; checkpoints and closed loops need validation</td></tr>
+    <tr><td>Open-world real-robot tasks</td><td>Research target</td><td>Not a capability claim of the current release</td></tr>
+  </tbody>
+</table>
+
+<h2 id="quick-start">Quick start</h2>
+
+<p>
+Recommended: Ubuntu/Linux, Python 3.12, and
+<a href="https://docs.astral.sh/uv/">uv</a>. The default simulation profile uses
+an in-process bus and does not require NATS.
+</p>
 
 ```bash
 git clone https://github.com/Xbotics-Embodied-AI-club/Xbotics-Hey-Robot.git
@@ -73,45 +174,30 @@ cd Xbotics-Hey-Robot
 
 uv sync --group dev --group sim
 cp .env.example .env
-```
 
-The default simulation profile uses:
-
-```text
-DEEPSEEK_MODEL
-DEEPSEEK_API_KEY
-DEEPSEEK_BASE_URL
-DASHSCOPE_MODEL
-DASHSCOPE_API_KEY
-DASHSCOPE_BASE_URL
-```
-
-See the repository-owned [Configuration Reference](reference/configuration.md)
-for core fields and environment variables, and the [Documentation Index](index.md)
-for channel, simulation, and real-hardware guides.
-
-### Run MuJoCo Simulation
-
-The default Ubuntu simulation profile uses an in-process bus and enables only
-the Web channel. It does not require NATS, voice, or Feishu credentials:
-
-```bash
 uv run hey-robot inspect --config configs/xlerobot.sim.ubuntu.yaml
 uv run hey-robot run --config configs/xlerobot.sim.ubuntu.yaml
 ```
 
-Open:
+<table>
+  <tr><td><strong>Chat</strong></td><td><a href="http://127.0.0.1:8080/chat"><code>http://127.0.0.1:8080/chat</code></a></td></tr>
+  <tr><td><strong>Tasks</strong></td><td><a href="http://127.0.0.1:8080/tasks"><code>http://127.0.0.1:8080/tasks</code></a></td></tr>
+</table>
 
-- Chat: <http://127.0.0.1:8080/chat>
-- Tasks: <http://127.0.0.1:8080/tasks>
+<p>
+See the <a href="reference/configuration.md">configuration reference</a> for model
+credentials and profile fields.
+</p>
 
-Real-hardware, Windows simulation, and VLA/VLN experiment profiles may use
-NATS. Read the [simulation guide](operations/xlerobot-sim.md) before using those
-profiles, then run `nats-server` or `docker compose up -d nats` when required.
+<h2 id="real-robot">XLeRobot hardware</h2>
 
-## XLeRobot Real Hardware
-
-Check the platform, deployment, and hardware mapping first:
+<p>
+XLeRobot is the primary real-robot embodiment currently supported by Hey Robot.
+The default hardware profile exposes <code>inspect_scene</code>,
+<code>move_base</code>, and <code>turn_base</code>. Arm control, manipulation
+policies, and VLA closed loops require explicit enablement and per-robot
+validation.
+</p>
 
 ```bash
 uv run python scripts/ops/check_platform.py \
@@ -124,34 +210,22 @@ uv run python scripts/robots/xlerobot/diagnose.py \
   --config configs/xlerobot.real.ubuntu.yaml
 ```
 
-After verifying serial ports, servos, cameras, and battery state:
+<p>
+Read the <a href="operations/xlerobot-real.md">real-hardware guide</a> before
+starting the harness on a physical robot.
+</p>
 
-```bash
-uv run hey-robot run --config configs/xlerobot.real.ubuntu.yaml
-```
+<h2 id="safety">Safety</h2>
 
-See [XLeRobot Real Deployment](operations/xlerobot-real.md) for the complete
-procedure.
+<ul>
+  <li>Validate motion in Mock or MuJoCo before using real hardware.</li>
+  <li>Keep a physical emergency stop or power cutoff available.</li>
+  <li>Do not test motion near people, pets, fragile objects, or unstable mechanics.</li>
+  <li>Re-run diagnostics after changing ports, servo IDs, cameras, calibration, or structure.</li>
+  <li>Validate VLA/VLN with the target checkpoint, embodiment, and real observation path.</li>
+</ul>
 
-## VLA / VLN
-
-VLA and VLN are integrated as independent model services for manipulation and
-vision-language navigation. Their code and experimental profile are included,
-but model weights, GPU setup, and the complete execution loop require separate
-deployment validation.
-
-See `configs/xlerobot.sim.vla_vln.yaml` and the
-[ModelService RPC documentation](architecture/model-service-rpc-proto.md).
-
-## Safety
-
-- Validate motion in MuJoCo before using real hardware.
-- Keep an emergency stop or power cutoff available.
-- Do not test motion near people, pets, fragile objects, or unsafe environments.
-- Re-run diagnostics after changing serial ports, servo IDs, cameras, or mechanics.
-- Validate VLA/VLN separately before allowing real-robot motion.
-
-## Development
+<h2 id="development">Development</h2>
 
 ```bash
 uv run poe style
@@ -159,33 +233,14 @@ uv run poe lint
 uv run poe test
 ```
 
-Main directories:
+<p>
+Start with the <a href="index.md">documentation index</a>,
+<a href="../CONTRIBUTING.md">contribution guide</a>, and
+<a href="development/skill-extension.md">skill extension guide</a>.
+</p>
 
-```text
-src/        core system
-configs/    simulation and real-hardware profiles
-frontend/   Web interface
-docs/       architecture, operations, and development guides
-scripts/    diagnostics, model downloads, and maintenance
-tests/      unit and integration tests
-```
-
-Read the [Contribution Guide](../CONTRIBUTING.md) and
-[Skill Extension Guide](development/skill-extension.md) before contributing.
-
-## Documentation
-
-| Topic | Document |
-|---|---|
-| Documentation entry point | [Index and sources of truth](index.md) |
-| Configuration | [Configuration Reference](reference/configuration.md) |
-| Architecture | [System Architecture](architecture/system-architecture.md) |
-| MuJoCo simulation | [XLeRobot Simulation](operations/xlerobot-sim.md) |
-| Real hardware | [XLeRobot Real Deployment](operations/xlerobot-real.md) |
-| RoboCasa365 evaluation | [Evaluation Runbook (Chinese)](evaluation/robocasa365/runbook.zh-CN.md) |
-| Extensions | [Skill Extension Guide](development/skill-extension.md) |
-| Documentation audit | [2026-07-25 audit (Chinese)](maintenance/documentation-audit-2026-07-25.zh-CN.md) |
-
-## License
-
-MIT License. See [LICENSE](../LICENSE).
+<p align="center">
+  <a href="https://github.com/Vector-Wangel/XLeRobot">XLeRobot</a> ·
+  <a href="references/project-references.md">Project references</a> ·
+  <a href="../LICENSE">MIT License</a>
+</p>

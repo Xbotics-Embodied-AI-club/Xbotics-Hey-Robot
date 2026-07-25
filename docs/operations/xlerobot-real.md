@@ -2,6 +2,12 @@
 
 XLeRobot 是 Hey Robot 的组合式真实机器人 embodiment：
 
+<p align="center">
+  <img src="../images/xlerobot.png"
+       alt="Hey Robot running on a physical XLeRobot"
+       width="300" />
+</p>
+
 - **SO101**：六自由度机械臂 + 夹爪（Feetech 舵机 ID 1-6）
 - **LeKiwi**：三轮全向移动底盘（Feetech 舵机 ID 7-9）
 - **OpenCVCamera**：Ubuntu/S600 默认双路（front + wrist），Windows 默认一路 front

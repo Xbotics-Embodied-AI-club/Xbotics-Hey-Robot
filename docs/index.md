@@ -27,17 +27,19 @@
 ## 架构与扩展
 
 - [系统架构](architecture/system-architecture.md)：当前运行拓扑和边界，架构事实主文档；
+- [论文草稿](references/paper-draft.md)：研究动机、系统主张、局限与待执行实验，不是能力事实源；
 - [部署模式边界](architecture/deployment-modes.zh-CN.md)：`in_memory`、NATS 与 sidecar；
 - [ModelService 协议](architecture/model-service-rpc-proto.md)：proto、gRPC 和 codegen；
 - [Skill 扩展指南](development/skill-extension.md)：新增或修改 Skill；
 - [质量门禁](overview/quality-gates.md)：合并前检查；
 - [贡献指南](../CONTRIBUTING.md)：开发与 PR 约定。
 
-## 历史与非规范性材料
+## 研究与非规范性材料
 
 带日期的维护审计用于解释某次提交的状态，不应用来生成部署配置或判断当前 API。历史重构
-记录、过时论文草稿和许可不明的第三方论文转录不保留在当前工作树中；需要追溯时使用 Git
-历史和上游论文链接。
+记录应通过 Git 历史追溯。项目自己的 [论文草稿](references/paper-draft.md) 随当前代码维护，
+但研究假设和计划实验不构成已交付能力。`docs/references/` 中的第三方论文转录是非规范性
+研究材料，必须逐份确认来源与再分发许可；根目录 MIT License 不自动覆盖这些内容。
 
 当前代码事实与历史文档冲突时，优先级为：
 
