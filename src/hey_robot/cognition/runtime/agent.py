@@ -204,6 +204,7 @@ class Agent:
         *,
         on_text_delta: TextDeltaCallback | None,
     ) -> AgentRunResult:
+        del on_text_delta
         model_turns = 0
         while True:
             active_task = self._tasks.active_task(self.session_key)
@@ -218,22 +219,17 @@ class Agent:
             if model_turns >= MAX_MODEL_TURNS_PER_WAKEUP:
                 if active_task is None:
                     return AgentRunResult(
-                        "responded", "普通工具调用已达到单轮上限，请继续下一轮。"
+                        "failed", "模型没有按结构化回复协议完成这次请求。"
                     )
                 text = "任务已暂停：单次唤醒达到模型轮次上限，请确认后继续。"
                 self._tasks.pause_task(active_task.task_id, text)
                 return AgentRunResult("blocked", text)
             deadline = _next_decision_deadline(active_task)
 
-            async def publish_delta(delta: str) -> None:
-                if on_text_delta is not None:
-                    await on_text_delta(delta)
-
             decision = await self._runner.run(
                 AgentTurnRequest(
                     tuple(messages), self._tools.names, deadline, interaction_id
                 ),
-                on_text_delta=publish_delta if active_task is None else None,
             )
             model_turns += 1
             if decision.status == "failed":
@@ -243,10 +239,19 @@ class Agent:
                 return AgentRunResult("failed", f"这次请求没有完成：{detail}")
             if decision.status == "returned":
                 text = decision.final_text or ""
-                if active_task is not None:
-                    self._tasks.close_task(active_task.task_id, recap=text)
-                    return AgentRunResult("completed", text, active_task.task_id)
-                return AgentRunResult("responded", text)
+                messages.extend(
+                    (
+                        ModelMessage(role="assistant", content=text),
+                        ModelMessage(
+                            role="user",
+                            content=(
+                                "普通文本不是有效的 Agent 响应。请使用当前 function "
+                                "schema 暴露的结构化响应能力。"
+                            ),
+                        ),
+                    )
+                )
+                continue
             proposal = decision.proposal
             if proposal is None or not decision.tool_calls:
                 return AgentRunResult("failed", "工具没有产生有效调用。")
@@ -275,17 +280,29 @@ class Agent:
                     "已提交机器人操作，正在等待执行结果。",
                     execution.outcome.operation_id,
                 )
+            if execution.directive == "respond":
+                return AgentRunResult(
+                    "responded",
+                    execution.final_text
+                    or execution.outcome.user_summary
+                    or "任务仍在进行中。",
+                    execution.task.task_id if execution.task is not None else None,
+                )
             if execution.directive == "finish":
                 task = execution.task
-                result_status: Literal["completed", "blocked", "cancelled"] = (
-                    "completed"
-                )
+                result_status: Literal[
+                    "completed", "blocked", "cancelled", "failed"
+                ] = "completed"
                 if task is not None:
                     current = self._tasks.task(task.task_id)
-                    if current is not None and current.status != "completed":
-                        result_status = (
-                            "blocked" if current.status == "blocked" else "cancelled"
-                        )
+                    if current is not None and current.status in {
+                        "blocked",
+                        "cancelled",
+                        "failed",
+                    }:
+                        result_status = current.status
+                elif execution.outcome.status == "failed":
+                    result_status = "failed"
                 return AgentRunResult(
                     result_status,
                     execution.final_text

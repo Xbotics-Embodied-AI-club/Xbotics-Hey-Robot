@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from hey_robot.config import DeploymentConfig
-from hey_robot.protocol import Envelope, RobotObservation
+from hey_robot.protocol import ArtifactRef, Envelope, ImageRef, RobotObservation
 from hey_robot.robot_api import RobotActionResult
 from hey_robot.skills import (
     ResourceManager,
@@ -14,6 +14,7 @@ from hey_robot.skills import (
     load_skill_registry,
     registry_from_config,
 )
+from hey_robot.skills.builtins.common import result_to_skill
 from hey_robot.skills.builtins.tabletop import pick_skill, place_skill
 
 
@@ -79,6 +80,30 @@ class Models:
             }
         )
         return ModelInferenceResult(True, "policy action", data=self.data)
+
+
+def test_robot_action_result_preserves_post_action_observation_refs() -> None:
+    observation = RobotObservation(
+        Envelope(robot_id="sim_robot"),
+        frame_id=12,
+        images=(ImageRef("media://front.jpg", camera="front"),),
+        artifacts=(ArtifactRef("media://state.json", "robot_state"),),
+    )
+
+    result = result_to_skill(
+        RobotActionResult(
+            True,
+            "observed",
+            frame_id=12,
+            observation=observation,
+        )
+    )
+    outcome = result.to_tool_outcome(operation_id="run-1")
+
+    assert result.observations == observation.images
+    assert result.artifacts == observation.artifacts
+    assert outcome.data["observations"][0]["uri"] == "media://front.jpg"
+    assert outcome.data["artifacts"][0]["uri"] == "media://state.json"
 
 
 class SequencedModels(Models):

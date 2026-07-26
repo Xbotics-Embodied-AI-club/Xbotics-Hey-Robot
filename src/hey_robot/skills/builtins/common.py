@@ -30,5 +30,14 @@ def result_to_skill(result: RobotActionResult) -> SkillResult:
         status="completed" if result.success else "failed",
         failure_mode=result.failure_mode,
         error=result.error,
+        observation_error=result.observation_error,
         data={**dict(result.data), "frame_id": result.frame_id},
+        observations=(
+            tuple(result.observation.images) if result.observation is not None else ()
+        ),
+        artifacts=(
+            tuple(result.observation.artifacts)
+            if result.observation is not None
+            else ()
+        ),
     )

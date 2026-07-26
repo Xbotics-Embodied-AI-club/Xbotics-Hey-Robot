@@ -116,12 +116,10 @@ def build_local_runtime_components(
         create_bus_client(config.deployment.bus, role="skill_controller")
     )
     projection_health = ProjectionHealthStore(
-        Path(config.resources.runtime_dir)
-        / config.deployment.id
-        / "skill_projection_health.json"
+        Path(config.resources.runtime_dir) / "skill_projection_health.json"
     )
     run_store = FileRunStore(
-        Path(config.resources.runtime_dir) / config.deployment.id / "runs",
+        Path(config.resources.runtime_dir) / "runs",
         artifact_store=LocalMediaStore(
             config.resources.media_root,
             max_items=config.resources.media_max_items,

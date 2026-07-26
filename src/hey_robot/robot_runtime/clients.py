@@ -124,6 +124,19 @@ class LocalRobotClient:
             or status.error
             or f"{action} completed"
         )
+        observation: RobotObservation | None = None
+        observation_error: str | None = None
+        try:
+            candidate = await runtime.observe()
+            if candidate.frame_id >= status.frame_id:
+                observation = candidate
+            else:
+                observation_error = (
+                    "stale post-action observation: "
+                    f"frame={candidate.frame_id} status_frame={status.frame_id}"
+                )
+        except Exception as exc:
+            observation_error = str(exc)
         return RobotActionResult(
             success,
             summary,
@@ -134,6 +147,8 @@ class LocalRobotClient:
             error=status.error,
             frame_id=status.frame_id,
             data=data,
+            observation=observation,
+            observation_error=observation_error,
         )
 
     async def stop(self, robot_id: str, *, reason: str) -> None:

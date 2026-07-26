@@ -34,6 +34,7 @@ class SkillResult:
     artifacts: tuple[ArtifactRef, ...] = ()
     failure_mode: str | None = None
     error: str | None = None
+    observation_error: str | None = None
 
     def to_tool_outcome(self, *, operation_id: str) -> ToolOutcome:
         """Project one physical terminal result onto the Agent Tool boundary."""
@@ -51,8 +52,17 @@ class SkillResult:
                     }
                     for artifact in self.artifacts
                 ],
+                "observations": [
+                    {
+                        "uri": observation.uri,
+                        "camera": observation.camera,
+                        "timestamp": observation.timestamp,
+                    }
+                    for observation in self.observations
+                ],
                 "failure_mode": self.failure_mode,
                 "error": self.error,
+                "observation_error": self.observation_error,
             },
             operation_id=operation_id,
             retryable=self.failure_mode in {"timeout", "unavailable"},

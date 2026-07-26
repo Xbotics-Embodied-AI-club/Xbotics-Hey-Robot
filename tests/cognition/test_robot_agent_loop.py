@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from contextlib import suppress
 from types import SimpleNamespace
 from typing import Any
@@ -18,7 +19,11 @@ from hey_robot.cognition.runtime.agent_task_store import AgentTaskStore
 from hey_robot.cognition.runtime.conversation_store import ConversationStore
 from hey_robot.cognition.runtime.task_coordinator import TaskCoordinator
 from hey_robot.cognition.tools.executor import AgentToolExecutor, ToolExecution
-from hey_robot.cognition.tools.models import HarnessToolCall, PhysicalToolCall
+from hey_robot.cognition.tools.models import (
+    AgentResponseCall,
+    HarnessToolCall,
+    PhysicalToolCall,
+)
 from hey_robot.protocol import AgentControl, Envelope, ToolOutcome
 from hey_robot.skills.models import SkillEvent, SkillResult
 
@@ -63,11 +68,24 @@ class _SteerRunner:
             except asyncio.CancelledError:
                 self.cancelled = True
                 raise
-        return AgentTurnResult("returned", "adjusted", "model_returned")
+        proposal = AgentResponseCall("none", "adjusted")
+        return AgentTurnResult(
+            "action_proposed",
+            None,
+            "stop_slice",
+            (
+                AgentToolCallRecord(
+                    "respond-steer",
+                    "respond",
+                    {"task_state": "none", "message": "adjusted"},
+                ),
+            ),
+            proposal,
+        )
 
 
 class _Tools:
-    names = frozenset({"inspect_scene", "move_base"})
+    names = frozenset({"inspect_scene", "move_base", "respond"})
 
 
 class _Templates:
@@ -124,7 +142,7 @@ class _InlineExecutor:
         self.tasks = tasks
         self.executions = iter(executions)
 
-    async def execute(self, **_kwargs):
+    async def execute(self, **kwargs):
         execution = next(self.executions)
         if isinstance(execution.proposal, PhysicalToolCall):
             task = self.tasks.active_task("session-1")
@@ -140,6 +158,22 @@ class _InlineExecutor:
                 )
                 return dataclass_replace(execution, step=step, task=task)
             return dataclass_replace(execution, task=task)
+        if isinstance(execution.proposal, AgentResponseCall):
+            task = self.tasks.active_task(kwargs["session_key"])
+            if execution.proposal.task_state == "wait":
+                if task is None:
+                    task = self.tasks.create_task(
+                        session_key=kwargs["session_key"],
+                        envelope=kwargs["envelope"],
+                        objective=kwargs["objective"],
+                    )
+                return dataclass_replace(execution, task=task)
+            if task is not None and execution.proposal.task_state in {
+                "complete",
+                "cancel",
+            }:
+                self.tasks.close_task(task.task_id, recap=execution.proposal.message)
+                return dataclass_replace(execution, task=self.tasks.task(task.task_id))
         return execution
 
 
@@ -169,14 +203,72 @@ def _agent(
 
 
 def _decision(call_id: str, proposal) -> AgentTurnResult:
-    name = proposal.name
+    if isinstance(proposal, AgentResponseCall):
+        name = "respond"
+        arguments = {
+            "task_state": proposal.task_state,
+            "message": proposal.message,
+        }
+    else:
+        name = proposal.name
+        arguments = dict(getattr(proposal, "arguments", {}))
     return AgentTurnResult(
         "action_proposed",
         None,
         "stop_slice",
-        (AgentToolCallRecord(call_id, name, dict(getattr(proposal, "arguments", {}))),),
+        (AgentToolCallRecord(call_id, name, arguments),),
         proposal,
     )
+
+
+def test_task_store_persists_one_canonical_envelope(tmp_path) -> None:
+    path = tmp_path / "tasks.sqlite3"
+    store = AgentTaskStore(path)
+    envelope = Envelope(
+        trace_id="trace-1",
+        account_id="account-1",
+        chat_type="group",
+        deployment_id="deployment-1",
+        robot_id="sim_robot",
+    )
+    task = store.create_task(
+        session_key="session-1",
+        envelope=envelope,
+        objective="inspect",
+    )
+    assert store.task_envelope(task.task_id) == envelope
+    store.close()
+
+    db = sqlite3.connect(path)
+    columns = {str(row[1]) for row in db.execute("PRAGMA table_info(sustained_tasks)")}
+    tables = {
+        str(row[0])
+        for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    db.close()
+
+    assert "envelope_json" in columns
+    assert not {
+        "robot_id",
+        "channel",
+        "chat_id",
+        "sender_id",
+        "user_id",
+        "agent_id",
+        "episode_id",
+    }.intersection(columns)
+    assert "task_envelopes" not in tables
+
+
+def test_task_store_rejects_unversioned_runtime_instead_of_migrating(tmp_path) -> None:
+    path = tmp_path / "tasks.sqlite3"
+    db = sqlite3.connect(path)
+    db.execute("CREATE TABLE sustained_tasks (task_id TEXT PRIMARY KEY)")
+    db.commit()
+    db.close()
+
+    with pytest.raises(RuntimeError, match="archive or reset"):
+        AgentTaskStore(path)
 
 
 @pytest.mark.asyncio
@@ -203,16 +295,24 @@ async def test_agent_returns_waiting_after_physical_submit(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_continues_from_tool_outcome_until_complete(tmp_path) -> None:
+async def test_plain_text_after_tool_outcome_keeps_task_active(tmp_path) -> None:
     observe = PhysicalToolCall("inspect_scene", {})
+    response = AgentResponseCall("none", "done")
     runner = _Runner(
         [
             _decision("observe-1", observe),
             AgentTurnResult("returned", "done", "model_returned"),
+            _decision("respond-1", response),
         ]
     )
     executions = [
         ToolExecution("continue", ToolOutcome("completed", "seen"), observe),
+        ToolExecution(
+            "respond",
+            ToolOutcome("completed", "done"),
+            response,
+            final_text="done",
+        ),
     ]
     agent, tasks, conversations = _agent(tmp_path, runner, executions)
 
@@ -220,10 +320,16 @@ async def test_agent_continues_from_tool_outcome_until_complete(tmp_path) -> Non
         AgentCommand("session-1", "turn-1", Envelope(robot_id="sim_robot"), "inspect")
     )
 
-    assert result.status == "completed"
+    assert result.status == "responded"
     assert result.text == "done"
-    assert len(runner.requests) == 2
+    assert len(runner.requests) == 3
     assert runner.requests[1].messages[-1].role == "tool"
+    assert (
+        runner.requests[2]
+        .messages[-1]
+        .content.startswith("普通文本不是有效的 Agent 响应")
+    )
+    assert tasks.active_task("session-1") is not None
     conversations.close()
     tasks.close()
 
@@ -267,7 +373,19 @@ async def test_steer_during_skill_waits_for_safe_point(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_steer_during_inference_rebuilds_context(tmp_path) -> None:
     runner = _SteerRunner()
-    agent, tasks, conversations = _agent(tmp_path, runner, [])  # type: ignore[arg-type]
+    response = AgentResponseCall("none", "adjusted")
+    agent, tasks, conversations = _agent(  # type: ignore[arg-type]
+        tmp_path,
+        runner,
+        [
+            ToolExecution(
+                "respond",
+                ToolOutcome("completed", "adjusted"),
+                response,
+                final_text="adjusted",
+            )
+        ],
+    )
     first = asyncio.create_task(
         agent.prompt(
             AgentCommand(
@@ -299,10 +417,22 @@ async def test_steer_during_inference_rebuilds_context(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_active_task_does_not_prevent_natural_text_stop(tmp_path) -> None:
+async def test_plain_text_does_not_implicitly_complete_active_task(tmp_path) -> None:
     returned = AgentTurnResult("returned", "still working", "model_returned")
-    runner = _Runner([returned])
-    agent, tasks, conversations = _agent(tmp_path, runner, [])
+    response = AgentResponseCall("none", "still working")
+    runner = _Runner([returned, _decision("respond-1", response)])
+    agent, tasks, conversations = _agent(
+        tmp_path,
+        runner,
+        [
+            ToolExecution(
+                "respond",
+                ToolOutcome("completed", "still working"),
+                response,
+                final_text="still working",
+            )
+        ],
+    )
     task = tasks.create_task(
         session_key="session-1",
         envelope=Envelope(robot_id="sim_robot"),
@@ -318,10 +448,124 @@ async def test_active_task_does_not_prevent_natural_text_stop(tmp_path) -> None:
         )
     )
 
-    assert result.status == "completed"
+    assert result.status == "responded"
     assert result.text == "still working"
-    assert len(runner.requests) == 1
-    assert tasks.task(task.task_id).status == "completed"  # type: ignore[union-attr]
+    assert len(runner.requests) == 2
+    assert tasks.task(task.task_id).status == "active"  # type: ignore[union-attr]
+    conversations.close()
+    tasks.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_terminal_response_is_not_reported_as_completed(tmp_path) -> None:
+    response = AgentResponseCall("complete", "done")
+    runner = _Runner([_decision("respond-1", response)])
+    execution = ToolExecution(
+        "finish",
+        ToolOutcome(
+            "failed",
+            "无法完成任务：当前没有进行中的持续任务。",
+            {"failure_mode": "task_not_active"},
+        ),
+        response,
+        final_text="无法完成任务：当前没有进行中的持续任务。",
+    )
+    agent, tasks, conversations = _agent(tmp_path, runner, [execution])
+
+    result = await agent.prompt(
+        AgentCommand(
+            "session-1",
+            "turn-1",
+            Envelope(robot_id="sim_robot"),
+            "done",
+        )
+    )
+
+    assert result.status == "failed"
+    conversations.close()
+    tasks.close()
+
+
+@pytest.mark.asyncio
+async def test_explicit_task_lifecycle_preserves_confirmed_goal_and_step_facts(
+    tmp_path,
+) -> None:
+    wait_for_confirmation = AgentResponseCall("wait", "要开始吗？")
+    move = PhysicalToolCall("move_base", {"direction": "forward", "distance_cm": 50})
+    wait_for_more = AgentResponseCall("wait", "已完成两步，要继续吗？")
+    complete = AgentResponseCall("complete", "目标已完成。")
+    runner = _Runner(
+        [
+            _decision("task-wait-1", wait_for_confirmation),
+            _decision("move-1", move),
+            _decision("move-2", move),
+            _decision("task-wait-2", wait_for_more),
+            _decision("task-complete", complete),
+        ]
+    )
+    executions = [
+        ToolExecution(
+            "respond",
+            ToolOutcome("completed", wait_for_confirmation.message),
+            wait_for_confirmation,
+            final_text=wait_for_confirmation.message,
+        ),
+        ToolExecution("continue", ToolOutcome("completed", "moved 50cm"), move),
+        ToolExecution("continue", ToolOutcome("completed", "moved 50cm"), move),
+        ToolExecution(
+            "respond",
+            ToolOutcome("completed", wait_for_more.message),
+            wait_for_more,
+            final_text=wait_for_more.message,
+        ),
+        ToolExecution(
+            "finish",
+            ToolOutcome("completed", complete.message),
+            complete,
+            final_text=complete.message,
+        ),
+    ]
+    agent, tasks, conversations = _agent(tmp_path, runner, executions)
+
+    confirmation = await agent.prompt(
+        AgentCommand(
+            "session-1",
+            "turn-1",
+            Envelope(robot_id="sim_robot"),
+            "往前走1米",
+        )
+    )
+    progress = await agent.prompt(
+        AgentCommand(
+            "session-1",
+            "turn-2",
+            Envelope(robot_id="sim_robot"),
+            "好",
+        )
+    )
+    task = tasks.active_task("session-1")
+
+    assert confirmation.status == "responded"
+    assert progress.status == "responded"
+    assert task is not None
+    assert task.objective == "往前走1米"
+    assert task.step_count == 2
+    projection = tasks.projection("session-1")
+    assert "objective=往前走1米" in projection
+    assert "move_base×2" in projection
+
+    finished = await agent.prompt(
+        AgentCommand(
+            "session-1",
+            "turn-3",
+            Envelope(robot_id="sim_robot"),
+            "已经完成",
+        )
+    )
+
+    assert finished.status == "completed"
+    assert tasks.active_task("session-1") is None
+    assert tasks.projection("session-1") == "当前会话没有进行中的持续任务。"
     conversations.close()
     tasks.close()
 
@@ -353,6 +597,125 @@ async def test_tool_executor_creates_task_and_persists_original_proposal(
     assert execution.step is not None
     assert execution.step.proposal == proposal
     assert coordinator.proposals == [proposal]
+    tasks.close()
+
+
+@pytest.mark.asyncio
+async def test_tool_executor_applies_explicit_wait_and_complete_transitions(
+    tmp_path,
+) -> None:
+    tasks = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    executor = AgentToolExecutor(
+        _Config(),  # type: ignore[arg-type]
+        tasks,
+        _SubmittingCoordinator(tasks),  # type: ignore[arg-type]
+        _SkillClient(),  # type: ignore[arg-type]
+    )
+    envelope = Envelope(
+        trace_id="trace-original",
+        channel="web",
+        account_id="web-account",
+        chat_type="web",
+        deployment_id="deployment-1",
+        robot_id="sim_robot",
+    )
+
+    waiting = await executor.execute(
+        session_key="session-1",
+        envelope=envelope,
+        objective="move five metres",
+        proposal=AgentResponseCall("wait", "confirm?"),
+        tool_call_id="wait-1",
+    )
+    task = tasks.active_task("session-1")
+
+    assert waiting.directive == "respond"
+    assert task is not None
+    assert task.objective == "move five metres"
+    assert tasks.task_envelope(task.task_id) == envelope
+    tasks.add_step(
+        task.task_id,
+        PhysicalToolCall("move_base", {"distance_cm": 500}),
+        ToolOutcome("completed", "moved five metres"),
+    )
+
+    completed = await executor.execute(
+        session_key="session-1",
+        envelope=envelope,
+        objective="yes",
+        proposal=AgentResponseCall("complete", "done"),
+        tool_call_id="complete-1",
+    )
+
+    assert completed.directive == "finish"
+    assert tasks.task(task.task_id).status == "completed"  # type: ignore[union-attr]
+    tasks.close()
+
+
+@pytest.mark.asyncio
+async def test_tool_executor_rejects_completion_without_physical_evidence(
+    tmp_path,
+) -> None:
+    tasks = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    executor = AgentToolExecutor(
+        _Config(),  # type: ignore[arg-type]
+        tasks,
+        _SubmittingCoordinator(tasks),  # type: ignore[arg-type]
+        _SkillClient(),  # type: ignore[arg-type]
+    )
+    envelope = Envelope(robot_id="sim_robot")
+    await executor.execute(
+        session_key="session-1",
+        envelope=envelope,
+        objective="move",
+        proposal=AgentResponseCall("wait", "confirm?"),
+        tool_call_id="wait-1",
+    )
+
+    completion = await executor.execute(
+        session_key="session-1",
+        envelope=envelope,
+        objective="move",
+        proposal=AgentResponseCall("complete", "done"),
+        tool_call_id="complete-1",
+    )
+
+    assert completion.directive == "respond"
+    assert completion.outcome.data["failure_mode"] == "task_evidence_missing"
+    assert tasks.active_task("session-1") is not None
+    tasks.close()
+
+
+@pytest.mark.asyncio
+async def test_tool_executor_cancels_a_withdrawn_task(tmp_path) -> None:
+    tasks = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    executor = AgentToolExecutor(
+        _Config(),  # type: ignore[arg-type]
+        tasks,
+        _SubmittingCoordinator(tasks),  # type: ignore[arg-type]
+        _SkillClient(),  # type: ignore[arg-type]
+    )
+    envelope = Envelope(robot_id="sim_robot")
+    await executor.execute(
+        session_key="session-1",
+        envelope=envelope,
+        objective="move",
+        proposal=AgentResponseCall("wait", "confirm?"),
+        tool_call_id="wait-1",
+    )
+    task = tasks.active_task("session-1")
+    assert task is not None
+
+    cancelled = await executor.execute(
+        session_key="session-1",
+        envelope=envelope,
+        objective="never mind",
+        proposal=AgentResponseCall("cancel", "cancelled"),
+        tool_call_id="cancel-1",
+    )
+
+    assert cancelled.directive == "finish"
+    assert tasks.task(task.task_id).status == "cancelled"  # type: ignore[union-attr]
     tasks.close()
 
 

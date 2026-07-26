@@ -6,6 +6,12 @@ from hey_robot.config import DeploymentConfig
 from hey_robot.config.validation import validate_deployment
 
 
+def test_runtime_dir_is_the_final_deployment_root() -> None:
+    config = DeploymentConfig.from_dict({"deployment": {"id": "d1"}})
+
+    assert config.resources.runtime_dir == "runtime/d1"
+
+
 def test_deployment_config_resources_and_validation(tmp_path: Path) -> None:
     config = DeploymentConfig.from_dict(
         {

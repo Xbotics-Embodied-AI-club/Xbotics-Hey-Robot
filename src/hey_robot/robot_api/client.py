@@ -26,6 +26,8 @@ class RobotActionResult:
     error: str | None = None
     frame_id: int | None = None
     data: dict[str, Any] = field(default_factory=dict)
+    observation: RobotObservation | None = None
+    observation_error: str | None = None
 
 
 class RobotClient(Protocol):

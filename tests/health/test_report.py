@@ -56,7 +56,7 @@ def test_health_report_describes_skill_resource_readiness(tmp_path) -> None:
 
 def test_health_report_exposes_projection_failures_and_drops(tmp_path) -> None:
     config = _config(tmp_path)
-    path = tmp_path / "runtime" / config.deployment.id / "skill_projection_health.json"
+    path = tmp_path / "runtime" / "skill_projection_health.json"
     path.parent.mkdir(parents=True)
     path.write_text(
         json.dumps({"published": 8, "failed": 1, "dropped": 2, "queued": 0}),

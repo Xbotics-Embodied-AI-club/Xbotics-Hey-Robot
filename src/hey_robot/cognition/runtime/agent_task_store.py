@@ -12,34 +12,33 @@ from typing import Any, Literal
 
 from hey_robot.cognition.tools.models import PhysicalToolCall
 from hey_robot.protocol import Envelope, ToolOutcome
-from hey_robot.protocol.messages import to_payload
+from hey_robot.protocol.messages import from_payload, to_payload
 
 TaskStatus = Literal["active", "paused", "completed", "blocked", "cancelled", "failed"]
 StepStatus = Literal["pending", "running", "completed", "failed", "cancelled"]
 
 TERMINAL_STATUSES = frozenset({"completed", "blocked", "cancelled", "failed"})
+TASK_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
 class AgentTask:
     task_id: str
     session_key: str
-    robot_id: str
+    envelope: Envelope
     objective: str
     ui_summary: str
     status: TaskStatus
-    channel: str | None
-    chat_id: str | None
-    sender_id: str | None
-    user_id: str | None
-    agent_id: str | None
-    episode_id: str | None
     created_at: float
     updated_at: float
     step_count: int
     deadline_at: float | None
     last_error: str | None
     final_recap: str | None
+
+    @property
+    def robot_id(self) -> str:
+        return self.envelope.robot_id or ""
 
 
 @dataclass(frozen=True)
@@ -68,21 +67,25 @@ class AgentTaskStore:
     def __init__(self, path: str | Path) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(path)
+        existing = self._db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sustained_tasks'"
+        ).fetchone()
+        schema_version = int(self._db.execute("PRAGMA user_version").fetchone()[0])
+        if existing is not None and schema_version != TASK_SCHEMA_VERSION:
+            self._db.close()
+            raise RuntimeError(
+                "unsupported sustained-task runtime schema; archive or reset this "
+                "deployment runtime before starting the new harness"
+            )
         self._db.execute(
             """
             CREATE TABLE IF NOT EXISTS sustained_tasks (
                 task_id TEXT PRIMARY KEY,
                 session_key TEXT NOT NULL,
-                robot_id TEXT NOT NULL,
+                envelope_json TEXT NOT NULL,
                 objective TEXT NOT NULL,
                 ui_summary TEXT NOT NULL DEFAULT '',
                 status TEXT NOT NULL,
-                channel TEXT,
-                chat_id TEXT,
-                sender_id TEXT,
-                user_id TEXT,
-                agent_id TEXT,
-                episode_id TEXT,
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL,
                 step_count INTEGER NOT NULL DEFAULT 0,
@@ -107,8 +110,6 @@ class AgentTaskStore:
                 evidence_json TEXT NOT NULL,
                 run_id TEXT,
                 tool_call_id TEXT,
-                tool_name TEXT,
-                arguments_json TEXT,
                 status TEXT NOT NULL DEFAULT 'completed',
                 last_event_sequence INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY(task_id) REFERENCES sustained_tasks(task_id)
@@ -135,6 +136,7 @@ class AgentTaskStore:
             WHERE run_id IS NOT NULL
             """
         )
+        self._db.execute(f"PRAGMA user_version={TASK_SCHEMA_VERSION}")
         self._db.commit()
 
     def create_task(
@@ -156,25 +158,18 @@ class AgentTaskStore:
         self._db.execute(
             """
             INSERT INTO sustained_tasks (
-                task_id, session_key, robot_id, objective, ui_summary, status,
-                channel, chat_id, sender_id, user_id, agent_id, episode_id,
+                task_id, session_key, envelope_json, objective, ui_summary, status,
                 created_at, updated_at, step_count,
                 deadline_at, last_error, final_recap
             )
-            VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, NULL)
+            VALUES (?, ?, ?, ?, ?, 'active', ?, ?, 0, ?, NULL, NULL)
             """,
             (
                 task_id,
                 session_key,
-                robot_id,
+                json.dumps(to_payload(envelope), ensure_ascii=False, sort_keys=True),
                 objective,
                 ui_summary,
-                envelope.channel,
-                envelope.chat_id,
-                envelope.sender_id,
-                envelope.user_id,
-                envelope.agent_id,
-                envelope.episode_id,
                 now,
                 now,
                 deadline_at,
@@ -189,8 +184,7 @@ class AgentTaskStore:
     def active_task(self, session_key: str) -> AgentTask | None:
         row = self._db.execute(
             """
-            SELECT task_id, session_key, robot_id, objective, ui_summary, status,
-                   channel, chat_id, sender_id, user_id, agent_id, episode_id,
+            SELECT task_id, session_key, envelope_json, objective, ui_summary, status,
                    created_at, updated_at, step_count,
                    deadline_at, last_error, final_recap
             FROM sustained_tasks
@@ -206,8 +200,7 @@ class AgentTaskStore:
         """Return the one non-terminal task, including a paused task."""
         row = self._db.execute(
             """
-            SELECT task_id, session_key, robot_id, objective, ui_summary, status,
-                   channel, chat_id, sender_id, user_id, agent_id, episode_id,
+            SELECT task_id, session_key, envelope_json, objective, ui_summary, status,
                    created_at, updated_at, step_count,
                    deadline_at, last_error, final_recap
             FROM sustained_tasks
@@ -222,8 +215,7 @@ class AgentTaskStore:
     def resumable_tasks(self) -> tuple[AgentTask, ...]:
         rows = self._db.execute(
             """
-            SELECT task_id, session_key, robot_id, objective, ui_summary, status,
-                   channel, chat_id, sender_id, user_id, agent_id, episode_id,
+            SELECT task_id, session_key, envelope_json, objective, ui_summary, status,
                    created_at, updated_at, step_count,
                    deadline_at, last_error, final_recap
             FROM sustained_tasks
@@ -243,8 +235,7 @@ class AgentTaskStore:
     def task(self, task_id: str) -> AgentTask | None:
         row = self._db.execute(
             """
-            SELECT task_id, session_key, robot_id, objective, ui_summary, status,
-                   channel, chat_id, sender_id, user_id, agent_id, episode_id,
+            SELECT task_id, session_key, envelope_json, objective, ui_summary, status,
                    created_at, updated_at, step_count,
                    deadline_at, last_error, final_recap
             FROM sustained_tasks
@@ -260,12 +251,11 @@ class AgentTaskStore:
         if robot_id:
             rows = self._db.execute(
                 """
-                SELECT task_id, session_key, robot_id, objective, ui_summary, status,
-                       channel, chat_id, sender_id, user_id, agent_id, episode_id,
+                SELECT task_id, session_key, envelope_json, objective, ui_summary, status,
                        created_at, updated_at, step_count,
                        deadline_at, last_error, final_recap
                 FROM sustained_tasks
-                WHERE robot_id=?
+                WHERE json_extract(envelope_json, '$.robot_id')=?
                 ORDER BY updated_at DESC
                 LIMIT ?
                 """,
@@ -274,8 +264,7 @@ class AgentTaskStore:
         else:
             rows = self._db.execute(
                 """
-                SELECT task_id, session_key, robot_id, objective, ui_summary, status,
-                       channel, chat_id, sender_id, user_id, agent_id, episode_id,
+                SELECT task_id, session_key, envelope_json, objective, ui_summary, status,
                        created_at, updated_at, step_count,
                        deadline_at, last_error, final_recap
                 FROM sustained_tasks
@@ -288,17 +277,18 @@ class AgentTaskStore:
 
     def task_envelope(self, task_id: str) -> Envelope | None:
         task = self.task(task_id)
-        if task is None:
-            return None
-        return Envelope(
-            channel=task.channel,
-            chat_id=task.chat_id,
-            sender_id=task.sender_id,
-            user_id=task.user_id,
-            agent_id=task.agent_id,
-            episode_id=task.episode_id,
-            robot_id=task.robot_id,
-        )
+        return task.envelope if task is not None else None
+
+    def has_successful_step(self, task_id: str) -> bool:
+        row = self._db.execute(
+            """
+            SELECT 1 FROM task_steps
+            WHERE task_id=? AND status='completed'
+            LIMIT 1
+            """,
+            (task_id,),
+        ).fetchone()
+        return row is not None
 
     def add_step(
         self, task_id: str, proposal: PhysicalToolCall, outcome: ToolOutcome
@@ -377,8 +367,8 @@ class AgentTaskStore:
             INSERT INTO task_steps (
                 step_id, task_id, sequence, proposal_json, outcome_json,
                 started_at, completed_at, evidence_json, run_id, tool_call_id,
-                tool_name, arguments_json, status, last_event_sequence
-            ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, 'pending', 0)
+                status, last_event_sequence
+            ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 'pending', 0)
             """,
             (
                 step_id,
@@ -392,10 +382,6 @@ class AgentTaskStore:
                 json.dumps([], ensure_ascii=False),
                 run_id,
                 tool_call_id,
-                proposal.name,
-                json.dumps(
-                    dict(proposal.arguments), ensure_ascii=False, sort_keys=True
-                ),
             ),
         )
         self._db.execute(
@@ -600,13 +586,29 @@ class AgentTaskStore:
         task = self.active_task(session_key)
         if task is None:
             return "当前会话没有进行中的持续任务。"
+        return self._project_task(task)
+
+    def _project_task(self, task: AgentTask) -> str:
         steps = self.recent_steps(task.task_id, limit=6)
+        all_steps = self.recent_steps(task.task_id, limit=max(task.step_count, 1))
+        completed_counts: dict[str, int] = {}
+        for step in all_steps:
+            if step.status != "completed":
+                continue
+            completed_counts[step.proposal.name] = (
+                completed_counts.get(step.proposal.name, 0) + 1
+            )
         lines = [
             (
-                "当前持续任务："
-                f"id={task.task_id}；status={task.status}；steps={task.step_count}。"
+                f"当前持续任务：id={task.task_id}；status={task.status}；"
+                f"objective={task.objective}；steps={task.step_count}。"
             )
         ]
+        if completed_counts:
+            counts = "，".join(
+                f"{name}×{count}" for name, count in sorted(completed_counts.items())
+            )
+            lines.append(f"已确认完成动作汇总：{counts}。")
         if steps:
             lines.append("最近证据：")
             for step in steps:
@@ -642,25 +644,22 @@ class AgentTaskStore:
 
 
 def _task_from_row(row: tuple[Any, ...]) -> AgentTask:
+    payload = json.loads(str(row[2]))
+    if not isinstance(payload, dict):
+        raise ValueError("stored task envelope must be an object")
     return AgentTask(
         task_id=str(row[0]),
         session_key=str(row[1]),
-        robot_id=str(row[2]),
+        envelope=from_payload(Envelope, payload),
         objective=str(row[3]),
         ui_summary=str(row[4] or ""),
         status=row[5],
-        channel=str(row[6]) if row[6] is not None else None,
-        chat_id=str(row[7]) if row[7] is not None else None,
-        sender_id=str(row[8]) if row[8] is not None else None,
-        user_id=str(row[9]) if row[9] is not None else None,
-        agent_id=str(row[10]) if row[10] is not None else None,
-        episode_id=str(row[11]) if row[11] is not None else None,
-        created_at=float(row[12]),
-        updated_at=float(row[13]),
-        step_count=int(row[14]),
-        deadline_at=float(row[15]) if row[15] is not None else None,
-        last_error=str(row[16]) if row[16] is not None else None,
-        final_recap=str(row[17]) if row[17] is not None else None,
+        created_at=float(row[6]),
+        updated_at=float(row[7]),
+        step_count=int(row[8]),
+        deadline_at=float(row[9]) if row[9] is not None else None,
+        last_error=str(row[10]) if row[10] is not None else None,
+        final_recap=str(row[11]) if row[11] is not None else None,
     )
 
 

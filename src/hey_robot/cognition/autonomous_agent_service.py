@@ -22,6 +22,7 @@ from hey_robot.cognition.runtime.task_coordinator import (
     AppliedSkillEvent,
     TaskCoordinator,
 )
+from hey_robot.cognition.tools.agent_response import AgentResponseTool
 from hey_robot.cognition.tools.executor import AgentToolExecutor
 from hey_robot.cognition.tools.models import AgentTool
 from hey_robot.cognition.tools.registry import (
@@ -61,7 +62,7 @@ class AutonomousAgentService:
         self.topics = Topics()
         self.bus = create_bus_client(config.deployment.bus, role="robot-agent")
 
-        root = Path(config.resources.runtime_dir) / config.deployment.id
+        root = Path(config.resources.runtime_dir)
         root.mkdir(parents=True, exist_ok=True)
         self.conversations = ConversationStore(root / "conversations.sqlite3")
         self.tasks = AgentTaskStore(root / "sustained_tasks.sqlite3")
@@ -80,7 +81,9 @@ class AutonomousAgentService:
             and configured_template_root.strip()
             else None
         )
-        self.tools = ToolRegistry(ToolDependencies(skills, extra_tools))
+        self.tools = ToolRegistry(
+            ToolDependencies(skills, (*extra_tools, AgentResponseTool()))
+        )
         model_client = create_model_client(config, agent_id, purpose="agent")
         self.runner = AgentRunner(model_client, self.tools)
         if skill_client is None:

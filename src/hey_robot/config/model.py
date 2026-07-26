@@ -44,7 +44,7 @@ class LoggingSpec:
 
 @dataclass(frozen=True)
 class ResourceSpec:
-    runtime_dir: str = "runtime"
+    runtime_dir: str = "runtime/local"
     media_root: str = "runtime/media"
     media_max_items: int = 5000
     media_image_save_every_n: int = 1
@@ -293,7 +293,9 @@ class DeploymentConfig:
         episodes_data = resources_data.get("episodes", {}) or {}
         events_data = resources_data.get("events", {}) or {}
         resources = ResourceSpec(
-            runtime_dir=str(resources_data.get("runtime_dir", "runtime")),
+            runtime_dir=str(
+                resources_data.get("runtime_dir", f"runtime/{deployment.id}")
+            ),
             media_root=str(media_data.get("root", "runtime/media")),
             media_max_items=int(media_data.get("max_items", 5000)),
             media_image_save_every_n=max(

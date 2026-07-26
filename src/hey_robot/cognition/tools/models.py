@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from hey_robot.protocol import ToolOutcome
 from hey_robot.tool_schema import validate_arguments
@@ -39,6 +39,14 @@ class PhysicalToolCall:
     arguments: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class AgentResponseCall:
+    """Validated user response with an atomic sustained-task state."""
+
+    task_state: Literal["none", "wait", "complete", "cancel"]
+    message: str
+
+
 HarnessToolHandler = Callable[
     [dict[str, Any]],
     ToolOutcome | Awaitable[ToolOutcome],
@@ -65,7 +73,7 @@ class HarnessToolCall:
         return result
 
 
-PreparedToolCall = HarnessToolCall | PhysicalToolCall
+PreparedToolCall = AgentResponseCall | HarnessToolCall | PhysicalToolCall
 
 
 class AgentTool(Protocol):

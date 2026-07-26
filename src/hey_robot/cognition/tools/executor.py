@@ -13,6 +13,7 @@ from hey_robot.cognition.runtime.agent_task_store import (
 )
 from hey_robot.cognition.runtime.task_coordinator import TaskCoordinator
 from hey_robot.cognition.tools.models import (
+    AgentResponseCall,
     HarnessToolCall,
     PhysicalToolCall,
     PreparedToolCall,
@@ -24,7 +25,7 @@ from hey_robot.skills.client import SkillClient
 
 @dataclass(frozen=True)
 class ToolExecution:
-    directive: Literal["continue", "wait", "finish"]
+    directive: Literal["continue", "wait", "respond", "finish"]
     outcome: ToolOutcome
     proposal: PreparedToolCall
     step: AgentTaskStep | None = None
@@ -60,6 +61,13 @@ class AgentToolExecutor:
             return await self._execute_skill(
                 session_key, envelope, objective, proposal, tool_call_id
             )
+        if isinstance(proposal, AgentResponseCall):
+            return await self._respond(
+                session_key=session_key,
+                envelope=envelope,
+                objective=objective,
+                proposal=proposal,
+            )
         if isinstance(proposal, HarnessToolCall):
             try:
                 outcome = await proposal.execute()
@@ -76,6 +84,113 @@ class AgentToolExecutor:
                 proposal,
             )
         raise TypeError(f"unsupported prepared tool call: {type(proposal)!r}")
+
+    async def _respond(
+        self,
+        *,
+        session_key: str,
+        envelope: Envelope,
+        objective: str,
+        proposal: AgentResponseCall,
+    ) -> ToolExecution:
+        task = self._tasks.active_task(session_key)
+        if proposal.task_state == "none":
+            return ToolExecution(
+                "respond",
+                ToolOutcome("completed", proposal.message),
+                proposal,
+                task=task,
+                final_text=proposal.message,
+            )
+        if proposal.task_state == "wait":
+            if task is None:
+                import time
+
+                task = self._tasks.create_task(
+                    session_key=session_key,
+                    envelope=envelope,
+                    objective=objective,
+                    ui_summary=objective,
+                    deadline_at=time.time()
+                    + self._config.agent_runtime.hard_max_wall_time_sec,
+                )
+            return ToolExecution(
+                "respond",
+                ToolOutcome("completed", proposal.message),
+                proposal,
+                task=task,
+                final_text=proposal.message,
+            )
+        if proposal.task_state == "complete":
+            if task is None:
+                return ToolExecution(
+                    "finish",
+                    ToolOutcome(
+                        "failed",
+                        "无法完成任务：当前没有进行中的持续任务。",
+                        {"failure_mode": "task_not_active"},
+                    ),
+                    proposal,
+                    final_text="无法完成任务：当前没有进行中的持续任务。",
+                )
+            if self._tasks.active_run_ids(task.task_id):
+                return ToolExecution(
+                    "respond",
+                    ToolOutcome(
+                        "failed",
+                        "当前机器人操作仍在执行，暂时不能完成任务。",
+                        {"failure_mode": "skill_still_running"},
+                    ),
+                    proposal,
+                    task=task,
+                    final_text="当前机器人操作仍在执行，暂时不能完成任务。",
+                )
+            if not self._tasks.has_successful_step(task.task_id):
+                return ToolExecution(
+                    "respond",
+                    ToolOutcome(
+                        "failed",
+                        "当前没有可信的机器人执行结果，不能把任务标记为完成。",
+                        {"failure_mode": "task_evidence_missing"},
+                    ),
+                    proposal,
+                    task=task,
+                    final_text="当前没有可信的机器人执行结果，不能把任务标记为完成。",
+                )
+            self._tasks.close_task(task.task_id, recap=proposal.message)
+            return ToolExecution(
+                "finish",
+                ToolOutcome("completed", proposal.message),
+                proposal,
+                task=self._tasks.task(task.task_id),
+                final_text=proposal.message,
+            )
+        if proposal.task_state == "cancel":
+            if task is None:
+                return ToolExecution(
+                    "finish",
+                    ToolOutcome(
+                        "failed",
+                        "无法取消任务：当前没有进行中的持续任务。",
+                        {"failure_mode": "task_not_active"},
+                    ),
+                    proposal,
+                    final_text="无法取消任务：当前没有进行中的持续任务。",
+                )
+            await self._apply_control(
+                session_key,
+                "cancel",
+                proposal.message,
+                agent_id=envelope.agent_id,
+            )
+            return ToolExecution(
+                "finish",
+                ToolOutcome("completed", proposal.message),
+                proposal,
+                task=self._tasks.task(task.task_id),
+                final_text=proposal.message,
+            )
+        raise ValueError(f"unsupported task state: {proposal.task_state!r}")
 
     async def control(self, command: AgentControl) -> str:
         return await self._apply_control(

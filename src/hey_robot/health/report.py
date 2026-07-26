@@ -46,9 +46,7 @@ class HealthReportService:
         self.config = config
         del episode_dir
         self.task_store = AgentTaskStore(
-            Path(config.resources.runtime_dir)
-            / config.deployment.id
-            / "sustained_tasks.sqlite3"
+            Path(config.resources.runtime_dir) / "sustained_tasks.sqlite3"
         )
         self.config_path = Path(config_path) if config_path is not None else None
         self.live = live
@@ -110,11 +108,7 @@ class HealthReportService:
         return reports
 
     def _projection_reports(self) -> list[HealthReport]:
-        path = (
-            Path(self.config.resources.runtime_dir)
-            / self.config.deployment.id
-            / "skill_projection_health.json"
-        )
+        path = Path(self.config.resources.runtime_dir) / "skill_projection_health.json"
         if not path.exists():
             return []
         try:

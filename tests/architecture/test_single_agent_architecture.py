@@ -91,6 +91,7 @@ def test_agent_prompt_has_no_removed_tool_vocabulary() -> None:
         "可用 Skill 契约",
         "complete_task",
         "control_task",
+        "task_state",
         "inspect_scene",
         "observation Skill",
         "request_perception",
@@ -164,3 +165,4 @@ def test_unused_policy_and_compatibility_frameworks_are_removed() -> None:
     task_store = _read("cognition/runtime/agent_task_store.py")
     assert "ALTER TABLE" not in task_store
     assert "_migrate_" not in task_store
+    assert "task_envelopes" not in task_store

@@ -713,11 +713,12 @@ def test_gateway_start_and_stop_publish_lifecycle_and_manage_channels(
     assert {event["kind"] for event in stored} >= {"gateway.start", "gateway.ready"}
 
     asyncio.run(gateway.stop())
+    asyncio.run(gateway.stop())
 
     stopped = gateway.event_store.recent(10)
     assert fake_channels.stopped is True
     assert fake_bus.closed is True
-    assert any(event["kind"] == "gateway.shutdown" for event in stopped)
+    assert sum(event["kind"] == "gateway.shutdown" for event in stopped) == 1
 
 
 def test_gateway_routes_natural_confirmation_to_typed_resume(tmp_path) -> None:

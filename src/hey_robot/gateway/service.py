@@ -62,6 +62,17 @@ class GatewayService:
     def __init__(
         self, config: DeploymentConfig, *, episode_dir: str | Path | None = None
     ) -> None:
+        unsupported_channels = sorted(
+            {
+                spec.type
+                for spec in config.channels.values()
+                if spec.enabled and spec.type not in {"cli", "web", "voice", "feishu"}
+            }
+        )
+        if unsupported_channels:
+            raise ValueError(
+                f"unsupported channel type: {', '.join(unsupported_channels)}"
+            )
         self.config = config
         self.topics = Topics()
         self.episode_root = Path(episode_dir or config.resources.episodes_root)
@@ -73,19 +84,11 @@ class GatewayService:
             Path(config.resources.runtime_dir) / "events",
             max_items=config.resources.events_max_items,
         )
-        self.run_store = FileRunStore(
-            Path(config.resources.runtime_dir) / config.deployment.id / "runs"
-        )
-        task_path = (
-            Path(config.resources.runtime_dir)
-            / config.deployment.id
-            / "sustained_tasks.sqlite3"
-        )
+        self.run_store = FileRunStore(Path(config.resources.runtime_dir) / "runs")
+        task_path = Path(config.resources.runtime_dir) / "sustained_tasks.sqlite3"
         self.task_store = AgentTaskStore(task_path)
         self.interaction_receipts = InteractionReceiptStore(
-            Path(config.resources.runtime_dir)
-            / config.deployment.id
-            / "interaction_receipts.sqlite3"
+            Path(config.resources.runtime_dir) / "interaction_receipts.sqlite3"
         )
         self.latest_robot_status: dict[str, RobotStatus] = {}
         self.identity = IdentityResolver(
@@ -95,6 +98,7 @@ class GatewayService:
             / "bindings.json",
         )
         self._ready = asyncio.Event()
+        self._stopped = False
         self._last_robot_status_persisted_at: dict[str, float] = {}
         self._register_channels()
 
@@ -132,6 +136,9 @@ class GatewayService:
         await asyncio.Event().wait()
 
     async def stop(self) -> None:
+        if self._stopped:
+            return
+        self._stopped = True
         event = RuntimeEvent.make(EventKind.GATEWAY_SHUTDOWN, source="gateway")
         await self.events.publish(event)
         self.event_store.append(event)
