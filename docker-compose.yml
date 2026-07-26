@@ -2,88 +2,79 @@ name: hey-robot
 
 x-common-env: &common-env
   PYTHONUNBUFFERED: "1"
+  ARK_API_KEY: ${ARK_API_KEY:-}
+  DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+  DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-}
+  DASHSCOPE_MODEL: ${DASHSCOPE_MODEL:-}
+  DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+  DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-}
+  DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-}
 
-x-common-volumes: &common-volumes
-  - ./configs:/app/configs:ro
-  - ./runtime:/app/runtime
+x-app-common: &app-common
+  platform: ${HEY_ROBOT_APP_PLATFORM:-linux/amd64}
+  user: "${HEY_ROBOT_APP_UID:-1000}:${HEY_ROBOT_APP_GID:-1000}"
+  environment: *common-env
+  volumes:
+    - ./configs:/app/configs:ro
+    - ./src:/app/src:ro
+    - ./runtime:/app/runtime
+  restart: unless-stopped
 
 services:
+  base:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.base
+      args:
+        PYTHON_VERSION: ${HEY_ROBOT_PYTHON_VERSION:-3.12}
+    image: ${HEY_ROBOT_BASE_IMAGE:-hey-robot-base:latest}
+    deploy:
+      replicas: 0
+
   nats:
     image: nats:2.10-alpine
     ports:
       - "${HEY_ROBOT_NATS_PORT:-4222}:4222"
       - "${HEY_ROBOT_NATS_MONITOR_PORT:-8222}:8222"
     command: ["-js", "-m", "8222"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
     restart: unless-stopped
-
-  vla:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.vla
-      args:
-        CUDA_VERSION: ${HEY_ROBOT_CUDA_VERSION:-12.6.2}
-        PYTHON_VERSION: ${HEY_ROBOT_PYTHON_VERSION:-3.12}
-    image: ${HEY_ROBOT_VLA_IMAGE:-hey-robot-vla:latest}
-    environment: *common-env
-    volumes:
-      - ./configs:/app/configs:ro
-      - ./models:/app/models:ro
-    depends_on:
-      - nats
-    ports:
-      - "${HEY_ROBOT_VLA_PORT:-9090}:9090"
-    command:
-      - --config
-      - ${HEY_ROBOT_VLA_CONFIG:-/app/configs/xlerobot.sim.vla_vln.yaml}
-      - --service-id
-      - ${HEY_ROBOT_VLA_SERVICE_ID:-manipulate}
-      - --host
-      - "0.0.0.0"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              device_ids: ["${HEY_ROBOT_VLA_GPU:-0}"]
-              capabilities: [gpu]
-    restart: unless-stopped
-    profiles:
-      - gpu
 
   vln:
     build:
       context: .
       dockerfile: docker/Dockerfile.vln
       args:
-        CUDA_VERSION: ${HEY_ROBOT_CUDA_VERSION:-12.6.2}
         PYTHON_VERSION: ${HEY_ROBOT_PYTHON_VERSION:-3.12}
     image: ${HEY_ROBOT_VLN_IMAGE:-hey-robot-vln:latest}
-    environment: *common-env
+    environment:
+      <<: *common-env
+      NVIDIA_VISIBLE_DEVICES: ${HEY_ROBOT_VLN_GPU:-0}
     volumes:
       - ./configs:/app/configs:ro
       - ./runtime:/app/runtime
       - ./models:/app/models:ro
     depends_on:
-      - nats
+      nats:
+        condition: service_healthy
     ports:
       - "${HEY_ROBOT_VLN_PORT:-9091}:9091"
     command:
       - --config
-      - ${HEY_ROBOT_VLN_CONFIG:-/app/configs/xlerobot.sim.vla_vln.yaml}
+      - ${HEY_ROBOT_VLN_CONFIG:-/app/configs/xlerobot.sim.vln.yaml}
       - --service-id
       - ${HEY_ROBOT_VLN_SERVICE_ID:-vln_nav}
       - --host
       - "0.0.0.0"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              device_ids: ["${HEY_ROBOT_VLN_GPU:-1}"]
-              capabilities: [gpu]
+    runtime: nvidia
     restart: unless-stopped
     profiles:
       - gpu
+      - vln
 
   robocasa365:
     build:
@@ -97,8 +88,11 @@ services:
     environment:
       MUJOCO_GL: egl
       NVIDIA_DRIVER_CAPABILITIES: compute,utility,graphics
-      ROBOCASA_EVALUATOR_TOKEN: ${ROBOCASA_EVALUATOR_TOKEN:?set an evaluator control-plane token}
-      ROBOCASA_DATA_TOKEN: ${ROBOCASA_DATA_TOKEN:?set a Robot Runtime data-plane token}
+      NVIDIA_VISIBLE_DEVICES: all
+      # The backend validates these only when this optional profile is started.
+      # Empty values must not prevent unrelated Compose services from parsing.
+      ROBOCASA_EVALUATOR_TOKEN: ${ROBOCASA_EVALUATOR_TOKEN:-}
+      ROBOCASA_DATA_TOKEN: ${ROBOCASA_DATA_TOKEN:-}
       HF_HOME: /cache/huggingface
       HF_TOKEN: ${HF_TOKEN:-}
       ROBOCASA_ASSET_ROOT: /root/.robocasa
@@ -112,34 +106,144 @@ services:
     ports:
       - "${HEY_ROBOT_ROBOCASA_PORT:-9092}:9092"
     shm_size: "8gb"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    runtime: nvidia
     restart: unless-stopped
     profiles:
       - robocasa
 
-  runtime:
+  robocasa-policy:
     build:
       context: .
-      dockerfile: docker/Dockerfile
+      dockerfile: docker/Dockerfile.policy
       args:
         PYTHON_VERSION: ${HEY_ROBOT_PYTHON_VERSION:-3.12}
-    platform: ${HEY_ROBOT_RUNTIME_PLATFORM:-linux/amd64}
-    environment: *common-env
-    volumes: *common-volumes
-    depends_on:
-      - nats
+    image: ${HEY_ROBOT_POLICY_IMAGE:-hey-robot-policy:latest}
+    environment:
+      <<: *common-env
+      HF_HOME: /cache/huggingface
+      HF_TOKEN: ${HF_TOKEN:-}
+      NVIDIA_VISIBLE_DEVICES: ${HEY_ROBOT_ROBOCASA_POLICY_GPU:-0}
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./models:/app/models:ro
+      - ${HF_CACHE_DIR:-/home/liber/.cache/huggingface}:/cache/huggingface
     ports:
-      - "${HEY_ROBOT_GATEWAY_PORT:-8080}:8080"
-      - "${HEY_ROBOT_MONITOR_PORT:-8081}:8081"
+      - "${HEY_ROBOT_ROBOCASA_POLICY_PORT:-9091}:9091"
     command:
-      - hey-robot
-      - run
       - --config
-      - /app/configs/deployment/mock.dev.yaml
+      - ${HEY_ROBOT_ROBOCASA_POLICY_CONFIG:-/app/configs/evaluation/robocasa365.yaml}
+      - --service-id
+      - ${HEY_ROBOT_ROBOCASA_POLICY_SERVICE_ID:-robocasa365}
+      - --host
+      - "0.0.0.0"
+    runtime: nvidia
+    restart: unless-stopped
+    profiles:
+      - robocasa
+
+  gateway:
+    <<: *app-common
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.gateway
+      args:
+        BASE_IMAGE: hey_robot_base
+      additional_contexts:
+        hey_robot_base: service:base
+    image: ${HEY_ROBOT_GATEWAY_IMAGE:-hey-robot-gateway:latest}
+    depends_on:
+      nats:
+        condition: service_healthy
+    command:
+      - /app/.venv/bin/hey-robot
+      - gateway
+      - --config
+      - /app/configs/mock.compose.yaml
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).read()"
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  robot:
+    <<: *app-common
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.robot
+      args:
+        BASE_IMAGE: hey_robot_base
+      additional_contexts:
+        hey_robot_base: service:base
+    image: ${HEY_ROBOT_ROBOT_IMAGE:-hey-robot-robot:latest}
+    depends_on:
+      nats:
+        condition: service_healthy
+    command:
+      - /app/.venv/bin/hey-robot
+      - robot
+      - --config
+      - /app/configs/mock.compose.yaml
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sys; sys.exit(0 if b'hey-robot\\x00robot' in open('/proc/1/cmdline','rb').read() else 1)"
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  agent:
+    <<: *app-common
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.agent
+      args:
+        BASE_IMAGE: hey_robot_base
+      additional_contexts:
+        hey_robot_base: service:base
+    image: ${HEY_ROBOT_AGENT_IMAGE:-hey-robot-agent:latest}
+    depends_on:
+      nats:
+        condition: service_healthy
+      robot:
+        condition: service_healthy
+    command:
+      - /app/.venv/bin/hey-robot
+      - agent
+      - --config
+      - /app/configs/mock.compose.yaml
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sys; sys.exit(0 if b'hey-robot\\x00agent' in open('/proc/1/cmdline','rb').read() else 1)"
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    image: ${HEY_ROBOT_FRONTEND_IMAGE:-hey-robot-frontend:latest}
+    depends_on:
+      gateway:
+        condition: service_healthy
+    ports:
+      - "${HEY_ROBOT_FRONTEND_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
     restart: unless-stopped

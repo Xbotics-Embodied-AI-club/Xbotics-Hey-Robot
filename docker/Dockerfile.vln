@@ -2,9 +2,8 @@
 # InternVLA-N1 System2 requires huggingface-hub < 1.0, which conflicts with
 # the main runtime (>= 1.0). Run in a separate container.
 
-ARG CUDA_VERSION=12.6.2
 ARG PYTHON_VERSION=3.12
-FROM nvidia/cuda:${CUDA_VERSION}-cudnn-runtime-ubuntu24.04
+FROM python:${PYTHON_VERSION}-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -15,12 +14,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# System deps: python3.12, git, and minimal GL libs (InternNav image loading)
+# System deps: git, build tools, and minimal GL libs (InternNav image loading).
+# CUDA/cuDNN are installed from the locked vln dependency group, so the image
+# does not carry a second copy from an NVIDIA CUDA base image.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        python3.12 \
-        python3.12-venv \
-        python3-pip \
         git \
         build-essential \
         libglib2.0-0 \
@@ -28,25 +26,24 @@ RUN apt-get update \
         libsm6 \
         libxext6 \
         libegl1 \
-    && ln -sf /usr/bin/python3.12 /usr/bin/python \
-    && ln -sf /usr/bin/python3.12 /usr/bin/python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install exactly the isolated VLN dependency group from the shared lockfile.
 # InternNav is loaded from the pinned repository submodule at runtime so its
 # broad optional extras cannot silently alter this environment.
-RUN pip install --break-system-packages uv
+RUN pip install uv
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-default-groups --group vln --no-install-project
+RUN uv sync --frozen --no-default-groups \
+    --extra model-service --group vln --no-install-project
 
 COPY third_party/InternNav /app/third_party/InternNav
 COPY src ./src
 COPY configs ./configs
-RUN uv sync --frozen --no-default-groups --group vln
+RUN uv sync --frozen --no-default-groups --extra model-service --group vln
 
 # ── Runtime ──
 
 # Default entrypoint: start the VLN capability service.
 # Override --config at runtime to switch between sim / real / mock configs.
-ENTRYPOINT ["python", "-m", "hey_robot.cli.model_service"]
-CMD ["--config", "configs/xlerobot.sim.vla_vln.yaml", "--service-id", "vln_nav"]
+ENTRYPOINT ["/app/.venv/bin/python", "-m", "hey_robot.cli.model_service"]
+CMD ["--config", "configs/xlerobot.sim.vln.yaml", "--service-id", "vln_nav"]

@@ -29,8 +29,8 @@ backend 内只有一个 `EpisodeManager`，它是 simulator、observation、fram
 
 - 单任务入口：`evaluation/robocasa365/full_system_benchmark.py`；
 - 批量入口：`evaluation/robocasa365/batch_full_system_benchmark.py`；
-- 唯一任务清单：`configs/evaluation/robocasa365.tasks.yaml`；
-- 唯一 Agent 配置：`configs/evaluation/robocasa365.agent.yaml`；
+- 唯一任务清单：`evaluation/robocasa365/tasks.yaml`；
+- 唯一 Agent 配置：`configs/evaluation/robocasa365.yaml`；
 - 唯一推荐启动器：`scripts/evaluation/run_robocasa365_full_system.sh`。
 
 ## 2. 已验证状态
@@ -98,6 +98,20 @@ RoboCasa assets。它会验证 assets 完整性，并把新环境中的 RoboCasa
 `artifacts/robocasa365/merged-assets`。CUDA driver、EGL/OpenGL 系统库、模型权重和
 RoboCasa assets 是运行资源，不属于 Python dependency group。
 
+容器模式同样保持这个边界，但把两个进程放入不同容器：
+
+```bash
+docker-compose --profile robocasa up -d robocasa365 robocasa-policy
+```
+
+`robocasa365` 使用 `Dockerfile.robocasa365`，只承担 MuJoCo/RoboCasa
+环境与 evaluator（9092）；`robocasa-policy` 使用通用
+`Dockerfile.policy` 和 `hey-robot-policy` 镜像，加载 PI052 并提供模型服务
+（9091），不与 RoboCasa 环境混装 Python 依赖。环境依赖组仅保留 LeRobot
+环境适配所需的 Torch/torchvision，不安装 Transformers、Datasets 或视频解码工具。
+当前不再维护单独的普通
+XLeRobot Policy Compose 服务。
+
 ### 4.2 模型配置
 
 项目根目录的 `.env` 需要配置以下变量：
@@ -117,7 +131,7 @@ DEEPSEEK_BASE_URL=...
 唯一启动器会自动读取 `.env`。
 
 PI052 checkpoint、device、prompt mode、horizon 和 timeout 只在
-`configs/evaluation/robocasa365.agent.yaml` 中配置：
+`configs/evaluation/robocasa365.yaml` 中配置：
 
 ```text
 policy_path: lerobot/pi052_robocasa
@@ -198,7 +212,7 @@ EpisodeManager，不存在 condition 专属 runner 或动作路径。
   --timeout-sec 7200
 ```
 
-任务分组来自 `configs/evaluation/robocasa365.tasks.yaml`：
+任务分组来自 `evaluation/robocasa365/tasks.yaml`：
 
 - `atomic_gate`：基础原子能力门禁；
 - `composite_seen`：组合已见任务；

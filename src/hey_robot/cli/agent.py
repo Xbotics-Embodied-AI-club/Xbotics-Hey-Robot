@@ -5,6 +5,7 @@ import asyncio
 
 from hey_robot.cognition import AutonomousAgentService
 from hey_robot.config import DeploymentConfig
+from hey_robot.skills import BusSkillClient
 
 
 async def async_main() -> None:
@@ -17,11 +18,17 @@ async def async_main() -> None:
 
     config = DeploymentConfig.from_yaml(args.config)
     agent_id = args.agent_id or config.default_agent_id()
-    service = AutonomousAgentService(config, agent_id=agent_id)
+    skills = BusSkillClient(config)
+    service = AutonomousAgentService(
+        config,
+        agent_id=agent_id,
+        skill_client=skills,
+    )
     try:
         await service.start()
     finally:
         await service.stop()
+        await skills.close()
 
 
 def main() -> None:

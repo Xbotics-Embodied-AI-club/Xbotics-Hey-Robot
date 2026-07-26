@@ -7,48 +7,66 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { text = "MIT" }
 
-# Core dependencies — shared by the main runtime.
+# Runtime dependencies are split by deployable service.
 # Usage:
-#   uv sync                  → main runtime (Agent / Skill OS / Robot)
-#   uv sync --group sim      → main runtime + MuJoCo simulation
-#   uv sync --group vla      → VLA model service  (lerobot ACT policy)
-#   uv sync --group vln      → VLN model service  (InternVLA-N1 planner)
+#   uv sync --extra gateway  → HTTP/WebSocket gateway
+#   uv sync --extra agent    → autonomous agent
+#   uv sync --extra robot    → robot driver + native SkillWorker
+#   uv sync --extra human-follow → optional local YOLO/Torch perception
+#   uv sync --extra voice    → optional local voice channel
+#   uv sync --extra model-service --group lerobot-policy → LeRobot policy service
+#   uv sync --extra model-service --group vln → VLN model service
 #   uv sync --only-group robocasa365 → isolated RoboCasa365 backend
 #   uv sync --group dev      → lint / type-check / test tooling
 #
-# Note: --group vla and --group vln are mutually exclusive (conflicting
+# Note: --group lerobot-policy and --group vln are mutually exclusive (conflicting
 # huggingface-hub / transformers versions).  Use separate venvs for each.
 dependencies = [
     "numpy>=1.24.0",
     "pillow>=10.0.0",
     "pyyaml>=6.0",
     "python-dotenv>=1.2.2",
-    "httpx[socks]>=0.28.1",
-    "pyzmq>=25.0.0",
     "nats-py>=2.8.0",
+]
+
+[project.optional-dependencies]
+gateway = [
+    "fastapi>=0.115.0",
+    "starlette>=0.45,<1.0.0",
+    "uvicorn>=0.30.0",
+    "websockets>=12.0",
+    "jinja2>=3.1.0",
+    "lark-oapi>=1.5.0,<2.0.0",
+]
+agent = [
+    "httpx[socks]>=0.28.1",
+    "openai>=1.90.0",
+    "jinja2>=3.1.0",
+]
+robot = [
     "grpcio==1.73.1",
     "protobuf>=6.31.0,<7",
     "imageio>=2.37.2",
     "imageio-ffmpeg>=0.6.0",
     "pyserial>=3.5",
     "opencv-python==4.10.0.84",
-    "json-repair>=0.54.0",
-    "jinja2>=3.1.0",
-    "openai>=1.90.0",
-    "fastapi>=0.115.0",
-    "starlette>=0.45,<1.0.0",
-    "uvicorn>=0.30.0",
+    "feetech-servo-sdk==1.0.0",
+]
+voice = [
+    "httpx[socks]>=0.28.1",
     "sounddevice>=0.4.6",
     "sherpa-onnx>=1.12.0",
     "sherpa-onnx-core>=1.12.0",
-    "lark-oapi>=1.5.0,<2.0.0",
     "websockets>=12.0",
+]
+human-follow = [
+    "httpx[socks]>=0.28.1",
     "torch>=2.0.0",
-    "feetech-servo-sdk==1.0.0",
     "ultralytics>=8.4.67",
-    "wsproto>=1.3.2",
-    "sniffio>=1.3.1",
-    "distro>=1.9.0",
+]
+model-service = [
+    "grpcio==1.73.1",
+    "protobuf>=6.31.0,<7",
 ]
 
 [project.scripts]
@@ -66,12 +84,12 @@ environments = [
 ]
 conflicts = [
     [
-        { group = "vla" },
+        { group = "lerobot-policy" },
         { group = "vln" },
     ],
     [
         { group = "robocasa365" },
-        { group = "vla" },
+        { group = "lerobot-policy" },
     ],
     [
         { group = "robocasa365" },
@@ -123,12 +141,15 @@ requires-dist = []
 [dependency-groups]
 sim = ["mujoco>=3.3.0"]
 
-# Isolated Linux backend for RoboCasa365 + PI0.5. Keep source revisions and
+# Isolated Linux environment backend for RoboCasa365. Policy/model and dataset
+# tooling live in the separate lerobot-policy image; this group keeps only the
+# LeRobot environment adapter and simulation runtime. Keep source revisions and
 # Python pins here so local environments and Docker consume the same uv.lock.
 # CUDA drivers, EGL system libraries, model weights, and RoboCasa assets are
-# runtime resources and intentionally do not belong in a Python dependency
-# group.
+# runtime resources and intentionally do not belong in this dependency group.
 robocasa365 = [
+    # LeRobot's environment adapter imports torch for observation conversion;
+    # policy/model dependencies remain in the separate policy group.
     "torch==2.7.1; sys_platform == 'linux'",
     "torchvision==0.22.1; sys_platform == 'linux'",
     "lerobot @ git+https://github.com/huggingface/lerobot.git@cb73cf3ffa1cec60640a06b924c2174548ae2b1b",
@@ -157,22 +178,23 @@ robocasa365 = [
     "requests>=2.32.0,<3.0.0",
     "packaging>=24.2,<26.0",
     "safetensors>=0.4.3,<1.0.0",
-    "transformers>=5.4.0,<5.6.0",
-    "sentencepiece>=0.2.0,<0.3.0",
-    "datasets>=4.7.0,<5.0.0",
-    "pandas>=2.0.0,<3.0.0",
-    "pyarrow>=21.0.0,<30.0.0",
-    "jsonlines>=4.0.0,<5.0.0",
-    "av>=15.0.0,<16.0.0",
-    "cmake>=3.29.0.1,<4.2.0",
-    "setuptools>=71.0.0,<81.0.0",
     "grpcio==1.73.1",
     "protobuf>=6.31.0,<7",
     "python-dotenv>=1.2.2,<2",
 ]
 
-vla = [
-    "lerobot>=0.6.0",
+lerobot-policy = [
+    # Shared inference image for the policy families currently deployed here:
+    # ACT is core; SmolVLA, PI0/PI0.5, and FastWAM need the explicit packages
+    # below. Keep simulation/environment dependencies in separate groups.
+    "lerobot>=0.6.0,<0.7.0",
+    "torch==2.7.1; sys_platform == 'linux'",
+    "torchvision==0.22.1; sys_platform == 'linux'",
+    "transformers>=5.4.0,<5.6.0",
+    "scipy>=1.14.0,<2.0.0",
+    "accelerate>=1.7.0,<2.0.0",
+    "diffusers>=0.38.0,<0.40.0",
+    "num2words>=0.5.14,<0.6.0",
     "safetensors>=0.7.0",
 ]
 

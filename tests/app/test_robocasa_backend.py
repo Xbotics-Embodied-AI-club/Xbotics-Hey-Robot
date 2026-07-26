@@ -15,7 +15,7 @@ from hey_robot.config import RobotSpec
 
 
 def test_canonical_config_builds_runtime_environment(monkeypatch) -> None:
-    robot = _load_backend_spec("configs/evaluation/robocasa365.agent.yaml")
+    robot = _load_backend_spec("configs/evaluation/robocasa365.yaml")
     monkeypatch.setattr(
         "hey_robot.app.robocasa_backend._separate_egl_device", lambda: "7"
     )
@@ -77,7 +77,7 @@ async def test_serve_composes_only_runtime_service(monkeypatch) -> None:
     # serve() runs in a dedicated production process. Isolate its process-level
     # CUDA/EGL environment when invoking it inside the shared pytest process.
     monkeypatch.setattr(os, "environ", os.environ.copy())
-    robot = _load_backend_spec("configs/evaluation/robocasa365.agent.yaml")
+    robot = _load_backend_spec("configs/evaluation/robocasa365.yaml")
     calls: list[object] = []
 
     class Server:

@@ -1,77 +1,54 @@
-# XLeRobot MuJoCo HOME scene simulation with VLN model service.
-# VLN service process is shared (already running on grpc://127.0.0.1:9091).
-# Usage:
-#   Start main runtime: hey-robot run --config configs/xlerobot.sim.home_vln.yaml
-
 deployment:
-  id: xlerobot.sim.home_vln
+  id: xlerobot.sim.vln
   bus:
     type: nats
     url: nats://127.0.0.1:4222
     options:
-      credentials:
-        agent:
-          username: agent
-          password_env: HEY_ROBOT_NATS_AGENT_PASSWORD
-        skill_controller:
-          username: skill_controller
-          password_env: HEY_ROBOT_NATS_SKILL_CONTROLLER_PASSWORD
-        robot:
-          username: robot
-          password_env: HEY_ROBOT_NATS_ROBOT_PASSWORD
-        gateway:
-          username: gateway
-          password_env: HEY_ROBOT_NATS_GATEWAY_PASSWORD
-
       robot_publish_hz: 2.0
       robot_status_log_every_frames: 30
-
 agent_runtime:
   enabled: true
   robot_id: sim_robot
-
 logging:
-  level: INFO
+  level: DEBUG
   theme: dark
   json_format: false
-  file_path: logs/xlerobot.sim.home_vln/app.log
-  json_file_path: logs/xlerobot.sim.home_vln/app.jsonl
+  file_path: logs/xlerobot.sim.vln/app.log
+  json_file_path: logs/xlerobot.sim.vln/app.jsonl
   throttle_sec: 0.0
-
 resources:
-  runtime_dir: runtime/xlerobot.sim.home_vln
+  runtime_dir: runtime/xlerobot.sim.vln
   media:
-    root: runtime/xlerobot.sim.home_vln/media
-    max_items: 128
+    root: runtime/xlerobot.sim.vln/media
+    max_items: 64
     image_save_every_n: 1
   episodes:
-    root: runtime/xlerobot.sim.home_vln/episodes
+    root: runtime/xlerobot.sim.vln/episodes
   events:
     retain: 2000
-
 skills:
   modules:
-    - hey_robot.skills.builtins
+  - hey_robot.skills.builtins
   mode: bringup
-  execution_mode: local
   tools:
-    - inspect_scene
-    - move_base
-    - turn_base
-
+  - inspect_scene
+  - move_base
+  - turn_base
+  execution_mode: local
 identity:
   enabled: true
   unified_user_episodes: true
   bindings:
-    "cli:sender:local-user": owner
-    "web:sender:web-user": owner
-
+    cli:sender:local-user: owner
+    web:sender:web-user: owner
+    voice:sender:voice-user: owner
+    feishu:sender:ou_160f4368eb2ada4edda22bd33ce435af: owner
 channels:
   cli:
     type: cli
-    enabled: true
+    enabled: false
     account_id: sim-dev
-    prompt: "home-sim> "
+    prompt: 'sim-dev> '
     sender_id: local-user
     chat_id: sim-dev-local
   web:
@@ -83,7 +60,67 @@ channels:
     port: 8080
     access_log: false
     uvicorn_log_level: warning
-
+  voice:
+    type: voice
+    enabled: true
+    account_id: sim-voice
+    sender_id: voice-user
+    chat_id: sim-voice
+    activation:
+      enabled: true
+      wake_words:
+      - 小白
+      - 机器人
+      - robot
+      strip_wake_word: true
+      session_timeout_sec: 60.0
+      min_route_chars: 4
+    tts_echo_guard_sec: 1.0
+    reply_tts: true
+    recorder:
+      input_device: null
+      sample_rate: 16000
+      channels: 1
+      block_ms: 100
+      energy_threshold: 0.02
+      silence_sec: 0.5
+      pre_roll_sec: 0.4
+      min_speech_sec: 0.4
+      max_speech_sec: 6.0
+    asr:
+      provider: doubao
+      api_key_env: ARK_API_KEY
+      endpoint: wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream
+      resource_id: volc.seedasr.sauc.duration
+      language: zh-CN
+      sample_rate: 16000
+      bits: 16
+      channels: 1
+      chunk_ms: 200
+    tts:
+      provider: doubao
+      enabled: true
+      api_key_env: ARK_API_KEY
+      resource_id: seed-tts-2.0
+      voice_type: zh_female_vv_uranus_bigtts
+      endpoint: wss://openspeech.bytedance.com/api/v3/tts/bidirection
+      encoding: pcm
+      sample_rate: 16000
+      output_device: null
+  feishu:
+    type: feishu
+    enabled: true
+    account_id: sim-feishu
+    app_id_env: FEISHU_APP_ID
+    app_secret_env: FEISHU_APP_SECRET
+    encrypt_key_env: FEISHU_ENCRYPT_KEY
+    verification_token_env: FEISHU_VERIFICATION_TOKEN
+    group_policy: mention
+    reply_to_message: true
+    domain: feishu
+    allow_from:
+    - '*'
+    media_root: runtime/xlerobot.sim.vln/media/feishu
 robots:
   sim_robot:
     type: xlerobot_sim
@@ -101,16 +138,15 @@ robots:
       angular_speed: 0.45
       viewer:
         enabled: false
-
 model_services:
-  vln_home:
+  vln_nav:
     type: vln_planner
     robot_id: sim_robot
     enabled: true
     target: grpc://127.0.0.1:9091
     provides:
-      - navigate_to
-      - approach_object
+    - navigate_to
+    - approach_object
     timeout_sec: 60.0
     settings:
       host: 127.0.0.1
@@ -124,7 +160,7 @@ model_services:
       device: cuda
       dtype: bf16
       attn_implementation: sdpa
-      media_root: runtime/xlerobot.sim.home_vln/media
+      media_root: runtime/xlerobot.sim.vln/media
       internnav_repo: third_party/InternNav
       camera: front
       image_width: 640
@@ -136,13 +172,11 @@ model_services:
       num_history: 8
       max_new_tokens: 128
       hfov: 90
-
 policies:
   embodied_skills:
     enabled: true
     robot_id: sim_robot
     freq_hz: 1.0
-
 agents:
   main:
     enabled: true

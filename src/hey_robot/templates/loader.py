@@ -35,7 +35,8 @@ class TemplateStore:
         )
 
     def render(self, name: str, **values: Any) -> str:
-        return self._env.get_template(_normalize_name(name)).render(**values).strip()
+        rendered = self._env.get_template(_normalize_name(name)).render(**values)
+        return str(rendered).strip()
 
     def _loader(self) -> ChoiceLoader:
         loaders: list[BaseLoader] = []

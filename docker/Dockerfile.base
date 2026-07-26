@@ -1,0 +1,37 @@
+ARG PYTHON_VERSION=3.12
+FROM python:${PYTHON_VERSION}-slim
+
+ARG BUILDPLATFORM
+ARG TARGETPLATFORM
+ARG TARGETARCH
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    UV_LINK_MODE=copy \
+    UV_SYSTEM_PYTHON=1
+
+WORKDIR /app
+
+RUN pip install uv
+
+# Keep the cross-service dependency layer stable across normal source changes.
+COPY pyproject.toml uv.lock README.md ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-default-groups --no-install-project
+
+COPY src ./src
+COPY configs ./configs
+
+ENV PATH="/app/.venv/bin:${PATH}"
+
+LABEL org.opencontainers.image.title="hey-robot-base" \
+      org.opencontainers.image.description="Shared core for Hey Robot deployable services" \
+      org.opencontainers.image.source="local" \
+      org.opencontainers.image.vendor="hey-robot" \
+      org.opencontainers.image.base.name="python:${PYTHON_VERSION}-slim" \
+      org.opencontainers.image.buildplatform="${BUILDPLATFORM}" \
+      org.opencontainers.image.targetplatform="${TARGETPLATFORM}" \
+      org.opencontainers.image.architecture="${TARGETARCH}"
+
+CMD ["python", "--version"]

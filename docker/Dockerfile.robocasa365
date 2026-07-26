@@ -1,5 +1,6 @@
-# RoboCasa365 uses an isolated uv dependency group while running the same Hey
-# Robot backend, standard ModelService, and Robot Runtime implementation.
+# RoboCasa365 environment/evaluator image. LeRobot is present here for its
+# RoboCasa environment integration; policy inference runs in the separate,
+# reusable Dockerfile.policy image.
 ARG LEROBOT_BASE_IMAGE=python:3.12-bookworm
 FROM ${LEROBOT_BASE_IMAGE}
 
@@ -36,8 +37,8 @@ COPY pyproject.toml uv.lock README.md /opt/bridge/
 RUN uv sync --frozen --only-group robocasa365 --no-install-project
 
 COPY src/hey_robot /opt/bridge/hey_robot
-COPY configs/evaluation/robocasa365.agent.yaml /opt/bridge/configs/robocasa365.agent.yaml
+COPY configs/evaluation/robocasa365.yaml /opt/bridge/configs/robocasa365.yaml
 RUN mkdir -p /outputs /cache/huggingface
 
 EXPOSE 9092
-CMD ["python", "-m", "hey_robot.app.robocasa_backend", "--config", "/opt/bridge/configs/robocasa365.agent.yaml", "--host", "0.0.0.0", "--port", "9092"]
+CMD ["python", "-m", "hey_robot.app.robocasa_backend", "--config", "/opt/bridge/configs/robocasa365.yaml", "--host", "0.0.0.0", "--port", "9092"]

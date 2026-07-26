@@ -253,7 +253,7 @@ VLA/VLN 可以作为独立 gRPC ModelService 部署。物理能力只通过
 git clone https://github.com/Xbotics-Embodied-AI-club/Xbotics-Hey-Robot.git
 cd Xbotics-Hey-Robot
 
-uv sync --group dev --group sim
+uv sync --extra gateway --extra agent --extra robot --group dev --group sim
 cp .env.example .env
 ```
 

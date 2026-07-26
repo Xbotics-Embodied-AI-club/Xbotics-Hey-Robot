@@ -122,6 +122,7 @@ def test_policy_observation_rejects_invalid_feature_contract(monkeypatch) -> Non
 
 
 def test_fallback_observation_and_action_helpers() -> None:
+    pytest.importorskip("torch", reason="LeRobot policy runtime is optional")
     sample = executor._fallback_preprocess_observation(
         {
             "agent_pos": np.zeros(6, dtype=np.float32),

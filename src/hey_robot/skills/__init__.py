@@ -17,10 +17,13 @@ from hey_robot.skills.models import (
 from hey_robot.skills.registry import SkillRegistry
 from hey_robot.skills.resources import ResourceManager
 from hey_robot.skills.runner import SkillRunner
+from hey_robot.skills.transport import BusSkillClient, BusSkillServer
 from hey_robot.skills.validation import SkillSurfaceIssue, validate_skill_surface
 from hey_robot.skills.worker import SkillWorker
 
 __all__ = [
+    "BusSkillClient",
+    "BusSkillServer",
     "ResourceManager",
     "Skill",
     "SkillCancel",

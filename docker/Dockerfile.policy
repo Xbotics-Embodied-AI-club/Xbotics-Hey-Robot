@@ -1,0 +1,36 @@
+# Generic LeRobot policy service image.
+# The checkpoint selects the concrete policy family (VLA, WAM, ACT, and so on);
+# the container itself only provides the shared LeRobot ModelService runtime.
+
+ARG PYTHON_VERSION=3.12
+FROM python:${PYTHON_VERSION}-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    PATH=/app/.venv/bin:${PATH}
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libglib2.0-0 \
+        libgl1 \
+        libgomp1 \
+        libsm6 \
+        libxext6 \
+        libegl1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install policy inference dependencies only (no RoboCasa/MuJoCo or dev tools).
+COPY pyproject.toml uv.lock README.md ./
+COPY src ./src
+COPY configs ./configs
+RUN pip install --no-cache-dir uv
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-default-groups \
+        --extra model-service --group lerobot-policy --python /usr/local/bin/python
+
+ENTRYPOINT ["/app/.venv/bin/python", "-m", "hey_robot.cli.model_service"]
+CMD ["--config", "configs/evaluation/robocasa365.yaml", "--service-id", "robocasa365"]

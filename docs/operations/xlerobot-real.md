@@ -50,7 +50,7 @@ Agent 和 Skill 层不绑定具体机器人形态。Agent 通过进程内 `Skill
 ### 1. 安装依赖
 
 ```bash
-uv sync --group dev
+uv sync --extra gateway --extra agent --extra robot --extra voice --group dev
 ```
 
 ### 2. 下载模型

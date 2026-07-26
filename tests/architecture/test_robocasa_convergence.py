@@ -37,7 +37,7 @@ def test_foundation_policy_does_not_import_environment_owner() -> None:
 
 def test_agent_surface_has_only_generic_manipulate() -> None:
     config = DeploymentConfig.from_yaml(
-        ROOT / "configs" / "evaluation" / "robocasa365.agent.yaml"
+        ROOT / "configs" / "evaluation" / "robocasa365.yaml"
     )
     assert config.skills.tools == ("inspect_scene", "manipulate")
     assert all(
@@ -107,6 +107,16 @@ def test_robocasa_dependencies_have_one_locked_group() -> None:
     assert "mujoco==3.3.1" in text
     assert "grpcio==1.73.1" in text
     assert "tianshou" not in text
+    for policy_or_dataset_dependency in (
+        "transformers",
+        "sentencepiece",
+        "datasets",
+        "pandas",
+        "pyarrow",
+        "jsonlines",
+        "av>=",
+    ):
+        assert policy_or_dataset_dependency not in text
 
 
 def test_local_and_docker_backends_consume_the_locked_group() -> None:

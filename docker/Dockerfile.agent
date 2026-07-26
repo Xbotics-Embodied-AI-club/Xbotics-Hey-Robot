@@ -1,0 +1,7 @@
+ARG BASE_IMAGE=hey-robot-base:latest
+FROM ${BASE_IMAGE}
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-default-groups --extra agent
+
+CMD ["hey-robot", "agent", "--help"]

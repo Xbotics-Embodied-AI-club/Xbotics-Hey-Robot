@@ -118,12 +118,22 @@ src/hey_robot/robot_backends/xlerobot/... -> tests/robot_backends/xlerobot/...
 ## 开发环境
 
 ```bash
-# 安装依赖
-uv sync --group dev
+# 全量非 GPU 开发与测试环境
+uv sync \
+  --extra gateway \
+  --extra agent \
+  --extra robot \
+  --extra voice \
+  --group sim \
+  --group dev
 
 # 确认版本
 uv run python -c "import sys; print(sys.version)"  # 必须是 3.12.x
 ```
+
+`dev` 只包含 lint、类型检查和测试工具，不重复声明各服务的运行依赖。需要执行
+Torch/Ultralytics 专项测试时额外同步 `--extra human-follow`；LeRobot Policy、VLN 和
+RoboCasa365 使用各自隔离的 dependency group 与环境，不要混装到上述开发环境。
 
 ## 代码风格
 

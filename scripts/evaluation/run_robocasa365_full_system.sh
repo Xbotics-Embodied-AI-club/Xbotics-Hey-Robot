@@ -49,7 +49,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 .venv/bin/hey-robot run \
-  --config configs/evaluation/robocasa365.agent.yaml >"$agent_log" 2>&1 &
+  --config configs/evaluation/robocasa365.yaml >"$agent_log" 2>&1 &
 agent_pid=$!
 printf '%s\n' 'robocasa365: Hey Robot deployment started'
 

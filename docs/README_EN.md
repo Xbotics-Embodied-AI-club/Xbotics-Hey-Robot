@@ -172,7 +172,7 @@ an in-process bus and does not require NATS.
 git clone https://github.com/Xbotics-Embodied-AI-club/Xbotics-Hey-Robot.git
 cd Xbotics-Hey-Robot
 
-uv sync --group dev --group sim
+uv sync --extra gateway --extra agent --extra robot --group dev --group sim
 cp .env.example .env
 
 uv run hey-robot inspect --config configs/xlerobot.sim.ubuntu.yaml

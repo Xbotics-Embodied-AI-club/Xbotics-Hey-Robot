@@ -55,6 +55,7 @@ class WebChannel:
         self.runtime_summary_provider = runtime_summary_provider
         self.host = str(context.spec.settings.get("host", "127.0.0.1"))
         self.port = int(context.spec.settings.get("port", 8080))
+        self.serve_frontend = bool(context.spec.settings.get("serve_frontend", True))
         self._server: Any | None = None
         self._server_task: asyncio.Task | None = None
         self._websockets: set[Any] = set()
@@ -74,7 +75,12 @@ class WebChannel:
             ) from exc
 
         app = FastAPI(title="Hey Robot Gateway")
-        app.mount("/static", StaticFiles(directory=str(_static_root())), name="static")
+        if self.serve_frontend:
+            app.mount(
+                "/static",
+                StaticFiles(directory=str(_static_root())),
+                name="static",
+            )
 
         @app.middleware("http")
         async def _static_cache(request, call_next):
@@ -83,29 +89,33 @@ class WebChannel:
                 response.headers["Cache-Control"] = "public, max-age=3600"
             return response
 
-        @app.get("/", response_class=RedirectResponse)
-        async def dashboard() -> RedirectResponse:
-            return RedirectResponse(url="/chat")
+        if self.serve_frontend:
 
-        @app.get("/chat", response_class=HTMLResponse)
-        async def chat_page() -> HTMLResponse:
-            return self._chat_html_response()  # type: ignore[no-any-return]
+            @app.get("/", response_class=RedirectResponse)
+            async def dashboard() -> RedirectResponse:
+                return RedirectResponse(url="/chat")
 
-        @app.get("/admin", response_class=HTMLResponse)
-        async def admin_page() -> HTMLResponse:
-            return self._views_html_response("admin", "index.html")  # type: ignore[no-any-return]
+            @app.get("/chat", response_class=HTMLResponse)
+            async def chat_page() -> HTMLResponse:
+                return self._chat_html_response()  # type: ignore[no-any-return]
 
-        @app.get("/tasks", response_class=HTMLResponse)
-        async def tasks_list_page() -> HTMLResponse:
-            return self._views_html_response("tasks", "index.html")  # type: ignore[no-any-return]
+            @app.get("/admin", response_class=HTMLResponse)
+            async def admin_page() -> HTMLResponse:
+                return self._views_html_response("admin", "index.html")  # type: ignore[no-any-return]
 
-        @app.get("/tasks/{episode_id}", response_class=HTMLResponse)
-        async def tasks_detail_page(episode_id: str) -> HTMLResponse:  # noqa: ARG001
-            return self._views_html_response("tasks", "detail.html")  # type: ignore[no-any-return]
+            @app.get("/tasks", response_class=HTMLResponse)
+            async def tasks_list_page() -> HTMLResponse:
+                return self._views_html_response("tasks", "index.html")  # type: ignore[no-any-return]
 
-        @app.get("/cockpit", response_class=RedirectResponse)
-        async def cockpit_page() -> RedirectResponse:
-            return RedirectResponse(url="/tasks")
+            @app.get("/tasks/{episode_id}", response_class=HTMLResponse)
+            async def tasks_detail_page(
+                episode_id: str,  # noqa: ARG001
+            ) -> HTMLResponse:
+                return self._views_html_response("tasks", "detail.html")  # type: ignore[no-any-return]
+
+            @app.get("/cockpit", response_class=RedirectResponse)
+            async def cockpit_page() -> RedirectResponse:
+                return RedirectResponse(url="/tasks")
 
         @app.get("/health")
         async def health() -> dict[str, str]:

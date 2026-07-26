@@ -49,12 +49,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--manifest",
         type=Path,
-        default=Path("configs/evaluation/robocasa365.tasks.yaml"),
+        default=Path("evaluation/robocasa365/tasks.yaml"),
     )
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path("configs/evaluation/robocasa365.agent.yaml"),
+        default=Path("configs/evaluation/robocasa365.yaml"),
         help="Canonical Hey Robot deployment configuration",
     )
     parser.add_argument("--agent-url", default="http://127.0.0.1:8080/turn")

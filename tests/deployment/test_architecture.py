@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
+import yaml
 
 from hey_robot.config import DeploymentConfig
 from hey_robot.config.validation import validate_deployment
@@ -17,11 +19,71 @@ XLEROBOT_DEV_CONFIGS = (
     "configs/xlerobot.real.ubuntu.yaml",
     "configs/xlerobot.real.windows.yaml",
     "configs/xlerobot.sim.ubuntu.yaml",
-    "configs/xlerobot.sim.vla_vln.yaml",
+    "configs/xlerobot.sim.vln.yaml",
     "configs/xlerobot.sim.windows.yaml",
 )
 
 MINIMAL_MOBILE_SKILLS = {"inspect_scene", "move_base", "turn_base"}
+
+
+def test_runtime_dependencies_are_partitioned_by_container() -> None:
+    project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))[
+        "project"
+    ]
+    core = tuple(project["dependencies"])
+    extras = project["optional-dependencies"]
+
+    assert not any(item.startswith(("torch", "ultralytics")) for item in core)
+    assert not any(item.startswith(("fastapi", "openai", "opencv")) for item in core)
+    assert any(item.startswith("fastapi") for item in extras["gateway"])
+    assert any(item.startswith("openai") for item in extras["agent"])
+    assert any(item.startswith("opencv-python") for item in extras["robot"])
+    assert any(item.startswith("torch") for item in extras["human-follow"])
+
+
+def test_lerobot_policy_has_a_generic_dependency_group_and_dockerfile() -> None:
+    project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    groups = project["dependency-groups"]
+
+    assert "lerobot-policy" in groups
+    assert "vla" not in groups
+    assert Path("docker/Dockerfile.policy").is_file()
+    assert not Path("docker/Dockerfile.vla").exists()
+    policy_dockerfile = Path("docker/Dockerfile.policy").read_text(encoding="utf-8")
+    assert "FROM python:${PYTHON_VERSION}-slim-bookworm" in policy_dockerfile
+    assert 'ENTRYPOINT ["/app/.venv/bin/python"' in policy_dockerfile
+    assert "pip install --break-system-packages \\\n    torch" not in policy_dockerfile
+
+
+def test_vln_image_has_one_locked_cuda_runtime() -> None:
+    project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    vln_dependencies = "\n".join(project["dependency-groups"]["vln"])
+    dockerfile = Path("docker/Dockerfile.vln").read_text(encoding="utf-8")
+    compose = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
+
+    assert "nvidia-cuda-runtime-cu12" in vln_dependencies
+    assert "nvidia-cudnn-cu12" in vln_dependencies
+    assert "FROM python:${PYTHON_VERSION}-slim-bookworm" in dockerfile
+    assert "FROM nvidia/cuda" not in dockerfile
+    assert "CUDA_VERSION" not in compose["services"]["vln"]["build"]["args"]
+
+
+def test_robocasa_uses_generic_lerobot_policy_image() -> None:
+    compose = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
+    services = compose["services"]
+    robocasa_policy = services["robocasa-policy"]
+
+    assert "policy" not in services
+    assert robocasa_policy["build"]["dockerfile"] == "docker/Dockerfile.policy"
+    assert robocasa_policy["image"] == (
+        "${HEY_ROBOT_POLICY_IMAGE:-hey-robot-policy:latest}"
+    )
+    assert robocasa_policy["runtime"] == "nvidia"
+    assert "deploy" not in robocasa_policy
+    assert services["robocasa365"]["build"]["dockerfile"] == (
+        "docker/Dockerfile.robocasa365"
+    )
+    assert "robocasa" in robocasa_policy["profiles"]
 
 
 def test_configs_do_not_use_direct_agent_mode() -> None:
@@ -201,15 +263,14 @@ def test_runtime_configs_use_native_local_surface() -> None:
     migrated_configs = (
         "configs/mock.test.yaml",
         "configs/mock.dev.yaml",
-        "configs/xlerobot.sim.home_vln.yaml",
+        "configs/mock.compose.yaml",
         "configs/xlerobot.sim.ubuntu.yaml",
         "configs/xlerobot.sim.windows.yaml",
-        "configs/xlerobot.sim.vla_vln.yaml",
+        "configs/xlerobot.sim.vln.yaml",
         "configs/xlerobot.real.ubuntu.yaml",
         "configs/xlerobot.real.windows.yaml",
         "configs/xlerobot.real.s600.yaml",
-        "configs/xlerobot.s600.chat.yaml",
-        "configs/evaluation/robocasa365.agent.yaml",
+        "configs/evaluation/robocasa365.yaml",
     )
 
     for path in migrated_configs:
@@ -223,8 +284,18 @@ def test_runtime_configs_use_native_local_surface() -> None:
         ], path
 
 
+def test_compose_mock_config_uses_split_service_addresses() -> None:
+    config = DeploymentConfig.from_yaml("configs/mock.compose.yaml")
+
+    web = config.channels["web"]
+    assert config.deployment.bus.url == "nats://nats:4222"
+    assert web.settings["host"] == "0.0.0.0"  # noqa: S104
+    assert web.settings["port"] == 8080
+    assert web.settings["serve_frontend"] is False
+
+
 def test_robocasa365_exposes_validated_native_vla_surface() -> None:
-    config = DeploymentConfig.from_yaml("configs/evaluation/robocasa365.agent.yaml")
+    config = DeploymentConfig.from_yaml("configs/evaluation/robocasa365.yaml")
 
     assert config.skills.modules == ("hey_robot.skills.builtins",)
     assert config.skills.execution_mode == "local"

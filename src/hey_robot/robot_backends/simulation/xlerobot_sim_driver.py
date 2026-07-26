@@ -223,9 +223,11 @@ class XLeRobotSimDriver:
 
         # Renderer 必须在调用线程创建，因为该线程持有 GL context。
         logger.info(f"{self.robot_id} creating MuJoCo renderer")
-        from mujoco.rendering.classic.renderer import Renderer
-
-        self.renderer = Renderer(self.model, self._render_height, self._render_width)
+        self.renderer = mujoco.Renderer(
+            self.model,
+            self._render_height,
+            self._render_width,
+        )
         logger.info(f"{self.robot_id} MuJoCo renderer ready")
 
         self._scene_cameras = {
