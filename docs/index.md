@@ -36,6 +36,10 @@
 
 ## 研究与非规范性材料
 
+[最小 Embodied Agent Harness 开发指南](development/minimal-embodied-agent-harness-guide.zh-CN.md)
+对照四篇材料、pi-agent-core、RPent 与当前代码，给出配置驱动、模块边界、核心收敛和
+分层验证顺序。
+
 带日期的维护审计用于解释某次提交的状态，不应用来生成部署配置或判断当前 API。历史重构
 记录应通过 Git 历史追溯。项目自己的 [论文草稿](references/paper-draft.md) 随当前代码维护，
 但研究假设和计划实验不构成已交付能力。`docs/references/` 中的第三方论文转录是非规范性
