@@ -270,7 +270,12 @@ def test_internvla_n1_dualvln_rejects_unknown_control_mode() -> None:
 
 def test_internvla_n1_dualvln_runs_system1_for_pixel_plan(
     tmp_path,
+    monkeypatch,
 ) -> None:
+    monkeypatch.setattr(
+        "hey_robot.foundation.backends.vln.internvla_n1._system1_rgb_pair",
+        lambda goal_rgb, current_rgb, **_kwargs: np.stack([goal_rgb, current_rgb]),
+    )
     image_path = tmp_path / "front.png"
     _write_rgb(image_path)
     model = _FakeS2Model(
