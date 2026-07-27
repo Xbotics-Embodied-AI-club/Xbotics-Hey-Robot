@@ -93,7 +93,7 @@ uv sync --frozen --only-group robocasa365 --no-install-project
 scripts/evaluation/setup_robocasa365_env.sh --recreate
 ```
 
-该脚本只删除并重建项目根目录下的 `.robocasa365-venv`，不会删除模型权重或约 5 GB 的
+该脚本只删除并重建项目根目录下的 `.venv-robocasa365`，不会删除模型权重或约 5 GB 的
 RoboCasa assets。它会验证 assets 完整性，并把新环境中的 RoboCasa package 指向统一的
 `artifacts/robocasa365/merged-assets`。CUDA driver、EGL/OpenGL 系统库、模型权重和
 RoboCasa assets 是运行资源，不属于 Python dependency group。

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-env_dir="$repo_root/.robocasa365-venv"
+env_dir="$repo_root/.venv-robocasa365"
 canonical_assets="$repo_root/artifacts/robocasa365/merged-assets"
 legacy_assets="$(dirname "$repo_root")/.cache/Xbotics-Hey-Robot/robocasa365/src/robocasa/robocasa/models/assets"
 source_cache="$(dirname "$repo_root")/.cache/Xbotics-Hey-Robot/robocasa365/src"
@@ -14,7 +14,7 @@ robosuite_ref="aaa8b9b214ce8e77e82926d677b4d61d55e577ab"
 
 if [[ "${1:-}" == "--recreate" ]]; then
   resolved_env="$(realpath -m "$env_dir")"
-  if [[ "$resolved_env" != "$repo_root/.robocasa365-venv" ]]; then
+  if [[ "$resolved_env" != "$repo_root/.venv-robocasa365" ]]; then
     printf 'refusing to remove unexpected environment path: %s\n' "$resolved_env" >&2
     exit 2
   fi

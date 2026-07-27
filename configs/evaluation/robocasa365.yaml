@@ -51,7 +51,7 @@ robots:
     settings:
       target: grpc://127.0.0.1:9092
       managed_backend: true
-      backend_python: .robocasa365-venv/bin/python
+      backend_python: .venv-robocasa365/bin/python
       backend_startup_timeout_sec: 600
       timeout_sec: 60
       control_hz: 20
