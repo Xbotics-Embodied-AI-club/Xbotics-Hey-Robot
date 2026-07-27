@@ -312,7 +312,12 @@ def test_internvla_n1_dualvln_runs_system1_for_pixel_plan(
 
 def test_internvla_n1_system2_real_path_selects_matching_observation_camera(
     tmp_path,
+    monkeypatch,
 ) -> None:
+    monkeypatch.setattr(
+        "hey_robot.foundation.backends.vln.internvla_n1._system1_rgb_pair",
+        lambda goal_rgb, current_rgb, **_kwargs: np.stack([goal_rgb, current_rgb]),
+    )
     front = tmp_path / "front.png"
     wrist = tmp_path / "wrist.png"
     _write_rgb(front)
@@ -341,7 +346,13 @@ def test_internvla_n1_system2_real_path_selects_matching_observation_camera(
     assert result["metrics"]["vln"]["image_source"] == str(front)
 
 
-def test_internvla_n1_system2_real_path_clamps_out_of_bounds_pixel(tmp_path) -> None:
+def test_internvla_n1_system2_real_path_clamps_out_of_bounds_pixel(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "hey_robot.foundation.backends.vln.internvla_n1._system1_rgb_pair",
+        lambda goal_rgb, current_rgb, **_kwargs: np.stack([goal_rgb, current_rgb]),
+    )
     image_path = tmp_path / "front.png"
     _write_rgb(image_path, size=(8, 6))
     model = _FakeS2Model(
@@ -431,7 +442,11 @@ def test_internvla_n1_system2_real_path_maps_non_stop_action_to_heading(
     assert result["metrics"]["vln"]["forward_distance_cm"] == 25.0
 
 
-def test_internvla_n1_system2_loads_base64_observation_image() -> None:
+def test_internvla_n1_system2_loads_base64_observation_image(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "hey_robot.foundation.backends.vln.internvla_n1._system1_rgb_pair",
+        lambda goal_rgb, current_rgb, **_kwargs: np.stack([goal_rgb, current_rgb]),
+    )
     image = Image.fromarray(np.zeros((6, 8, 3), dtype=np.uint8))
     buf = io.BytesIO()
     image.save(buf, format="JPEG")
@@ -504,7 +519,13 @@ def test_dualvln_returns_complete_native_system2_action_chunk(tmp_path) -> None:
     assert len(model.no_infer_calls) == 0
 
 
-def test_internvla_n1_system2_resets_on_new_policy_session(tmp_path) -> None:
+def test_internvla_n1_system2_resets_on_new_policy_session(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "hey_robot.foundation.backends.vln.internvla_n1._system1_rgb_pair",
+        lambda goal_rgb, current_rgb, **_kwargs: np.stack([goal_rgb, current_rgb]),
+    )
     image_path = tmp_path / "front.png"
     _write_rgb(image_path)
     model = _FakeS2Model(
