@@ -76,8 +76,8 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq libosmesa6 libegl1 libgl1
 
-      - name: Sync dev dependencies
-        run: uv sync --frozen --group dev
+      - name: Sync test dependencies
+        run: uv sync --frozen --group dev --extra gateway --extra agent --extra robot --group sim
 
       - name: Run tests with coverage
         run: uv run poe test
