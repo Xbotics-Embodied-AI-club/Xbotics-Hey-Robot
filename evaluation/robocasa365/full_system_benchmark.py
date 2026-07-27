@@ -268,6 +268,16 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
         if agent_turn_task.done():
             await agent_turn_task
         truth = await runtime.read_truth()
+        if truth["done"] and truth["official_success"] and agent_task:
+            await _mark_environment_complete(
+                args.agent_url,
+                str(agent_task["task_id"]),
+                reason="RoboCasa official evaluator reported episode completion.",
+            )
+            tasks = await asyncio.to_thread(_read_agent_tasks, args.agent_url)
+            agent_task = _find_trial_task(
+                tasks, objective=agent_objective, started=started
+            )
         evaluator_events = _evaluator_events(truth)
         model_options = _option_records([runtime_summary], trial_id=trial_id)
         actions = [item for item in evaluator_events if item.get("kind") == "action"]
@@ -360,6 +370,24 @@ async def _send_agent_turn(
     # several planner / perception / option cycles before the response closes.
     async with httpx.AsyncClient(timeout=timeout_sec) as client:
         response = await client.post(url, json=payload)
+        response.raise_for_status()
+
+
+async def _mark_environment_complete(
+    agent_url: str, task_id: str, *, reason: str
+) -> None:
+    parsed = urlsplit(agent_url)
+    endpoint = urlunsplit(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            f"/api/tasks/{task_id}/environment-complete",
+            "",
+            "",
+        )
+    )
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.post(endpoint, json={"reason": reason})
         response.raise_for_status()
 
 

@@ -27,6 +27,7 @@ EpisodeTaskPayload = dict[str, Any] | None
 EpisodeTaskProvider = Callable[[str], EpisodeTaskPayload | Any]
 RuntimeSummaryPayload = dict[str, Any]
 RuntimeSummaryProvider = Callable[[int], RuntimeSummaryPayload | Any]
+EnvironmentCompletionProvider = Callable[[str, str], dict[str, Any] | Any]
 
 
 class WebChannel:
@@ -43,6 +44,7 @@ class WebChannel:
         tasks_list_provider: TasksListProvider | None = None,
         episode_task_provider: EpisodeTaskProvider | None = None,
         runtime_summary_provider: RuntimeSummaryProvider | None = None,
+        environment_completion_provider: EnvironmentCompletionProvider | None = None,
     ) -> None:
         self.context = context
         self.name = context.name
@@ -53,6 +55,7 @@ class WebChannel:
         self.tasks_list_provider = tasks_list_provider
         self.episode_task_provider = episode_task_provider
         self.runtime_summary_provider = runtime_summary_provider
+        self.environment_completion_provider = environment_completion_provider
         self.host = str(context.spec.settings.get("host", "127.0.0.1"))
         self.port = int(context.spec.settings.get("port", 8080))
         self.serve_frontend = bool(context.spec.settings.get("serve_frontend", True))
@@ -207,6 +210,22 @@ class WebChannel:
             if inspect.isawaitable(result):
                 return cast(RuntimeSummaryPayload, await result)
             return cast(RuntimeSummaryPayload, result)
+
+        @app.post("/api/tasks/{task_id}/environment-complete")
+        async def environment_complete(
+            task_id: str, payload: dict[str, Any] | None = None
+        ) -> dict[str, Any]:
+            if self.environment_completion_provider is None:
+                raise HTTPException(
+                    status_code=404, detail="environment completion is disabled"
+                )
+            reason = str(
+                (payload or {}).get("reason") or "environment reported completion"
+            )
+            result = self.environment_completion_provider(task_id, reason)
+            if inspect.isawaitable(result):
+                result = await result
+            return cast(dict[str, Any], result)
 
         @app.websocket("/ws")
         async def ws(socket: WebSocket) -> None:

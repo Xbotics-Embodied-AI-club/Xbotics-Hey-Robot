@@ -638,6 +638,7 @@ class GatewayService:
                         tasks_list_provider=self._web_tasks_list,
                         episode_task_provider=self._web_episode_task,
                         runtime_summary_provider=self._web_runtime_summary,
+                        environment_completion_provider=self._web_environment_complete,
                     )
                 )
                 continue
@@ -648,6 +649,14 @@ class GatewayService:
                 self.channels.register(FeishuChannel(context))
                 continue
             raise ValueError(f"unsupported channel type: {spec.type}")
+
+    def _web_environment_complete(self, task_id: str, reason: str) -> dict[str, Any]:
+        task = self.task_store.task(task_id)
+        if task is None:
+            raise ValueError(f"unknown task: {task_id}")
+        self.task_store.complete_from_environment(task_id, recap=reason)
+        completed = self.task_store.task(task_id) or task
+        return _task_payload(completed)
 
     def _log_channel_ready(self) -> None:
         for name, _channel in sorted(self.channels.items()):
