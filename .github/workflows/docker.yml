@@ -1,0 +1,181 @@
+name: Docker
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Base image (shared FROM line of gateway, agent, robot) ────────────
+  base:
+    name: "Base image"
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image-ref: ${{ steps.set-ref.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Base image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/hey-robot-base
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build base image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.base
+          push: ${{ github.event_name != 'pull_request' }}
+          load: ${{ github.event_name == 'pull_request' }}
+          tags: ${{ github.event_name == 'pull_request' && format('hey-robot-base:pr-{0}', github.event.pull_request.number) || steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Set image reference for dependents
+        id: set-ref
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "ref=hey-robot-base:pr-${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          else
+            TAGS='${{ steps.meta.outputs.tags }}'
+            FIRST_TAG="$(echo "$TAGS" | head -1)"
+            echo "ref=${FIRST_TAG}" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── Service images ────────────────────────────────────────────────────
+  services:
+    name: "${{ matrix.name }}"
+    runs-on: ubuntu-24.04
+    needs: [base]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: gateway, file: docker/Dockerfile.gateway, needs-base: true}
+          - {name: agent, file: docker/Dockerfile.agent, needs-base: true}
+          - {name: robot, file: docker/Dockerfile.robot, needs-base: true}
+          - {name: frontend, file: docker/Dockerfile.frontend, needs-base: false}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Service metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/hey-robot-${{ matrix.name }}
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build service image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          push: ${{ github.event_name != 'pull_request' }}
+          load: ${{ github.event_name == 'pull_request' }}
+          build-args: |
+            ${{ matrix.needs-base && format('BASE_IMAGE={0}', needs.base.outputs.image-ref) || '' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── GPU model-service images (main & tags only — heavy CUDA layers) ───
+  gpu:
+    name: "${{ matrix.name }}"
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'pull_request'
+    needs: [base]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: vln, file: docker/Dockerfile.vln}
+          - {name: policy, file: docker/Dockerfile.policy}
+          - {name: robocasa365, file: docker/Dockerfile.robocasa365}
+    permissions:
+      contents: read
+      packages: write
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: GPU image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/hey-robot-${{ matrix.name }}
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build & push GPU image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

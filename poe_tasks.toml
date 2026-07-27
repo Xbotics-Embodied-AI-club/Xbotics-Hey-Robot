@@ -19,9 +19,23 @@ sequence = [
     { cmd = "uv run --no-sync mypy src" },
 ]
 
+[tasks.check-format]
+help = "Check formatting without applying fixes (CI-safe)"
+sequence = [
+    { cmd = "uv run --no-sync ruff format --check ." },
+    { cmd = "uv run --no-sync ruff check ." },
+]
+
 [tasks.test]
 help = "Run the test suite with coverage"
 cmd = "uv run --no-sync python -m pytest -q"
+
+[tasks.ci]
+help = "Run all CI checks: format, lint, type-check, config validation"
+sequence = [
+    { ref = "check-format" },
+    { ref = "lint" },
+]
 
 [tasks.clean]
 help = "Clean pyc, build, test, and lint artifacts"

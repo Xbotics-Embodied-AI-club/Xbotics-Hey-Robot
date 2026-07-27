@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Format check (no auto-fix) + quick lint ──────────────────────────
+  check-format:
+    name: "Format & quick lint"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Sync dev dependencies
+        run: uv sync --frozen --group dev
+
+      - name: Check formatting & quick lint
+        run: uv run poe check-format
+
+  # ── Full lint: config validation + type-check ────────────────────────
+  lint:
+    name: "Lint & type-check"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Sync dev dependencies
+        run: uv sync --frozen --group dev
+
+      - name: Lint & type-check
+        run: uv run poe lint
+
+  # ── Tests with coverage ──────────────────────────────────────────────
+  test:
+    name: "Tests"
+    runs-on: ubuntu-24.04
+    needs: [check-format, lint]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install system deps (MuJoCo headless)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libosmesa6 libegl1 libgl1
+
+      - name: Sync dev dependencies
+        run: uv sync --frozen --group dev
+
+      - name: Run tests with coverage
+        run: uv run poe test
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-artifacts
+          path: artifacts/test/
+          retention-days: 30
+
+      - name: Publish test results
+        if: always()
+        uses: dorny/test-reporter@v2
+        with:
+          name: Test Results
+          path: artifacts/test/report.xml
+          reporter: java-junit
+          fail-on-error: false
