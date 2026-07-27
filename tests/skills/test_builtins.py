@@ -393,8 +393,35 @@ async def test_native_vln_navigation_runs_bounded_observe_plan_act_loop() -> Non
     robot = FreshRobot()
     models = SequencedModels(
         [
-            {"vln": {"mode": "pixel_goal", "pixel_goal": [240, 320]}},
-            {"vln": {"mode": "stop", "stop": True}},
+            {
+                "vln": {
+                    "control_mode": "base_action_chunk",
+                    "control_chunk": {
+                        "kind": "base_velocity_chunk",
+                        "stop": False,
+                        "actions": [
+                            {
+                                "kind": "base_velocity_step",
+                                "vx": 0.25,
+                                "vy": 0.0,
+                                "wz": 0.0,
+                                "duration_ms": 1000,
+                                "source": "system1_forward",
+                            }
+                        ],
+                    },
+                }
+            },
+            {
+                "vln": {
+                    "control_mode": "base_action_chunk",
+                    "control_chunk": {
+                        "kind": "base_velocity_chunk",
+                        "stop": True,
+                        "actions": [],
+                    },
+                }
+            },
         ]
     )
     sink = Sink()
@@ -405,7 +432,10 @@ async def test_native_vln_navigation_runs_bounded_observe_plan_act_loop() -> Non
 
     assert result.success is True
     assert result.data["termination_reason"] == "model_done"
-    assert [call[1] for call in robot.calls] == ["move_base", "stop_motion"]
+    assert [call[1] for call in robot.calls] == [
+        "base_velocity_step",
+        "stop_motion",
+    ]
     assert [request["request"]["reset_policy"] for request in models.requests] == [
         True,
         False,
@@ -421,7 +451,27 @@ async def test_native_vln_navigation_runs_bounded_observe_plan_act_loop() -> Non
 async def test_native_vln_budget_exhaustion_does_not_claim_success() -> None:
     robot = FreshRobot()
     models = SequencedModels(
-        [{"vln": {"mode": "pixel_goal", "pixel_goal": [240, 320]}}]
+        [
+            {
+                "vln": {
+                    "control_mode": "base_action_chunk",
+                    "control_chunk": {
+                        "kind": "base_velocity_chunk",
+                        "stop": False,
+                        "actions": [
+                            {
+                                "kind": "base_velocity_step",
+                                "vx": 0.25,
+                                "vy": 0.0,
+                                "wz": 0.0,
+                                "duration_ms": 1000,
+                                "source": "system1_forward",
+                            }
+                        ],
+                    },
+                }
+            }
+        ]
     )
 
     result = await _runner(robot, Sink(), models=models).execute(
@@ -431,6 +481,65 @@ async def test_native_vln_budget_exhaustion_does_not_claim_success() -> None:
     assert result.success is False
     assert result.failure_mode == "budget_exhausted"
     assert result.data["termination_reason"] == "max_steps"
+
+
+async def test_native_vln_executes_direct_base_action_chunk_before_replanning() -> None:
+    robot = FreshRobot()
+    models = SequencedModels(
+        [
+            {
+                "vln": {
+                    "control_mode": "base_action_chunk",
+                    "control_chunk": {
+                        "kind": "base_velocity_chunk",
+                        "stop": False,
+                        "actions": [
+                            {
+                                "kind": "base_velocity_step",
+                                "vx": 0.0,
+                                "vy": 0.0,
+                                "wz": 0.3,
+                                "duration_ms": 250,
+                                "source": "discrete_left",
+                            },
+                            {
+                                "kind": "base_velocity_step",
+                                "vx": 0.12,
+                                "vy": 0.0,
+                                "wz": 0.0,
+                                "duration_ms": 250,
+                                "source": "discrete_forward",
+                            },
+                        ],
+                    },
+                }
+            },
+            {
+                "vln": {
+                    "control_mode": "base_action_chunk",
+                    "control_chunk": {
+                        "kind": "base_velocity_chunk",
+                        "stop": True,
+                        "actions": [],
+                    },
+                }
+            },
+        ]
+    )
+
+    result = await _runner(robot, Sink(), models=models).execute(
+        _command("navigate_to", {"target": "desk", "max_steps": 3})
+    )
+
+    assert result.success is True
+    assert result.data["termination_reason"] == "model_done"
+    assert [call[1] for call in robot.calls] == [
+        "base_velocity_step",
+        "base_velocity_step",
+        "stop_motion",
+    ]
+    assert len(models.requests) == 2
+    assert robot.observation_after_ids == [None, 12, 13]
 
 
 async def test_native_dock_skills_use_robot_client_primitives() -> None:

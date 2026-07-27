@@ -20,7 +20,7 @@ resources:
   runtime_dir: runtime/xlerobot.sim.vln
   media:
     root: runtime/xlerobot.sim.vln/media
-    max_items: 64
+    max_items: 1024
     image_save_every_n: 1
   episodes:
     root: runtime/xlerobot.sim.vln/episodes
@@ -32,8 +32,8 @@ skills:
   mode: bringup
   tools:
   - inspect_scene
-  - move_base
-  - turn_base
+  - navigate_to
+  - approach_object
   execution_mode: local
 identity:
   enabled: true
@@ -151,11 +151,14 @@ model_services:
     settings:
       host: 127.0.0.1
       port: 9091
-      backend: internvla_n1_system2
-      control_mode: planner_only
-      execute_low_level_control: false
+      backend: internvla_n1_dualvln
+      control_mode: base_action_chunk
+      base_linear_speed: 0.25
+      base_angular_speed: 0.30
+      max_action_chunk_steps: 4
+      system1_replans_per_waypoint: 4
       mock_mode: false
-      model_path: models/InternVLA-N1-System2
+      model_path: models/InternVLA-N1-DualVLN
       # 由 CUDA_VISIBLE_DEVICES / 容器 GPU 映射选择物理设备；容器内不要绑定宿主机编号。
       device: cuda
       dtype: bf16

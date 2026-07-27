@@ -45,6 +45,7 @@ class VLNPlannerResult:
     output_latent: Any | None = None
     requires_secondary_observation: bool = False
     policy_session_id: str | None = None
+    policy_stage: str | None = None
 
     def to_metrics(
         self, *, backend: str, camera: str, control_mode: str
@@ -72,7 +73,7 @@ class VLNPlannerResult:
             raw={
                 "raw_output": self.raw_output,
                 "image_source": self.image_source,
-                "output_latent": json_public_value(self.output_latent),
+                "latent_available": self.output_latent is not None,
             },
         ).to_metrics()
         return {
@@ -94,9 +95,10 @@ class VLNPlannerResult:
             "image_source": self.image_source,
             "image_width": self.image_width,
             "image_height": self.image_height,
-            "output_latent": json_public_value(self.output_latent),
+            "latent_available": self.output_latent is not None,
             "requires_secondary_observation": self.requires_secondary_observation,
             "policy_session_id": self.policy_session_id,
+            "policy_stage": self.policy_stage,
             "local_goal": local_goal,
             "policy_result": policy_result,
         }

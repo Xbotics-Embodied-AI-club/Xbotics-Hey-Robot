@@ -1,26 +1,61 @@
-from hey_robot.skills.vln.option import planner_to_action
+from hey_robot.skills.vln.option import planner_to_actions
 
 
-def test_pixel_goal_conversion_uses_reported_image_width() -> None:
-    centered = planner_to_action(
-        {"mode": "pixel_goal", "pixel_goal": [100, 160], "image_width": 320}
+def test_base_action_chunk_consumes_velocity_actions() -> None:
+    commands = planner_to_actions(
+        {
+            "control_mode": "base_action_chunk",
+            "control_chunk": {
+                "kind": "base_velocity_chunk",
+                "stop": False,
+                "actions": [
+                    {
+                        "kind": "base_velocity_step",
+                        "vx": 0.0,
+                        "vy": 0.0,
+                        "wz": -0.3,
+                        "duration_ms": 250,
+                        "source": "discrete_right",
+                    }
+                ],
+            },
+        }
     )
-    right = planner_to_action(
-        {"mode": "pixel_goal", "pixel_goal": [100, 300], "image_width": 320}
+
+    command = commands[0]
+    assert command["name"] == "base_velocity_step"
+    assert command["arguments"] == {
+        "vx": 0.0,
+        "vy": 0.0,
+        "wz": -0.3,
+        "duration_ms": 250,
+    }
+    assert command["reason"] == "discrete_right"
+
+
+def test_base_action_chunk_appends_deferred_stop() -> None:
+    commands = planner_to_actions(
+        {
+            "control_mode": "base_action_chunk",
+            "control_chunk": {
+                "kind": "base_velocity_chunk",
+                "stop": False,
+                "stop_after_actions": True,
+                "actions": [
+                    {
+                        "kind": "base_velocity_step",
+                        "vx": 0.25,
+                        "vy": 0.0,
+                        "wz": 0.0,
+                        "duration_ms": 1000,
+                        "source": "system1_forward",
+                    }
+                ],
+            },
+        }
     )
 
-    assert centered["name"] == "move_base"
-    assert right["name"] == "turn_base"
-    assert right["arguments"]["direction"] == "right"
-
-
-def test_discrete_actions_keep_internnav_motion_semantics() -> None:
-    forward = planner_to_action(
-        {"action_code": 1, "heading_deg": 0.0, "forward_distance_cm": 25.0}
-    )
-    left = planner_to_action({"action_code": 2, "heading_deg": -15.0})
-    right = planner_to_action({"action_code": 3, "heading_deg": 15.0})
-
-    assert forward["arguments"] == {"direction": "forward", "distance_cm": 25.0}
-    assert left["arguments"] == {"direction": "left", "angle_deg": 15.0}
-    assert right["arguments"] == {"direction": "right", "angle_deg": 15.0}
+    assert [command["name"] for command in commands] == [
+        "base_velocity_step",
+        "stop_motion",
+    ]

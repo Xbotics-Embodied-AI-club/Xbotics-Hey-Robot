@@ -2,7 +2,7 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-vln_env="${1:-${project_root}/.vln-venv}"
+vln_env="${1:-${project_root}/.venv-vln}"
 
 cd "$project_root"
 
@@ -34,6 +34,8 @@ required = {
     "hey_robot": None,
     "internnav": None,
     "torch": "2.6.0+cu126",
+    "torchvision": "0.21.0+cu126",
+    "cv2": "4.10.0",
     "transformers": "4.51.0",
     "huggingface_hub": "0.33.4",
     "grpc": None,

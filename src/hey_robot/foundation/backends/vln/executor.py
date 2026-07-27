@@ -6,6 +6,7 @@ import time
 from typing import Any, Protocol
 
 from hey_robot.config import ModelServiceSpec
+from hey_robot.foundation.backends.vln.control import build_base_action_chunk
 from hey_robot.foundation.backends.vln.input import planner_input_from_payload
 from hey_robot.foundation.backends.vln.models import (
     VLNPlannerInput,
@@ -32,7 +33,7 @@ class VLNRuntime(Protocol):
 
 
 class VLNPlannerExecutor:
-    """Model-service adapter for a bounded, planner-only VLN backend."""
+    """Model-service adapter for the InternNav VLN planning contract."""
 
     def __init__(
         self,
@@ -44,8 +45,10 @@ class VLNPlannerExecutor:
         self.service_id = service_id
         self.spec = spec
         self.settings = dict(spec.settings)
-        self.backend = str(self.settings.get("backend") or "internvla_n1_system2")
-        self.control_mode = str(self.settings.get("control_mode") or "planner_only")
+        self.backend = str(self.settings.get("backend") or "internvla_n1_dualvln")
+        self.control_mode = str(
+            self.settings.get("control_mode") or "base_action_chunk"
+        )
         self.camera = str(self.settings.get("camera") or "front")
         self._cancelled = threading.Event()
         self._runtime = runtime
@@ -91,10 +94,10 @@ class VLNPlannerExecutor:
     def execute(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._cancelled.clear()
         started_at = time.time()
-        if self.control_mode != "planner_only":
+        if self.control_mode != "base_action_chunk":
             return self._failure(
                 "unsupported_control_mode",
-                f"VLN control_mode={self.control_mode!r} is not enabled",
+                f"VLN control_mode={self.control_mode!r} is not supported",
             )
         missing = self._missing_config()
         if missing:
@@ -121,7 +124,7 @@ class VLNPlannerExecutor:
                 "vln_inference_failed",
                 f"VLN inference failed: {type(exc).__name__}: {exc}",
             )
-        metrics = {
+        metrics: dict[str, Any] = {
             "duration_sec": round(time.time() - started_at, 3),
             "vln": result.to_metrics(
                 backend=self.backend,
@@ -129,6 +132,14 @@ class VLNPlannerExecutor:
                 control_mode=self.control_mode,
             ),
         }
+        metrics["vln"]["base_control"] = {
+            "linear_speed": float(self.settings["base_linear_speed"]),
+            "angular_speed": float(self.settings["base_angular_speed"]),
+            "forward_distance_cm": float(self.settings["discrete_forward_cm"]),
+            "turn_angle_deg": float(self.settings["discrete_turn_deg"]),
+            "max_chunk_steps": int(self.settings["max_action_chunk_steps"]),
+        }
+        metrics["vln"]["control_chunk"] = build_base_action_chunk(result, self.settings)
         if self._cancelled.is_set():
             return {
                 "success": False,
@@ -168,7 +179,7 @@ class VLNPlannerExecutor:
 
     def _get_runtime(self) -> VLNRuntime:
         if self._runtime is None:
-            if self.backend != "internvla_n1_system2":
+            if self.backend != "internvla_n1_dualvln":
                 raise RuntimeError(f"unsupported VLN backend: {self.backend}")
             from hey_robot.foundation.backends.vln.internvla_n1 import (
                 InternVLAN1Runtime,
@@ -225,6 +236,9 @@ class VLNPlannerExecutor:
         return VLNPlannerResult(
             mode="pixel_goal",
             pixel_goal=[row, col],
+            action_code=1,
+            action_sequence=[1],
+            forward_distance_cm=float(self.settings["discrete_forward_cm"]),
             confidence=0.5,
             reason="mock planner returned center pixel goal",
             raw_output=f"({row}, {col})",
@@ -251,8 +265,8 @@ class VLNPlannerExecutor:
 
 
 def build_vln_executor(service_id: str, spec: ModelServiceSpec) -> VLNPlannerExecutor:
-    backend = str(spec.settings.get("backend") or "internvla_n1_system2")
-    if backend != "internvla_n1_system2":
+    backend = str(spec.settings.get("backend") or "internvla_n1_dualvln")
+    if backend != "internvla_n1_dualvln":
         raise ValueError(f"unsupported VLN backend: {backend}")
     return VLNPlannerExecutor(service_id, spec)
 

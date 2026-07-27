@@ -98,16 +98,19 @@ class VLNOptionRunner:
         observation = await ctx.observe(timeout_sec=fresh_timeout)
         trace = _ExecutionTrace()
         look_down_requested = False
+        planning_steps = 0
+        executed_steps = 0
 
-        for step_index in range(max_steps):
+        while executed_steps < max_steps and planning_steps < max_steps:
             ctx.raise_if_cancelled()
             payload = _vln_payload(
                 arguments,
                 observation,
-                reset_policy=step_index == 0,
+                reset_policy=planning_steps == 0,
                 policy_session_id=ctx.run_id,
                 look_down=look_down_requested,
             )
+            look_down_requested = False
             inference = await ctx.models.infer(
                 request.capability,
                 payload,
@@ -115,6 +118,7 @@ class VLNOptionRunner:
                 robot_id=ctx.robot_id,
                 timeout_sec=arguments.get("model_timeout_sec"),
             )
+            planning_steps += 1
             ctx.raise_if_cancelled()
             planner = _planner_data(inference.data)
             trace.planners.append(planner)
@@ -130,7 +134,7 @@ class VLNOptionRunner:
                 return trace.result(True, inference.summary, "environment_done")
 
             if _requires_secondary_observation(planner):
-                if step_index + 1 >= max_steps:
+                if planning_steps >= max_steps:
                     return trace.result(
                         False,
                         "VLN 请求 secondary observation，但没有剩余 planning step。",
@@ -139,7 +143,7 @@ class VLNOptionRunner:
                     )
                 look_down_requested = True
                 await ctx.progress(
-                    (step_index + 1) / max_steps,
+                    executed_steps / max_steps,
                     "VLN 请求 secondary observation，准备重新观察。",
                 )
                 stale = await self._fresh_observation(
@@ -155,7 +159,7 @@ class VLNOptionRunner:
                 continue
 
             try:
-                command = planner_to_action(planner)
+                commands = planner_to_actions(planner)
             except ValueError as exc:
                 return trace.result(
                     False,
@@ -166,47 +170,61 @@ class VLNOptionRunner:
                 )
             if not execute_primitives:
                 return trace.result(
-                    True, inference.summary, "plan_only", command=command
+                    True,
+                    inference.summary,
+                    "plan_only",
+                    command={"kind": "action_chunk", "actions": commands},
                 )
 
             robot = ctx.robot
             assert robot is not None
-            action = await robot.execute(
-                ctx.robot_id,
-                command["name"],
-                command["arguments"],
-                run_id=ctx.run_id,
-                expected_frame_id=observation.frame_id,
-            )
-            trace.steps.append(
-                {
-                    "step_index": step_index,
-                    "primitive": command["name"],
-                    "arguments": command["arguments"],
-                    "reason": command["reason"],
-                    "success": action.success,
-                    "summary": action.summary,
-                    "frame_id": action.frame_id,
-                    "data": dict(action.data),
-                }
-            )
-            if not action.success:
-                return trace.result(
-                    False,
-                    action.summary,
-                    "action_failed",
-                    failure_mode=action.failure_mode or "action_failed",
-                    error=action.error,
+            for chunk_index, command in enumerate(commands):
+                if executed_steps >= max_steps and command["name"] != "stop_motion":
+                    break
+                action = await robot.execute(
+                    ctx.robot_id,
+                    command["name"],
+                    command["arguments"],
+                    run_id=ctx.run_id,
+                    expected_frame_id=observation.frame_id,
                 )
-            if _environment_done(action.data):
-                return trace.result(True, action.summary, "environment_done")
-            await ctx.progress(
-                (step_index + 1) / max_steps,
-                f"VLN 已执行 {command['name']} ({step_index + 1}/{max_steps})。",
-            )
-            if command["name"] == "stop_motion":
-                return trace.result(True, "VLN planner 已确认到达目标。", "model_done")
-            if step_index + 1 < max_steps:
+                trace.steps.append(
+                    {
+                        "step_index": executed_steps,
+                        "planning_step": planning_steps - 1,
+                        "chunk_index": chunk_index,
+                        "primitive": command["name"],
+                        "arguments": command["arguments"],
+                        "reason": command["reason"],
+                        "success": action.success,
+                        "summary": action.summary,
+                        "frame_id": action.frame_id,
+                        "data": dict(action.data),
+                    }
+                )
+                if not action.success:
+                    return trace.result(
+                        False,
+                        action.summary,
+                        "action_failed",
+                        failure_mode=action.failure_mode or "action_failed",
+                        error=action.error,
+                    )
+                if command["name"] != "stop_motion":
+                    executed_steps += 1
+                if _environment_done(action.data):
+                    return trace.result(True, action.summary, "environment_done")
+                await ctx.progress(
+                    min(executed_steps / max_steps, 1.0),
+                    f"VLN 已执行 action chunk {chunk_index + 1}/{len(commands)} "
+                    f"({executed_steps}/{max_steps})。",
+                )
+                if command["name"] == "stop_motion":
+                    return trace.result(
+                        True, "VLN planner 已确认到达目标。", "model_done"
+                    )
+                if executed_steps >= max_steps:
+                    break
                 fresh = await self._fresh_observation(
                     ctx,
                     trace,
@@ -298,64 +316,35 @@ def _environment_done(data: dict[str, Any]) -> bool:
     return isinstance(environment, dict) and bool(environment.get("done"))
 
 
-def planner_to_action(planner: dict[str, Any]) -> dict[str, Any]:
-    if bool(planner.get("stop")) or planner.get("mode") == "stop":
-        return {"name": "stop_motion", "arguments": {}, "reason": "planner_stop"}
-    action_code = planner.get("action_code")
-    if isinstance(action_code, int | float):
-        code = int(action_code)
-        if code == 1:
-            return {
-                "name": "move_base",
+def planner_to_actions(planner: dict[str, Any]) -> list[dict[str, Any]]:
+    if planner.get("control_mode") != "base_action_chunk":
+        raise ValueError("VLN planner requires base_action_chunk control mode")
+    chunk = planner.get("control_chunk")
+    if not isinstance(chunk, dict) or chunk.get("kind") != "base_velocity_chunk":
+        raise ValueError("base_action_chunk requires a base_velocity_chunk")
+    if bool(chunk.get("stop")):
+        return [{"name": "stop_motion", "arguments": {}, "reason": "planner_stop"}]
+    actions = chunk.get("actions")
+    if not isinstance(actions, list) or not actions:
+        raise ValueError("base_velocity_chunk requires at least one action")
+    commands: list[dict[str, Any]] = []
+    for action in actions:
+        if not isinstance(action, dict) or action.get("kind") != "base_velocity_step":
+            raise ValueError("base_velocity_chunk contains an invalid action")
+        commands.append(
+            {
+                "name": "base_velocity_step",
                 "arguments": {
-                    "direction": "forward",
-                    "distance_cm": float(planner.get("forward_distance_cm") or 25.0),
+                    "vx": float(action["vx"]),
+                    "vy": float(action["vy"]),
+                    "wz": float(action["wz"]),
+                    "duration_ms": int(action["duration_ms"]),
                 },
-                "reason": "planner_discrete_forward",
+                "reason": str(action.get("source") or "vln_action_chunk"),
             }
-        if code in {2, 3}:
-            discrete_heading = float(planner.get("heading_deg") or 0.0)
-            return {
-                "name": "turn_base",
-                "arguments": {
-                    "direction": "left" if code == 2 else "right",
-                    "angle_deg": abs(discrete_heading) or 15.0,
-                },
-                "reason": "planner_discrete_turn",
-            }
-    heading = planner.get("heading_deg")
-    if isinstance(heading, int | float):
-        if abs(heading) < 10.0:
-            return {
-                "name": "move_base",
-                "arguments": {"direction": "forward", "distance_cm": 15.0},
-                "reason": "heading_centered",
-            }
-        return {
-            "name": "turn_base",
-            "arguments": {
-                "direction": "right" if heading > 0 else "left",
-                "angle_deg": min(abs(heading), 30.0),
-            },
-            "reason": "planner_heading",
-        }
-    pixel_goal = planner.get("pixel_goal")
-    if isinstance(pixel_goal, list | tuple) and len(pixel_goal) >= 2:
-        width = max(1.0, float(planner.get("image_width") or 640.0))
-        offset = float(pixel_goal[1]) - width / 2.0
-        if abs(offset) <= width * 0.125:
-            return {
-                "name": "move_base",
-                "arguments": {"direction": "forward", "distance_cm": 15.0},
-                "reason": "pixel_centered",
-            }
-        angle = 10.0 + 20.0 * min(abs(offset) / (width / 2.0), 1.0)
-        return {
-            "name": "turn_base",
-            "arguments": {
-                "direction": "right" if offset > 0 else "left",
-                "angle_deg": angle,
-            },
-            "reason": "pixel_off_center",
-        }
-    raise ValueError("planner output lacks stop, heading_deg, or pixel_goal")
+        )
+    if bool(chunk.get("stop_after_actions")):
+        commands.append(
+            {"name": "stop_motion", "arguments": {}, "reason": "planner_stop"}
+        )
+    return commands

@@ -124,7 +124,12 @@ NAVIGATE_TO = Skill(
     handler=navigate_to,
     resources=("camera", "base"),
     timeout_sec=180.0,
-    required_actions=("move_base", "turn_base", "stop_motion"),
+    required_actions=(
+        "move_base",
+        "turn_base",
+        "base_velocity_step",
+        "stop_motion",
+    ),
     required_models=("navigate_to",),
 )
 
@@ -135,7 +140,12 @@ APPROACH_OBJECT = Skill(
     handler=approach_object,
     resources=("camera", "base"),
     timeout_sec=180.0,
-    required_actions=("move_base", "turn_base", "stop_motion"),
+    required_actions=(
+        "move_base",
+        "turn_base",
+        "base_velocity_step",
+        "stop_motion",
+    ),
     required_models=("approach_object",),
 )
 

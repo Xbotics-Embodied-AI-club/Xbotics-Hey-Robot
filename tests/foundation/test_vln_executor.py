@@ -5,19 +5,22 @@ import io
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 from PIL import Image
 
 from hey_robot.config import DeploymentConfig
 from hey_robot.foundation.backends.vln import VLNPlannerExecutor
+from hey_robot.foundation.backends.vln.control import build_base_action_chunk
 from hey_robot.foundation.backends.vln.input import to_float_list
 from hey_robot.foundation.backends.vln.internvla_n1 import (
     InternVLAN1Runtime,
     action_to_heading,
 )
+from hey_robot.foundation.backends.vln.models import VLNPlannerResult
 
 
-class InternVLAN1System2Executor(VLNPlannerExecutor):
-    """Test adapter that injects a tiny fake model into the real runtime wrapper."""
+class InternVLAN1DualVLNExecutor(VLNPlannerExecutor):
+    """Test adapter that injects a tiny dual-system model into the runtime."""
 
     @property
     def _model(self):
@@ -41,8 +44,14 @@ def _spec(settings: dict | None = None):
                     "robot_id": "xlerobot",
                     "target": "127.0.0.1:9091",
                     "provides": ["navigate_to", "approach_object"],
-                    "backend": "internvla_n1_system2",
-                    "control_mode": "planner_only",
+                    "backend": "internvla_n1_dualvln",
+                    "control_mode": "base_action_chunk",
+                    "base_linear_speed": 0.25,
+                    "base_angular_speed": 0.3,
+                    "discrete_forward_cm": 25,
+                    "discrete_turn_deg": 15,
+                    "max_action_chunk_steps": 4,
+                    "system1_replans_per_waypoint": 4,
                     "mock_mode": True,
                     **dict(settings or {}),
                 }
@@ -53,10 +62,15 @@ def _spec(settings: dict | None = None):
 
 
 class _FakeS2Model:
-    def __init__(self, output, *, llm_output: str = "") -> None:
+    def __init__(
+        self, output, *, llm_output: str = "", system1_actions: list[int] | None = None
+    ) -> None:
         self.output = output
         self.llm_output = llm_output
+        self.device = "cpu"
+        self.system1_actions = system1_actions or [1, 1, 1, 1]
         self.calls: list[dict] = []
+        self.system1_calls: list[dict] = []
         self.no_infer_calls: list[dict] = []
         self.reset_calls = 0
 
@@ -79,6 +93,10 @@ class _FakeS2Model:
     def step_no_infer(self, rgb, depth, pose) -> None:
         self.no_infer_calls.append({"rgb": rgb, "depth": depth, "pose": pose})
 
+    def s1_step_latent(self, rgbs, depths, latent):
+        self.system1_calls.append({"rgbs": rgbs, "depths": depths, "latent": latent})
+        return SimpleNamespace(idx=list(self.system1_actions))
+
 
 def _real_spec(settings: dict | None = None):
     return _spec(
@@ -98,15 +116,15 @@ def _write_rgb(path, *, size=(8, 6)) -> None:
     Image.fromarray(data).save(path)
 
 
-def test_internvla_n1_system2_mock_health_is_loaded() -> None:
-    executor = InternVLAN1System2Executor("vln_nav", _spec())
+def test_internvla_n1_dualvln_mock_health_is_loaded() -> None:
+    executor = InternVLAN1DualVLNExecutor("vln_nav", _spec())
 
     health = executor.health()
 
     assert health["online"] is True
     assert health["loaded"] is True
-    assert health["metrics"]["backend"] == "internvla_n1_system2"
-    assert health["metrics"]["control_mode"] == "planner_only"
+    assert health["metrics"]["backend"] == "internvla_n1_dualvln"
+    assert health["metrics"]["control_mode"] == "base_action_chunk"
     assert health["metrics"]["mock_mode"] is True
 
 
@@ -120,8 +138,27 @@ def test_real_vln_health_is_not_loaded_before_runtime_load() -> None:
     assert health["error"] is None
 
 
-def test_internvla_n1_system2_mock_returns_center_pixel_goal() -> None:
-    executor = InternVLAN1System2Executor(
+def test_runtime_requires_complete_dual_system_checkpoint() -> None:
+    vlm = SimpleNamespace(
+        latent_queries=None,
+        traj_dit=None,
+        action_encoder=None,
+        rgb_model=None,
+        memory_encoder=None,
+        cond_projector=None,
+    )
+    inner = SimpleNamespace(
+        config=SimpleNamespace(system1=None),
+        get_model=lambda: vlm,
+    )
+    runtime = InternVLAN1Runtime({"n_query": 4})
+
+    with pytest.raises(RuntimeError, match="DualVLN checkpoint is required"):
+        runtime._validate_dual_system(SimpleNamespace(model=inner))
+
+
+def test_internvla_n1_dualvln_mock_returns_center_pixel_goal() -> None:
+    executor = InternVLAN1DualVLNExecutor(
         "vln_nav",
         _spec({"image_width": 640, "image_height": 480}),
     )
@@ -137,8 +174,8 @@ def test_internvla_n1_system2_mock_returns_center_pixel_goal() -> None:
     assert result["metrics"]["vln"]["local_goal"]["pixel_goal"] == [240, 320]
 
 
-def test_internvla_n1_system2_mock_can_return_stop() -> None:
-    executor = InternVLAN1System2Executor("vln_nav", _spec())
+def test_internvla_n1_dualvln_mock_can_return_stop() -> None:
+    executor = InternVLAN1DualVLNExecutor("vln_nav", _spec())
 
     result = executor.execute({"arguments": {"instruction": "stop when done"}})
 
@@ -147,8 +184,80 @@ def test_internvla_n1_system2_mock_can_return_stop() -> None:
     assert result["metrics"]["vln"]["stop"] is True
 
 
-def test_internvla_n1_system2_rejects_non_planner_control_mode() -> None:
-    executor = InternVLAN1System2Executor(
+def test_base_action_chunk_publishes_calibrated_control_contract() -> None:
+    executor = InternVLAN1DualVLNExecutor(
+        "vln_nav",
+        _spec(
+            {
+                "control_mode": "base_action_chunk",
+                "base_linear_speed": 0.25,
+                "base_angular_speed": 0.3,
+                "discrete_forward_cm": 25,
+                "discrete_turn_deg": 15,
+                "max_action_chunk_steps": 4,
+            }
+        ),
+    )
+
+    result = executor.execute({"arguments": {"target": "desk"}})
+
+    assert result["success"] is True
+    assert result["metrics"]["vln"]["base_control"] == {
+        "linear_speed": 0.25,
+        "angular_speed": 0.3,
+        "forward_distance_cm": 25.0,
+        "turn_angle_deg": 15.0,
+        "max_chunk_steps": 4,
+    }
+    assert result["metrics"]["vln"]["control_chunk"]["kind"] == ("base_velocity_chunk")
+    assert len(result["metrics"]["vln"]["control_chunk"]["actions"]) == 1
+
+
+def test_base_action_chunk_preserves_native_motion_scale() -> None:
+    chunk = build_base_action_chunk(
+        VLNPlannerResult(mode="heading", action_sequence=[2, 2, 1, 3]),
+        {
+            "base_linear_speed": 0.25,
+            "base_angular_speed": 0.3,
+            "discrete_forward_cm": 25,
+            "discrete_turn_deg": 15,
+            "max_action_chunk_steps": 4,
+        },
+    )
+
+    assert chunk["kind"] == "base_velocity_chunk"
+    assert [action["source"] for action in chunk["actions"]] == [
+        "system2_left",
+        "system2_left",
+        "system2_forward",
+        "system2_right",
+    ]
+    assert [action["wz"] for action in chunk["actions"]] == [0.3, 0.3, 0.0, -0.3]
+
+
+def test_base_action_chunk_preserves_stop_after_motion() -> None:
+    chunk = build_base_action_chunk(
+        VLNPlannerResult(
+            mode="trajectory_chunk",
+            action_sequence=[1, 0],
+            policy_stage="system1",
+        ),
+        {
+            "base_linear_speed": 0.25,
+            "base_angular_speed": 0.3,
+            "discrete_forward_cm": 25,
+            "discrete_turn_deg": 15,
+            "max_action_chunk_steps": 4,
+        },
+    )
+
+    assert chunk["stop"] is False
+    assert chunk["stop_after_actions"] is True
+    assert [action["source"] for action in chunk["actions"]] == ["system1_forward"]
+
+
+def test_internvla_n1_dualvln_rejects_unknown_control_mode() -> None:
+    executor = InternVLAN1DualVLNExecutor(
         "vln_nav",
         _spec({"control_mode": "direct_velocity"}),
     )
@@ -159,7 +268,7 @@ def test_internvla_n1_system2_rejects_non_planner_control_mode() -> None:
     assert result["failure_mode"] == "unsupported_control_mode"
 
 
-def test_internvla_n1_system2_real_path_adapts_image_path_and_pixel_output(
+def test_internvla_n1_dualvln_runs_system1_for_pixel_plan(
     tmp_path,
 ) -> None:
     image_path = tmp_path / "front.png"
@@ -167,7 +276,7 @@ def test_internvla_n1_system2_real_path_adapts_image_path_and_pixel_output(
     model = _FakeS2Model(
         SimpleNamespace(output_pixel=np.asarray([3, 4]), output_latent=np.asarray([9]))
     )
-    executor = InternVLAN1System2Executor("vln_nav", _real_spec({"hfov": 90}))
+    executor = InternVLAN1DualVLNExecutor("vln_nav", _real_spec({"hfov": 90}))
     executor._model = model
 
     result = executor.execute(
@@ -182,9 +291,10 @@ def test_internvla_n1_system2_real_path_adapts_image_path_and_pixel_output(
     )
 
     assert result["success"] is True
-    assert result["metrics"]["vln"]["mode"] == "pixel_goal"
+    assert result["metrics"]["vln"]["mode"] == "trajectory_chunk"
     assert result["metrics"]["vln"]["pixel_goal"] == [3, 4]
-    assert result["metrics"]["vln"]["output_latent"] == [9]
+    assert result["metrics"]["vln"]["latent_available"] is True
+    assert result["metrics"]["vln"]["policy_stage"] == "system1"
     assert result["metrics"]["vln"]["image_source"] == str(image_path)
     call = model.calls[0]
     assert call["rgb"].shape == (6, 8, 3)
@@ -202,8 +312,10 @@ def test_internvla_n1_system2_real_path_selects_matching_observation_camera(
     wrist = tmp_path / "wrist.png"
     _write_rgb(front)
     _write_rgb(wrist)
-    model = _FakeS2Model(SimpleNamespace(output_pixel=np.asarray([1, 2])))
-    executor = InternVLAN1System2Executor("vln_nav", _real_spec({"camera": "front"}))
+    model = _FakeS2Model(
+        SimpleNamespace(output_pixel=np.asarray([1, 2]), output_latent=np.asarray([9]))
+    )
+    executor = InternVLAN1DualVLNExecutor("vln_nav", _real_spec({"camera": "front"}))
     executor._model = model
 
     result = executor.execute(
@@ -227,8 +339,12 @@ def test_internvla_n1_system2_real_path_selects_matching_observation_camera(
 def test_internvla_n1_system2_real_path_clamps_out_of_bounds_pixel(tmp_path) -> None:
     image_path = tmp_path / "front.png"
     _write_rgb(image_path, size=(8, 6))
-    model = _FakeS2Model(SimpleNamespace(output_pixel=np.asarray([99, -3])))
-    executor = InternVLAN1System2Executor("vln_nav", _real_spec())
+    model = _FakeS2Model(
+        SimpleNamespace(
+            output_pixel=np.asarray([99, -3]), output_latent=np.asarray([9])
+        )
+    )
+    executor = InternVLAN1DualVLNExecutor("vln_nav", _real_spec())
     executor._model = model
 
     result = executor.execute(
@@ -239,14 +355,13 @@ def test_internvla_n1_system2_real_path_clamps_out_of_bounds_pixel(tmp_path) -> 
     assert result["metrics"]["vln"]["pixel_goal"] == [99, 0]
     assert result["metrics"]["vln"]["image_width"] == 384
     assert result["metrics"]["vln"]["image_height"] == 384
-    assert "clamped" in result["metrics"]["vln"]["reason"]
 
 
 def test_internvla_n1_system2_real_path_maps_stop_action(tmp_path) -> None:
     image_path = tmp_path / "front.png"
     _write_rgb(image_path)
     model = _FakeS2Model(SimpleNamespace(output_action=[0], output_pixel=None))
-    executor = InternVLAN1System2Executor("vln_nav", _real_spec())
+    executor = InternVLAN1DualVLNExecutor("vln_nav", _real_spec())
     executor._model = model
 
     result = executor.execute(
@@ -259,8 +374,10 @@ def test_internvla_n1_system2_real_path_maps_stop_action(tmp_path) -> None:
 
 
 def test_internvla_n1_system2_real_path_requires_image() -> None:
-    executor = InternVLAN1System2Executor("vln_nav", _real_spec())
-    executor._model = _FakeS2Model(SimpleNamespace(output_pixel=np.asarray([1, 2])))
+    executor = InternVLAN1DualVLNExecutor("vln_nav", _real_spec())
+    executor._model = _FakeS2Model(
+        SimpleNamespace(output_pixel=np.asarray([1, 2]), output_latent=np.asarray([9]))
+    )
 
     result = executor.execute({"arguments": {"target": "desk"}})
 
@@ -269,10 +386,12 @@ def test_internvla_n1_system2_real_path_requires_image() -> None:
 
 
 def test_vln_rejects_unsafe_local_media_uri(tmp_path) -> None:
-    executor = InternVLAN1System2Executor(
+    executor = InternVLAN1DualVLNExecutor(
         "vln_nav", _real_spec({"media_root": str(tmp_path)})
     )
-    executor._model = _FakeS2Model(SimpleNamespace(output_pixel=np.asarray([1, 2])))
+    executor._model = _FakeS2Model(
+        SimpleNamespace(output_pixel=np.asarray([1, 2]), output_latent=np.asarray([9]))
+    )
 
     result = executor.execute(
         {
@@ -293,7 +412,7 @@ def test_internvla_n1_system2_real_path_maps_non_stop_action_to_heading(
     image_path = tmp_path / "front.png"
     _write_rgb(image_path)
     model = _FakeS2Model(SimpleNamespace(output_action=[1], output_pixel=None))
-    executor = InternVLAN1System2Executor("vln_nav", _real_spec())
+    executor = InternVLAN1DualVLNExecutor("vln_nav", _real_spec())
     executor._model = model
 
     result = executor.execute(
@@ -311,8 +430,10 @@ def test_internvla_n1_system2_loads_base64_observation_image() -> None:
     image = Image.fromarray(np.zeros((6, 8, 3), dtype=np.uint8))
     buf = io.BytesIO()
     image.save(buf, format="JPEG")
-    model = _FakeS2Model(SimpleNamespace(output_pixel=np.asarray([3, 4])))
-    executor = InternVLAN1System2Executor("vln_nav", _real_spec({"camera": "front"}))
+    model = _FakeS2Model(
+        SimpleNamespace(output_pixel=np.asarray([3, 4]), output_latent=np.asarray([9]))
+    )
+    executor = InternVLAN1DualVLNExecutor("vln_nav", _real_spec({"camera": "front"}))
     executor._model = model
 
     result = executor.execute(
@@ -343,7 +464,7 @@ def test_internvla_n1_system2_action_five_requires_look_down(tmp_path) -> None:
     image_path = tmp_path / "front.png"
     _write_rgb(image_path)
     model = _FakeS2Model(SimpleNamespace(output_action=[5], output_pixel=None))
-    executor = InternVLAN1System2Executor("vln_nav", _real_spec())
+    executor = InternVLAN1DualVLNExecutor("vln_nav", _real_spec())
     executor._model = model
 
     result = executor.execute(
@@ -356,40 +477,35 @@ def test_internvla_n1_system2_action_five_requires_look_down(tmp_path) -> None:
     assert result["metrics"]["vln"]["heading_deg"] is None
 
 
-def test_internvla_n1_system2_action_sequence_uses_current_step(tmp_path) -> None:
+def test_dualvln_returns_complete_native_system2_action_chunk(tmp_path) -> None:
     image_path = tmp_path / "front.png"
     _write_rgb(image_path)
     model = _FakeS2Model(
         SimpleNamespace(output_action=[1, 0], output_pixel=None),
         llm_output="↑STOP",
     )
-    executor = InternVLAN1System2Executor("vln_nav", _real_spec())
+    executor = InternVLAN1DualVLNExecutor("vln_nav", _real_spec())
     executor._model = model
 
     first = executor.execute(
         {"arguments": {"target": "desk", "image_path": str(image_path)}}
     )
-    second = executor.execute(
-        {"arguments": {"target": "desk", "image_path": str(image_path)}}
-    )
-
     assert first["success"] is True
     assert first["metrics"]["vln"]["mode"] == "heading"
     assert first["metrics"]["vln"]["action_sequence"] == [1, 0]
     assert first["metrics"]["vln"]["remaining_action_count"] == 1
     assert first["metrics"]["vln"]["raw_output"] == "↑STOP"
-    assert second["success"] is True
-    assert second["metrics"]["vln"]["mode"] == "stop"
-    assert second["metrics"]["vln"]["remaining_action_count"] == 0
     assert len(model.calls) == 1
-    assert len(model.no_infer_calls) == 1
+    assert len(model.no_infer_calls) == 0
 
 
 def test_internvla_n1_system2_resets_on_new_policy_session(tmp_path) -> None:
     image_path = tmp_path / "front.png"
     _write_rgb(image_path)
-    model = _FakeS2Model(SimpleNamespace(output_pixel=np.asarray([3, 4])))
-    executor = InternVLAN1System2Executor("vln_nav", _real_spec())
+    model = _FakeS2Model(
+        SimpleNamespace(output_pixel=np.asarray([3, 4]), output_latent=np.asarray([9]))
+    )
+    executor = InternVLAN1DualVLNExecutor("vln_nav", _real_spec())
     executor._model = model
 
     payload = {
@@ -415,6 +531,8 @@ def test_internvla_n1_system2_resets_on_new_policy_session(tmp_path) -> None:
     assert result2["success"] is True
     assert result3["success"] is True
     assert model.reset_calls == 2
+    assert len(model.calls) == 2
+    assert len(model.system1_calls) == 3
     assert result3["metrics"]["vln"]["policy_session_id"] == "session-b"
 
 

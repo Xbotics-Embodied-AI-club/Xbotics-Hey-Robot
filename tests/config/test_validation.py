@@ -125,6 +125,39 @@ def test_validate_deployment_requires_explicit_vln_backend_contract(tmp_path) ->
     assert "model service planner requires setting media_root" in messages
 
 
+def test_validate_deployment_rejects_unsafe_dual_vln_control_limits(
+    tmp_path,
+) -> None:
+    config = DeploymentConfig.from_dict(
+        {
+            "resources": {"runtime_dir": str(tmp_path / "runtime")},
+            "model_services": {
+                "planner": {
+                    "type": "vln_planner",
+                    "robot_id": "robot",
+                    "settings": {
+                        "control_mode": "base_action_chunk",
+                        "base_linear_speed": 1.0,
+                        "base_angular_speed": 2.0,
+                        "max_action_chunk_steps": 20,
+                        "system1_replans_per_waypoint": 20,
+                        "discrete_forward_cm": 30,
+                        "discrete_turn_deg": 45,
+                        "mock_mode": True,
+                    },
+                }
+            },
+        }
+    )
+
+    messages = {issue.message for issue in validate_deployment(config)}
+
+    assert any("base_linear_speed" in message for message in messages)
+    assert any("base_angular_speed" in message for message in messages)
+    assert any("max_action_chunk_steps" in message for message in messages)
+    assert any("system1_replans_per_waypoint" in message for message in messages)
+
+
 def test_deployment_config_rejects_unknown_skill_surface_field(
     tmp_path,
 ) -> None:

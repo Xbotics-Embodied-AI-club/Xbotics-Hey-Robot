@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -206,8 +207,8 @@ def _vln_configuration_issues(config: DeploymentConfig) -> list[ValidationIssue]
     for service_id, service in config.model_services.items():
         if service.type != "vln_planner":
             continue
-        backend = str(service.settings.get("backend") or "internvla_n1_system2")
-        if backend != "internvla_n1_system2":
+        backend = str(service.settings.get("backend") or "internvla_n1_dualvln")
+        if backend != "internvla_n1_dualvln":
             issues.append(
                 ValidationIssue(
                     "error",
@@ -215,8 +216,8 @@ def _vln_configuration_issues(config: DeploymentConfig) -> list[ValidationIssue]
                     f"{backend!r}",
                 )
             )
-        control_mode = str(service.settings.get("control_mode") or "planner_only")
-        if control_mode != "planner_only":
+        control_mode = str(service.settings.get("control_mode") or "base_action_chunk")
+        if control_mode != "base_action_chunk":
             issues.append(
                 ValidationIssue(
                     "error",
@@ -224,6 +225,54 @@ def _vln_configuration_issues(config: DeploymentConfig) -> list[ValidationIssue]
                     f"{control_mode!r}",
                 )
             )
+        limits = (
+            ("base_linear_speed", 0.0, 0.25),
+            ("base_angular_speed", 0.0, 0.60),
+            ("max_action_chunk_steps", 0.0, 8.0),
+            ("system1_replans_per_waypoint", 0.0, 16.0),
+            ("discrete_forward_cm", 0.0, 25.0),
+            ("discrete_turn_deg", 0.0, 30.0),
+        )
+        for name, lower, upper in limits:
+            value = service.settings.get(name)
+            try:
+                number = (
+                    float(value)
+                    if isinstance(value, str | int | float)
+                    else float("nan")
+                )
+            except (TypeError, ValueError):
+                number = float("nan")
+            if not lower < number <= upper:
+                issues.append(
+                    ValidationIssue(
+                        "error",
+                        f"model service {service_id} requires {name} in "
+                        f"({lower}, {upper}] for base_action_chunk",
+                    )
+                )
+        try:
+            forward_duration_ms = (
+                10.0
+                * float(service.settings["discrete_forward_cm"])
+                / float(service.settings["base_linear_speed"])
+            )
+            turn_duration_ms = (
+                1000.0
+                * math.radians(float(service.settings["discrete_turn_deg"]))
+                / float(service.settings["base_angular_speed"])
+            )
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            pass
+        else:
+            if max(forward_duration_ms, turn_duration_ms) > 1000.0:
+                issues.append(
+                    ValidationIssue(
+                        "error",
+                        f"model service {service_id} native VLN action exceeds "
+                        "the 1000ms base velocity safety window",
+                    )
+                )
         if bool(service.settings.get("mock_mode", False)):
             continue
         issues.extend(

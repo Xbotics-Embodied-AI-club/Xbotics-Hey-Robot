@@ -19,11 +19,11 @@ XLEROBOT_DEV_CONFIGS = (
     "configs/xlerobot.real.ubuntu.yaml",
     "configs/xlerobot.real.windows.yaml",
     "configs/xlerobot.sim.ubuntu.yaml",
-    "configs/xlerobot.sim.vln.yaml",
     "configs/xlerobot.sim.windows.yaml",
 )
 
 MINIMAL_MOBILE_SKILLS = {"inspect_scene", "move_base", "turn_base"}
+VLN_MOBILE_SKILLS = {"inspect_scene", "navigate_to", "approach_object"}
 
 
 def test_runtime_dependencies_are_partitioned_by_container() -> None:
@@ -63,6 +63,9 @@ def test_vln_image_has_one_locked_cuda_runtime() -> None:
 
     assert "nvidia-cuda-runtime-cu12" in vln_dependencies
     assert "nvidia-cudnn-cu12" in vln_dependencies
+    assert "torch==2.6.0" in vln_dependencies
+    assert "torchvision==0.21.0" in vln_dependencies
+    assert "opencv-python==4.10.0.84" in vln_dependencies
     assert "FROM python:${PYTHON_VERSION}-slim-bookworm" in dockerfile
     assert "FROM nvidia/cuda" not in dockerfile
     assert "CUDA_VERSION" not in compose["services"]["vln"]["build"]["args"]
@@ -152,6 +155,13 @@ def test_xlerobot_runtime_configs_use_minimal_mobile_skill_surface() -> None:
             ]
 
     assert offenders == {}
+
+
+def test_xlerobot_vln_config_exposes_only_navigation_options() -> None:
+    config = DeploymentConfig.from_yaml("configs/xlerobot.sim.vln.yaml")
+
+    assert config.skills.mode == "bringup"
+    assert set(config.skills.tools) == VLN_MOBILE_SKILLS
 
 
 def test_protocol_does_not_export_skill_contract_runtime() -> None:

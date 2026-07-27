@@ -210,6 +210,12 @@ lerobot-policy = [
 ]
 
 vln = [
+    # InternVLA-N1 was released and validated on the PyTorch 2.6 CUDA 12.6
+    # stack. Declare the image runtime explicitly instead of relying on a
+    # transitive dependency from InternNav's research packages.
+    "torch==2.6.0",
+    "torchvision==0.21.0",
+    "opencv-python==4.10.0.84",
     "transformers==4.51.0",
     "huggingface-hub==0.33.4",
     "diffusers==0.32.2",
@@ -219,7 +225,7 @@ vln = [
     "einops==0.8.1",
     "triton==3.1.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
     # The explicit PyTorch CUDA index ships thin wheels. Keep their runtime
-    # libraries in this isolated group so .vln-venv works outside CUDA images.
+    # libraries in this isolated group so .venv-vln works outside CUDA images.
     "nvidia-cublas-cu12==12.6.4.1; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "nvidia-cuda-cupti-cu12==12.6.80; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "nvidia-cuda-nvrtc-cu12==12.6.77; sys_platform == 'linux' and platform_machine == 'x86_64'",

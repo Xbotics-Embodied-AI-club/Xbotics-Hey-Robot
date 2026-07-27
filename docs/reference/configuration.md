@@ -182,9 +182,13 @@ model_services:
 通用字段为 `type`、`robot_id`、`enabled`、`target`、`provides`、`timeout_sec` 和
 `settings`。VLA/VLN 的必填 settings 由配置校验器按 type 检查：
 
-- `vln_planner` 当前只支持 `backend: internvla_n1_system2` 和
-  `control_mode: planner_only`；非 mock 模式还需要 `model_path`、`internnav_repo`、
-  `media_root`。
+- `vln_planner` 当前使用 `backend: internvla_n1_dualvln`。执行模式为
+  `control_mode: base_action_chunk`，并要求 `base_linear_speed`、
+  `base_angular_speed`、`max_action_chunk_steps`、
+  `system1_replans_per_waypoint`、`discrete_forward_cm` 和
+  `discrete_turn_deg`。离散动作必须能在 Robot Runtime 的 1000ms 速度安全窗口内
+  完成；非 mock 模式还需要 `model_path`、`internnav_repo`、`media_root`，且
+  `model_path` 必须指向包含 System 1 权重的 DualVLN checkpoint。
 - `robot_policy` 当前只支持 `runtime: lerobot`，并要求 `policy_path`、
   `policy_device`、`action_space`、正数 `action_dimensions`。
 

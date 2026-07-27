@@ -11,8 +11,8 @@
 | 实验 VLN | `configs/xlerobot.sim.vln.yaml` |
 
 Windows/Ubuntu主配置只向Agent开放`inspect_scene`、`move_base`和`turn_base`，不包含
-ModelService。实验配置声明 VLN ModelService，但当前同样只开放这3个 Skill；
-模型服务条目用于独立联调，必须把对应Skill显式加入`skills.tools`后Agent才能调用。
+ModelService。实验 VLN 配置额外开放`navigate_to`和`approach_object`，由独立
+InternNav ModelService 提供导航能力。
 
 ## 平台差异
 
@@ -34,7 +34,7 @@ ModelService。实验配置声明 VLN ModelService，但当前同样只开放这
                         ▼
               ┌─────────────────────────┐
               │ VLN 导航服务              │
-              │ InternVLA-N1-System2    │
+              │ InternVLA-N1-DualVLN   │
               │ (transformers 4.x)      │
               └─────────────────────────┘
 ```
@@ -59,7 +59,7 @@ huggingface-hub、transformers 等包的版本冲突：
 
 **版本约束（Python 3.12）：**
 
-| 包 | 主环境 (.venv) | VLN 环境 (.vln-venv) | 冲突原因 |
+| 包 | 主环境 (.venv) | VLN 环境 (.venv-vln) | 冲突原因 |
 |---|---|---|---|
 | lerobot | >= 0.6.0 | — | 0.4.x/0.5.x dataclass bug 在 3.12 上无法 import |
 | transformers | >= 5.4.0, < 5.6.0 | == 4.51.0 | lerobot 0.6.0 要求 5.x，InternNav 要求 4.x |
@@ -85,7 +85,7 @@ uv sync --extra gateway --extra agent --extra robot --group sim --group dev
 
 之后主进程命令（`hey-robot run` 和测试脚本）使用 `.venv/bin/python`。
 
-### VLN 环境（.vln-venv）：导航模型服务
+### VLN 环境（.venv-vln）：导航模型服务
 
 由于 VLN（InternVLA-N1）依赖 `transformers==4.51.0` + `huggingface-hub==0.33.4`，
 与主环境的 `transformers>=5.4` + `huggingface-hub>=1.0` 不兼容，必须创建独立 venv：
@@ -154,13 +154,17 @@ uv run hey-robot run --config configs/xlerobot.sim.ubuntu.yaml
 
 ```bash
 git submodule update --init --recursive third_party/InternNav
-test -d models/InternVLA-N1-System2
+HF_ENDPOINT="${HF_ENDPOINT:-https://huggingface.co}" \
+  .venv-vln/bin/huggingface-cli download \
+  InternRobotics/InternVLA-N1-DualVLN \
+  --local-dir models/InternVLA-N1-DualVLN
+test -f models/InternVLA-N1-DualVLN/model.safetensors.index.json
 ```
 
 ### 实验 VLN：2. 启动 VLN 服务
 
 ```bash
-.vln-venv/bin/python -m hey_robot.cli.model_service \
+.venv-vln/bin/python -m hey_robot.cli.model_service \
   --config configs/xlerobot.sim.vln.yaml \
   --service-id vln_nav
 ```
@@ -203,13 +207,17 @@ model_services:
     type: vln_planner
     target: grpc://127.0.0.1:9091
     settings:
-      backend: internvla_n1_system2
+      backend: internvla_n1_dualvln
       mock_mode: false              # 内部测试开关；true 时跳过模型
-      model_path: models/InternVLA-N1-System2
+      model_path: models/InternVLA-N1-DualVLN
       device: cuda                  # 物理 GPU 由 CUDA_VISIBLE_DEVICES / 容器映射选择
       attn_implementation: sdpa     # 用 PyTorch 内置 SDPA 代替 flash_attn
       internnav_repo: third_party/InternNav
-      control_mode: planner_only    # 当前仅支持 planner_only
+      control_mode: base_action_chunk
+      base_linear_speed: 0.25
+      base_angular_speed: 0.30
+      max_action_chunk_steps: 4
+      system1_replans_per_waypoint: 4
       camera: front
       image_width: 640
       image_height: 480
@@ -227,7 +235,7 @@ model_services:
 | 值 | 行为 | 适用场景 |
 |---|---|---|
 | `true` | 返回测试替身结果（屏幕中心点/配置的 heading） | 调试 gRPC 管道、skill 调度 |
-| `false` | 加载真实 InternVLA-N1 模型推理 | 实际导航验证 |
+| `false` | 加载真实 InternVLA-N1 DualVLN 模型推理 | 实际导航验证 |
 
 `mock_mode` 是现有配置字段名，仅用于内部测试，不表示项目对外提供独立的 Mock 机器人环境。
 
@@ -253,7 +261,7 @@ model_services:
 
 ## Agent 可见 Skills
 
-普通Windows/Ubuntu仿真配置和`xlerobot.sim.vln.yaml`当前都只开放：
+普通Windows/Ubuntu仿真配置只开放：
 
 | 类别 | Skill | 说明 |
 |---|---|---|
@@ -265,13 +273,19 @@ model_services:
 
 | 类别 | Skill | 当前状态 |
 |---|---|---|
-| 导航 | `navigate_to` | 需要 `vln_nav` gRPC 服务 |
-| 导航 | `approach_object` | 需要 `vln_nav` gRPC 服务 |
+| 导航 | `navigate_to` | 需要 `vln_nav` gRPC 服务，输出受限底盘控制周期 |
+| 导航 | `approach_object` | 需要 `vln_nav` gRPC 服务，输出受限底盘控制周期 |
 
-这些Skill已注册，但当前不在实验YAML的`skills.tools`中，因此不会出现在Agent tool
-surface。启用时必须同时验证ModelService health、capability name、observation mapping、
-action dimensions、fresh frame和budget termination。仓库测试覆盖接口链路，不代表指定
-checkpoint已经完成真实任务效果验证。
+实验 VLN 配置已将这两个 Skill 暴露给 Agent。`base_action_chunk` 模式保留
+DualVLN 的原生双系统边界：System 2 输出转向、像素 waypoint 或 STOP；System 1
+消费 latent waypoint 和连续 RGB 观测，生成最多4步局部轨迹动作。ModelService 将原生
+动作按 `15°` / `25 cm` 语义校准为 `base_velocity_chunk`，Robot Runtime 逐个执行其中的
+`base_velocity_step`，每步之间获取 fresh observation，整个 chunk 完成后再规划。一个
+`navigate_to` run 内保持同一 policy session 和 waypoint latent；模型不直接访问串口或
+仿真驱动。纯 `InternVLA-N1-System2` checkpoint 缺少 System 1 权重，配置会在加载阶段
+明确失败，不能以固定前进或随机 latent 代替。启用时必须同时验证 ModelService health、capability name、observation
+mapping、fresh frame 和 budget termination。仓库测试覆盖接口链路，不代表指定
+checkpoint 已经完成真实任务效果验证。
 
 ## Docker 状态
 
@@ -421,9 +435,9 @@ export MUJOCO_GL=egl
 
 ### VLN 报 huggingface-hub 版本冲突
 
-说明 VLN 服务用了主环境或 `.vln-venv` 没有按锁文件同步。VLN 需要
+说明 VLN 服务用了主环境或 `.venv-vln` 没有按锁文件同步。VLN 需要
 `huggingface-hub==0.33.4`。运行 `scripts/dev/setup_vln_env.sh` 重建独立环境，
-不要使用 `uv sync --group vln --python .vln-venv/bin/python`；后者缺少
+不要使用 `uv sync --group vln --python .venv-vln/bin/python`；后者缺少
 `model-service` extra，并且仍可能选择项目
 默认 `.venv`。
 
