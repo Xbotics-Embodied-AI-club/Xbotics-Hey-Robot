@@ -195,6 +195,7 @@ class HumanFollowService:
             on_stop=on_stop,
         )
 
+        result: dict[str, Any] = {}
         try:
             result = await runner.run()
         except asyncio.CancelledError:
