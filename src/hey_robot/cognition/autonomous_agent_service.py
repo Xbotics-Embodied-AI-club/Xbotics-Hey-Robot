@@ -123,7 +123,19 @@ class AutonomousAgentService:
             if envelope is not None:
                 await self._publish_result(envelope, event.run_id, applied.final_text)
         for task in self.tasks.resumable_tasks():
-            await self._resume_task(task, source="startup_recovery")
+            reason = (
+                "检测到重启前尚未完成审议的任务。为避免自动触发新的机器人动作，"
+                "任务已暂停；请确认后继续。"
+            )
+            self.tasks.pause_task(task.task_id, reason)
+            envelope = self.tasks.task_envelope(task.task_id)
+            if envelope is not None:
+                await self._publish_result(
+                    envelope,
+                    self.tasks.task_interaction_id(task.task_id)
+                    or f"recovery_{task.task_id}",
+                    reason,
+                )
 
     async def stop(self) -> None:
         for agent in tuple(self._agents.values()):
@@ -156,7 +168,10 @@ class AutonomousAgentService:
         agent = self._agent(turn.session_key)
         active_task = self.tasks.active_task(turn.session_key)
         try:
-            if turn.kind == "steer" or active_task is not None:
+            has_active_run = bool(
+                active_task and self.tasks.active_run_ids(active_task.task_id)
+            )
+            if turn.kind == "steer" or has_active_run:
                 result = await agent.steer(command, on_text_delta=publish_text_delta)
             else:
                 result = await agent.prompt(command, on_text_delta=publish_text_delta)
@@ -224,9 +239,12 @@ class AutonomousAgentService:
         )
         envelope = self.tasks.task_envelope(task.task_id)
         if envelope is not None:
+            routed_interaction_id = (
+                self.tasks.task_interaction_id(task.task_id) or interaction_id
+            )
             await self._publish_result(
                 envelope,
-                interaction_id,
+                routed_interaction_id,
                 result.text,
                 final=getattr(result, "status", None) != "waiting",
             )
@@ -245,9 +263,14 @@ class AutonomousAgentService:
         )
         envelope = self.tasks.task_envelope(task.task_id)
         if envelope is not None:
+            routed_interaction_id = self.tasks.task_interaction_id(task.task_id)
             await self._publish_result(
                 envelope,
-                f"resume_{task.task_id}_{self.tasks.resume_after_sequence(task.task_id)}",
+                routed_interaction_id
+                or (
+                    f"resume_{task.task_id}_"
+                    f"{self.tasks.resume_after_sequence(task.task_id)}"
+                ),
                 result.text,
                 final=getattr(result, "status", None) != "waiting",
             )

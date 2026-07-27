@@ -53,18 +53,25 @@ class AgentToolExecutor:
         *,
         session_key: str,
         envelope: Envelope,
+        interaction_id: str = "",
         objective: str,
         proposal: PreparedToolCall,
         tool_call_id: str,
     ) -> ToolExecution:
         if isinstance(proposal, PhysicalToolCall):
             return await self._execute_skill(
-                session_key, envelope, objective, proposal, tool_call_id
+                session_key,
+                envelope,
+                interaction_id,
+                objective,
+                proposal,
+                tool_call_id,
             )
         if isinstance(proposal, AgentResponseCall):
             return await self._respond(
                 session_key=session_key,
                 envelope=envelope,
+                interaction_id=interaction_id,
                 objective=objective,
                 proposal=proposal,
             )
@@ -90,11 +97,26 @@ class AgentToolExecutor:
         *,
         session_key: str,
         envelope: Envelope,
+        interaction_id: str,
         objective: str,
         proposal: AgentResponseCall,
     ) -> ToolExecution:
         task = self._tasks.active_task(session_key)
         if proposal.task_state == "none":
+            if task is not None:
+                return ToolExecution(
+                    "continue",
+                    ToolOutcome(
+                        "failed",
+                        (
+                            "当前存在进行中的持续任务；请明确选择 wait、complete "
+                            "或 cancel，不能使用 none。"
+                        ),
+                        {"failure_mode": "active_task_state_required"},
+                    ),
+                    proposal,
+                    task=task,
+                )
             return ToolExecution(
                 "respond",
                 ToolOutcome("completed", proposal.message),
@@ -109,6 +131,7 @@ class AgentToolExecutor:
                 task = self._tasks.create_task(
                     session_key=session_key,
                     envelope=envelope,
+                    interaction_id=interaction_id,
                     objective=objective,
                     ui_summary=objective,
                     deadline_at=time.time()
@@ -204,6 +227,7 @@ class AgentToolExecutor:
         self,
         session_key: str,
         envelope: Envelope,
+        interaction_id: str,
         objective: str,
         proposal: PhysicalToolCall,
         tool_call_id: str,
@@ -226,6 +250,7 @@ class AgentToolExecutor:
             task = self._tasks.create_task(
                 session_key=session_key,
                 envelope=envelope,
+                interaction_id=interaction_id,
                 objective=objective,
                 ui_summary=objective,
                 deadline_at=time.time()

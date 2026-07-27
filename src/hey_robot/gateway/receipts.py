@@ -50,5 +50,12 @@ class InteractionReceiptStore:
                 (result_kind, time.time(), interaction_id),
             )
 
+    def status(self, interaction_id: str) -> str | None:
+        row = self._db.execute(
+            "SELECT status FROM interaction_receipts WHERE interaction_id=?",
+            (interaction_id,),
+        ).fetchone()
+        return str(row[0]) if row is not None else None
+
     def close(self) -> None:
         self._db.close()

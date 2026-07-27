@@ -184,3 +184,37 @@ def test_file_run_store_externalizes_numpy_policy_output_as_typed_npz(tmp_path) 
     np.testing.assert_array_equal(
         loaded["model_outputs"]["action"], np.arange(64, dtype=np.float32)
     )
+
+
+def test_file_run_store_pins_observations_outside_transient_image_limit(
+    tmp_path,
+) -> None:
+    media = LocalMediaStore(tmp_path / "media", max_items=2)
+    store = FileRunStore(tmp_path / "runs", artifact_store=media)
+    image = np.zeros((8, 8, 3), dtype=np.uint8)
+    transient = media.put_image(image, robot_id="mock0", frame_id=1, camera="front")
+    event = SkillEvent(
+        envelope=Envelope(robot_id="mock0"),
+        run_id="run-evidence",
+        sequence=1,
+        name="inspect",
+        phase="completed",
+        timestamp=1.0,
+        result=SkillResult(
+            True,
+            "seen",
+            "completed",
+            observations=(transient,),
+        ),
+    )
+
+    persisted = store.append_event(event)
+    assert persisted.result is not None
+    pinned = persisted.result.observations[0]
+    assert pinned.uri.startswith("media://local/evidence/run-evidence/")
+
+    for frame_id in range(2, 8):
+        media.put_image(image, robot_id="mock0", frame_id=frame_id, camera="front")
+
+    assert media.resolve_image(pinned).shape == (8, 8, 3)
+    assert store.append_event(event) == persisted

@@ -260,6 +260,34 @@ def test_task_store_persists_one_canonical_envelope(tmp_path) -> None:
     assert "task_envelopes" not in tables
 
 
+def test_task_store_updates_continuation_route_without_changing_task_identity(
+    tmp_path,
+) -> None:
+    store = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    task = store.create_task(
+        session_key="session-1",
+        envelope=Envelope(
+            trace_id="trace-1",
+            robot_id="sim_robot",
+            episode_id="episode-1",
+        ),
+        interaction_id="turn-1",
+        objective="inspect",
+    )
+    latest = Envelope(
+        trace_id="trace-2",
+        robot_id="sim_robot",
+        episode_id="episode-1",
+    )
+
+    store.update_route(task.task_id, envelope=latest, interaction_id="turn-2")
+
+    assert store.task(task.task_id).objective == "inspect"  # type: ignore[union-attr]
+    assert store.task_envelope(task.task_id) == latest
+    assert store.task_interaction_id(task.task_id) == "turn-2"
+    store.close()
+
+
 def test_task_store_rejects_unversioned_runtime_instead_of_migrating(tmp_path) -> None:
     path = tmp_path / "tasks.sqlite3"
     db = sqlite3.connect(path)
@@ -653,6 +681,40 @@ async def test_tool_executor_applies_explicit_wait_and_complete_transitions(
 
 
 @pytest.mark.asyncio
+async def test_tool_executor_rejects_none_while_task_is_active(tmp_path) -> None:
+    tasks = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    executor = AgentToolExecutor(
+        _Config(),  # type: ignore[arg-type]
+        tasks,
+        _SubmittingCoordinator(tasks),  # type: ignore[arg-type]
+        _SkillClient(),  # type: ignore[arg-type]
+    )
+    envelope = Envelope(robot_id="sim_robot")
+    await executor.execute(
+        session_key="session-1",
+        envelope=envelope,
+        interaction_id="turn-1",
+        objective="inspect",
+        proposal=AgentResponseCall("wait", "working"),
+        tool_call_id="wait-1",
+    )
+
+    rejected = await executor.execute(
+        session_key="session-1",
+        envelope=envelope,
+        interaction_id="turn-1",
+        objective="inspect",
+        proposal=AgentResponseCall("none", "done"),
+        tool_call_id="respond-1",
+    )
+
+    assert rejected.directive == "continue"
+    assert rejected.outcome.data["failure_mode"] == "active_task_state_required"
+    assert tasks.active_task("session-1") is not None
+    tasks.close()
+
+
+@pytest.mark.asyncio
 async def test_tool_executor_rejects_completion_without_physical_evidence(
     tmp_path,
 ) -> None:
@@ -918,7 +980,7 @@ class _NoReconciliation:
 
 
 @pytest.mark.asyncio
-async def test_startup_resumes_terminal_undeliberated_step(tmp_path) -> None:
+async def test_startup_pauses_terminal_undeliberated_step(tmp_path) -> None:
     path = tmp_path / "tasks.sqlite3"
     original = AgentTaskStore(path)
     task = original.create_task(
@@ -951,8 +1013,12 @@ async def test_startup_resumes_terminal_undeliberated_step(tmp_path) -> None:
 
     await service._recover_tasks()
 
-    assert len(resume_agent.triggers) == 1
-    assert resume_agent.triggers[0].source == "startup_recovery"
+    assert resume_agent.triggers == []
+    recovered = restarted.task(task.task_id)
+    assert recovered is not None
+    assert recovered.status == "paused"
+    assert "避免自动触发新的机器人动作" in (recovered.last_error or "")
+    assert service.bus.published
     restarted.close()
 
 

@@ -9,7 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Protocol
 
-from hey_robot.protocol import ArtifactRef
+from hey_robot.protocol import ArtifactRef, ImageRef
 from hey_robot.protocol.messages import from_payload, to_payload
 from hey_robot.skills.models import SkillCommand, SkillEvent, SkillResult
 
@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 
 class RunArtifactStore(Protocol):
+    def pin_image(self, ref: ImageRef, *, namespace: str) -> ImageRef: ...
+
     def put_json_artifact(
         self,
         payload: Any,
@@ -186,6 +188,27 @@ class FileRunStore:
         result = event.result
         if result is None or self._artifact_store is None:
             return event
+        pinned_observations: tuple[ImageRef, ...] = ()
+        if result.observations:
+            pinned: list[ImageRef] = []
+            for observation in result.observations:
+                try:
+                    pinned.append(
+                        self._artifact_store.pin_image(
+                            observation, namespace=event.run_id
+                        )
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "run %s could not pin observation %s: %s",
+                        event.run_id,
+                        observation.uri,
+                        exc,
+                    )
+                    pinned.append(observation)
+            pinned_observations = tuple(pinned)
+            result = replace(result, observations=pinned_observations)
+            event = replace(event, result=result)
         payload = dict(result.data)
         try:
             encoded = json.dumps(
@@ -257,9 +280,22 @@ class FileRunStore:
             and stored_result.summary == incoming_result.summary
             and stored_result.failure_mode == incoming_result.failure_mode
             and stored_result.error == incoming_result.error
-            and any(
-                artifact.role == "execution_trace"
-                for artifact in stored_result.artifacts
+            and (
+                any(
+                    artifact.role == "execution_trace"
+                    for artifact in stored_result.artifacts
+                )
+                or (
+                    len(stored_result.observations) == len(incoming_result.observations)
+                    and all(
+                        stored_ref.sha256 == incoming_ref.sha256
+                        for stored_ref, incoming_ref in zip(
+                            stored_result.observations,
+                            incoming_result.observations,
+                            strict=True,
+                        )
+                    )
+                )
             )
         )
 

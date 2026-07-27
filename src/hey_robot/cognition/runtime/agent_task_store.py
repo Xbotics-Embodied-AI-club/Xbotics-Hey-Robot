@@ -18,7 +18,7 @@ TaskStatus = Literal["active", "paused", "completed", "blocked", "cancelled", "f
 StepStatus = Literal["pending", "running", "completed", "failed", "cancelled"]
 
 TERMINAL_STATUSES = frozenset({"completed", "blocked", "cancelled", "failed"})
-TASK_SCHEMA_VERSION = 1
+TASK_SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -83,6 +83,7 @@ class AgentTaskStore:
                 task_id TEXT PRIMARY KEY,
                 session_key TEXT NOT NULL,
                 envelope_json TEXT NOT NULL,
+                interaction_id TEXT,
                 objective TEXT NOT NULL,
                 ui_summary TEXT NOT NULL DEFAULT '',
                 status TEXT NOT NULL,
@@ -144,6 +145,7 @@ class AgentTaskStore:
         *,
         session_key: str,
         envelope: Envelope,
+        interaction_id: str | None = None,
         objective: str,
         ui_summary: str = "",
         deadline_at: float | None = None,
@@ -158,16 +160,18 @@ class AgentTaskStore:
         self._db.execute(
             """
             INSERT INTO sustained_tasks (
-                task_id, session_key, envelope_json, objective, ui_summary, status,
+                task_id, session_key, envelope_json, interaction_id,
+                objective, ui_summary, status,
                 created_at, updated_at, step_count,
                 deadline_at, last_error, final_recap
             )
-            VALUES (?, ?, ?, ?, ?, 'active', ?, ?, 0, ?, NULL, NULL)
+            VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, 0, ?, NULL, NULL)
             """,
             (
                 task_id,
                 session_key,
                 json.dumps(to_payload(envelope), ensure_ascii=False, sort_keys=True),
+                interaction_id,
                 objective,
                 ui_summary,
                 now,
@@ -180,6 +184,34 @@ class AgentTaskStore:
         if task is None:
             raise RuntimeError("failed to load newly created sustained task")
         return task
+
+    def update_route(
+        self, task_id: str, *, envelope: Envelope, interaction_id: str
+    ) -> None:
+        """Associate future task continuations with the latest accepted interaction."""
+        self._db.execute(
+            """
+            UPDATE sustained_tasks
+            SET envelope_json=?, interaction_id=?, updated_at=?
+            WHERE task_id=? AND status='active'
+            """,
+            (
+                json.dumps(to_payload(envelope), ensure_ascii=False, sort_keys=True),
+                interaction_id,
+                time.time(),
+                task_id,
+            ),
+        )
+        self._db.commit()
+
+    def task_interaction_id(self, task_id: str) -> str | None:
+        row = self._db.execute(
+            "SELECT interaction_id FROM sustained_tasks WHERE task_id=?",
+            (task_id,),
+        ).fetchone()
+        if row is None or row[0] is None:
+            return None
+        return str(row[0])
 
     def active_task(self, session_key: str) -> AgentTask | None:
         row = self._db.execute(

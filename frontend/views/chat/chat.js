@@ -17,7 +17,7 @@
   let thinkingMsgEl = null;
   let renderedCount = 0;           // number of Store messages already in DOM
   const progressCards = new Map();   // skill_id → DOM element
-  const streamingMessageEls = new Map(); // interaction_id → DOM element
+  const streamingMessageEls = new Map(); // interaction_id/trace_id → reply DOM element
 
   // ── Init ──
   WS.connect();
@@ -56,6 +56,7 @@
             content: r.content || '',
             timestamp: r.timestamp * 1000 || Date.now(),
             metadata: r.metadata || payload.metadata || {},
+            traceKey: payload.envelope?.trace_id || null,
           });
         }
       }
@@ -303,6 +304,9 @@
     if (msg.streamKey) {
       streamingMessageEls.set(msg.streamKey, div);
     }
+    if (msg.traceKey) {
+      streamingMessageEls.set(msg.traceKey, div);
+    }
 
     // Observation images (from agent reply metadata)
     if (msg.metadata && msg.metadata.images && msg.metadata.images.length > 0) {
@@ -323,7 +327,18 @@
     }
 
     messagesInner.appendChild(div);
+    if (msg.traceKey) {
+      placeProgressCardsBeforeReply(msg.traceKey, div);
+    }
     scrollDown();
+  }
+
+  function placeProgressCardsBeforeReply(traceId, replyEl) {
+    for (const child of Array.from(messagesInner.children)) {
+      if (child.dataset?.traceId === traceId && child !== replyEl) {
+        messagesInner.insertBefore(child, replyEl);
+      }
+    }
   }
 
   // ── Lightbox image registry (avoids inline JSON in onclick) ──
@@ -391,7 +406,15 @@
           </div>
         </div>
       `;
-      messagesInner.appendChild(card);
+      card.dataset.traceId = task.traceId || '';
+      const replyEl = task.traceId
+        ? streamingMessageEls.get(task.traceId)
+        : null;
+      if (replyEl && replyEl.parentNode === messagesInner) {
+        messagesInner.insertBefore(card, replyEl);
+      } else {
+        messagesInner.appendChild(card);
+      }
       progressCards.set(skillId, card);
     }
 
@@ -427,7 +450,8 @@
       if (title) {
         title.textContent = (task.name || '任务') + (task.phase === 'failed' ? ' — 失败' : ' — 完成');
       }
-      // Keep card for a moment then clean up
+      // Preserve the completed card in the visible timeline, but release its
+      // live-update lookup after late duplicate events have had time to arrive.
       setTimeout(() => {
         progressCards.delete(skillId);
       }, 10000);

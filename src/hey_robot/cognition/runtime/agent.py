@@ -84,6 +84,12 @@ class Agent:
     ) -> AgentRunResult:
         task = self._tasks.current_task(self.session_key)
         if task is not None:
+            if task.status == "active":
+                self._tasks.update_route(
+                    task.task_id,
+                    envelope=command.envelope,
+                    interaction_id=command.interaction_id,
+                )
             active_runs = self._tasks.active_run_ids(task.task_id)
             if active_runs:
                 # Conversation is the only source of user intent. The returned
@@ -151,6 +157,13 @@ class Agent:
         if previous is not None and not previous.done():
             with suppress(asyncio.CancelledError):
                 await previous
+        active_task = self._tasks.active_task(command.session_key)
+        if active_task is not None:
+            self._tasks.update_route(
+                active_task.task_id,
+                envelope=command.envelope,
+                interaction_id=command.interaction_id,
+            )
         messages = self._context.for_command(command.session_key, command.text)
         self._conversations.append(command.session_key, "user", command.text)
         return await self._launch_drive(
@@ -259,6 +272,7 @@ class Agent:
             execution = await self._executor.execute(
                 session_key=self.session_key,
                 envelope=envelope,
+                interaction_id=interaction_id,
                 objective=objective,
                 proposal=proposal,  # type: ignore[arg-type]
                 tool_call_id=call.tool_call_id,

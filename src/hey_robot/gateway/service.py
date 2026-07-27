@@ -197,7 +197,6 @@ class GatewayService:
                 )
             ),
         )
-        self.interaction_receipts.complete(interaction_id, "conversation_turn")
 
     async def _on_conversation_result(self, _topic: str, payload: dict) -> None:
         result = from_payload(ConversationResult, payload)
@@ -361,6 +360,9 @@ class GatewayService:
         if reply.final and reply.envelope.episode_id:
             self.episodes.append_agent_reply(reply.envelope.episode_id, reply)
         await self.channels.send(reply)
+        interaction_id = reply.metadata.get("interaction_id")
+        if reply.final and isinstance(interaction_id, str):
+            self.interaction_receipts.complete(interaction_id, "conversation_turn")
 
     def _materialize_reply(self, reply: AgentReply) -> AgentReply:
         envelope = reply.envelope

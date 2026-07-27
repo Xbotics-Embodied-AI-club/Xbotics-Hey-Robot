@@ -597,7 +597,14 @@ class XLeRobotSimDriver:
                     f"{self._kernel.gripper_debug_state()}"
                 )
 
-        result = RobotSkillResult(True, cmd.message, {"skill": skill.to_dict()})
+        result = RobotSkillResult(
+            True,
+            cmd.message,
+            {
+                "skill": skill.to_dict(),
+                "base_pose": self._base_pose(),
+            },
+        )
         self.last_skill_result = result
         self.state = "skill_completed"
         self.last_error = None

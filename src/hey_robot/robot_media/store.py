@@ -10,8 +10,10 @@ import hmac
 import io
 import json
 import mimetypes
+import shutil
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
@@ -202,6 +204,21 @@ class LocalMediaStore:
         path = self.path_for_uri(ref.uri)
         with Image.open(path) as image:
             return np.array(image.convert("RGB"))
+
+    def pin_image(self, ref: ImageRef, *, namespace: str) -> ImageRef:
+        """Copy a transient image into durable evidence storage."""
+        source = self.path_for_uri(ref.uri)
+        target_dir = self._ensure_subdir(
+            Path("evidence")
+            / _safe_segment(namespace)
+            / _safe_segment(ref.camera or "cam")
+        )
+        suffix = source.suffix.lower() or ".jpg"
+        digest = ref.sha256 or _sha256_file(source)
+        target = target_dir / f"{digest}{suffix}"
+        if not target.exists():
+            shutil.copy2(source, target)
+        return replace(ref, uri=self.uri_for_path(target))
 
     def load_json_artifact(self, ref: ArtifactRef) -> Any:
         path = self.path_for_uri(ref.uri)

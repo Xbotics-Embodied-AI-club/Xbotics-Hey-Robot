@@ -153,6 +153,56 @@ def test_gateway_preserves_streaming_conversation_result(tmp_path) -> None:
     assert payload["metadata"]["interaction_id"] == "interaction-1"
 
 
+def test_gateway_completes_receipt_only_after_final_result(tmp_path) -> None:
+    gateway = _gateway(tmp_path)
+    turn = UserTurn(
+        Envelope(channel="web", sender_id="web-user", message_id="message-1"),
+        "look around",
+    )
+    asyncio.run(gateway._on_user_turn(turn))
+    fake_bus = cast(FakeBus, gateway.bus)
+    conversation = next(
+        payload
+        for topic, payload in fake_bus.published
+        if topic == gateway.topics.conversation_turn
+    )
+    interaction_id = conversation["interaction_id"]
+    assert gateway.interaction_receipts.status(interaction_id) == "processing"
+
+    partial = ConversationResult(
+        Envelope(channel="web", episode_id=conversation["envelope"]["episode_id"]),
+        interaction_id,
+        "working",
+        final=False,
+    )
+    asyncio.run(
+        gateway._on_conversation_result(
+            gateway.topics.conversation_result, to_payload(partial)
+        )
+    )
+    assert gateway.interaction_receipts.status(interaction_id) == "processing"
+
+    final = ConversationResult(partial.envelope, interaction_id, "done", final=True)
+    asyncio.run(
+        gateway._on_conversation_result(
+            gateway.topics.conversation_result, to_payload(final)
+        )
+    )
+    assert gateway.interaction_receipts.status(interaction_id) == "processing"
+    agent_reply = next(
+        payload
+        for topic, payload in reversed(fake_bus.published)
+        if topic == gateway.topics.agent_reply
+    )
+    asyncio.run(
+        gateway._on_agent_reply(
+            gateway.topics.agent_reply,
+            agent_reply,
+        )
+    )
+    assert gateway.interaction_receipts.status(interaction_id) == "completed"
+
+
 def test_gateway_never_routes_natural_language_directly_to_skill_intent(
     tmp_path,
 ) -> None:

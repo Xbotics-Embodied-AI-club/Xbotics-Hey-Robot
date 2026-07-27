@@ -44,8 +44,8 @@ def test_web_channel_payload_and_live_broadcasts() -> None:
     if isinstance(html_body, bytes):
         html_body = html_body.decode()
     assert "/static/shared/js/api.js" in html_body
-    assert "/static/shared/js/ws.js" in html_body
-    assert "/static/views/chat/chat.js" in html_body
+    assert "/static/shared/js/ws.js?v=20260727-1" in html_body
+    assert "/static/views/chat/chat.js?v=20260727-1" in html_body
 
     api_js = (
         frontend_root().joinpath("shared", "js", "api.js").read_text(encoding="utf-8")
@@ -99,12 +99,18 @@ def test_interaction_ui_treats_progress_replies_as_non_terminal() -> None:
     assert "bindStore" in static_js
     assert "loadLastMessages" in static_js
     assert "streamingMessageEls" in static_js
+    assert "messagesInner.insertBefore(card, replyEl)" in static_js
+    assert "streamingMessageEls.set(msg.traceKey, div)" in static_js
+    assert "placeProgressCardsBeforeReply(msg.traceKey, div)" in static_js
+    assert "card.dataset.traceId = task.traceId" in static_js
 
     ws_js = (
         frontend_root().joinpath("shared", "js", "ws.js").read_text(encoding="utf-8")
     )
     assert "upsertAgentReply" in ws_js
     assert "payload.final !== false" in ws_js
+    assert "traceId: payload.trace_id" in ws_js
+    assert "traceKey = envelope.trace_id" in ws_js
 
 
 def test_web_history_restores_persisted_episode(tmp_path) -> None:

@@ -17,10 +17,12 @@ class AgentResponseTool:
         (
             "Return every user-facing response through this function. Set "
             "task_state='none' for ordinary conversation that does not change a "
-            "sustained robot task; 'wait' when asking for confirmation or reporting "
-            "unfinished progress; 'complete' only when trusted physical results "
-            "support the whole objective; and 'cancel' when the user withdraws it. "
-            "The message is shown to the user."
+            "sustained robot task and only when no task is active; 'wait' only when "
+            "the active objective itself is unfinished and requires confirmation or "
+            "more work; 'complete' when trusted physical results support the whole "
+            "objective; and 'cancel' when the user withdraws it. An optional offer "
+            "of additional help after fulfilling the objective does not make the "
+            "task unfinished: use 'complete'. The message is shown to the user."
         ),
         {
             "type": "object",
