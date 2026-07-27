@@ -6,6 +6,7 @@
 > 目标约束：当前不增加新功能；先保持简单、通用、最小，并验证现有模块
 > 核心目标：交互能力、long-horizon task、配置驱动的 Embodied Agent Harness、边界清晰
 > 的快慢双系统
+> 对外定位：Embodied Agent Harness · Fast–Slow Dual System · Distributed Model Services
 
 本文不是对当前已交付能力的声明。代码、配置和测试仍是运行事实源；本指南用于约束后续
 取舍，并应随着验证结论更新。
@@ -30,7 +31,8 @@ self-improvement，而是冻结一条最小主链，证明它在交互、长程�
 4. Hey Robot 现有分层已经足够表达最小 Harness。此时再引入第二套 agent runtime、
    plan graph、通用 memory、通用 verifier 或更多事件抽象，只会增加尚未验证的状态空间。
 5. VLA/VLN、RoboCasa、Human Follow、Voice、Feishu、仿真和真机驱动都可以保留，但应放在
-   核心之外逐层验收，不能反向定义核心。
+   核心之外逐层验收，不能反向定义核心。InternNav 仿真接入和 RoboCasa365 LeRobot policy
+   链路已经提供了部分集成证据；这不等同于 XLeRobot 真机或开放世界长程能力已验证。
 6. 系统应继续由一份 deployment config 选择模块和实现，但配置只能驱动组装、能力暴露与
    有界参数，不能成为运行状态、隐藏控制流或另一种编程语言。
 
@@ -283,8 +285,9 @@ RPent 文档把 memory 定义为经过审阅、每次 run 开始时读取的只�
 当前只需证明：
 
 - VLA option 有明确预算；
-- 终止原因和成功语义不会混淆；
-- 每次 option 后返回实际新观测；
+- 终止原因和成功语义不会混淆（当前仍需修复并回归验证 `no_action`、`max_steps`）；
+- SkillResult 已保存 option 后的观测引用，但这些观测是否完整投影到下一轮 Agent context
+  仍需验证；
 - VLA 失败不会破坏 Agent task。
 
 不应为了对齐论文而立即增加通用 verifier、重试策略或 primitive catalog。
@@ -341,6 +344,14 @@ Hi-VLA 对 planner、VLA、termination、observation、memory 的系统比较，
 ```
 
 当前没有证据表明需要第二个 Agent、第二种 task engine 或第二条物理执行路径。
+
+需要把以下能力标记为 `partial`，而不是已验证：
+
+- `AutonomousAgentService` 虽然向 Agent 传递了文本增量回调，但 Agent 驱动层当前没有继续
+  发布该回调，因此流式回复尚未在完整 Agent 路径打通；
+- `agent_runtime.enabled` 是配置模型字段，但当前服务启停实际由
+  `agents.<id>.enabled` 决定；
+- VLA 的 `no_action` / `max_steps` 可能仍被任务完成逻辑视为成功步骤。
 
 ## 8. 核心与可选能力的边界
 
@@ -442,7 +453,7 @@ Hi-VLA 对 planner、VLA、termination、observation、memory 的系统比较，
 
 ### 10.1 先冻结一个 Golden Path
 
-建议唯一基线配置：
+建议唯一基线配置（目标形状，当前尚未作为正式 deterministic profile 完整验收）：
 
 ```text
 一个 Web Channel
@@ -454,10 +465,10 @@ Hi-VLA 对 planner、VLA、termination、observation、memory 的系统比较，
   + Mock RobotRuntime
 ```
 
-该基线必须是一份正常的 deployment profile，而不是测试代码中手工拼出的另一套系统。
-测试可以注入 deterministic model/Skill，但仍应经过与生产一致的 typed config、
-registry、factory 和 composition root。这样才能真正验证“配置驱动”，而不仅是验证若干
-孤立类。
+该基线最终必须是一份正常的 deployment profile，而不是测试代码中手工拼出的另一套系统。
+当前 deterministic model/Skill 主要通过测试注入；在正式 profile 建立前，不能把 Golden
+Path 写成已交付能力。测试仍应经过与生产一致的 typed config、registry、factory 和
+composition root。这样才能真正验证“配置驱动”，而不仅是验证若干孤立类。
 
 Golden Path 只需要一个三步任务：
 
@@ -480,7 +491,7 @@ Golden Path 只需要一个三步任务：
 | L3 | crash/recovery | 无物理动作盲重放，lost 状态可解释并可继续 |
 | L4 | 一个 simulator adapter | 只改配置/叶子组装即可替换 Mock，artifact 足够复现 |
 | L5 | 一个 real driver | 只替换配置实现，安全和失败语义与 Mock contract 一致 |
-| L6 | VLA/VLN/RoboCasa 等实验能力 | 逐项启用，失败不污染核心结论 |
+| L6 | VLA/VLN/RoboCasa 等模型与评测能力 | 已有部分集成验证；逐项启用，失败不污染核心结论 |
 
 在 L0–L3 没有稳定通过以前，不应以 benchmark 新功能替代基础验证。
 
@@ -522,12 +533,13 @@ Golden Path 只需要一个三步任务：
 
 ## 12. VLA 与 RPent 应如何保留为未来实验
 
-Hey Robot 当前 VLA option 已有 bounded steps，并把 `no_action`、`max_steps` 的
-`subgoal_succeeded` 保持为 unknown。这部分应先做 contract 回归测试，确认：
+Hey Robot 当前 VLA option 已有 bounded steps，termination policy 会把 `no_action`、
+`max_steps` 的 `subgoal_succeeded` 表示为 unknown；但 option 结果当前仍可能以
+`success=True` 进入任务完成判定。这部分应先修正并做 contract 回归测试，确认：
 
 - option 正常结束不等于物理子目标成功；
 - unknown 不会被上层转换为 task success；
-- observation 是执行后的状态；
+- 执行后的 observation 引用不仅被保存，而且能按约定进入下一轮 Agent context；
 - crash 不会触发隐式动作重试。
 
 如果发现语义缺陷，修复现有 contract 属于验证和正确性工作，不是扩功能。但无需因此
@@ -583,8 +595,8 @@ RPent 可以作为 L6 的实验参照：
 ## 15. 最终建议
 
 Hey Robot 不缺一张更宏大的路线图，缺的是对当前系统的可信证据。接下来应停止横向扩展，
-用一份正式配置驱动 Mock + deterministic Skill 完成 L0–L3，形成一条任何人都能运行和
-解释的 Golden Path。
+用一份正式配置驱动 Mock + deterministic Skill 完成 L0–L3；在该 profile 和完整三步
+场景验收前，Golden Path 应视为待验证目标，而不是当前已交付能力。
 
 只有三类工作应进入当前主线：
 
