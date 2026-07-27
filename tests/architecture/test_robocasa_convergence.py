@@ -116,7 +116,7 @@ def test_robocasa_dependencies_have_one_locked_group() -> None:
         "jsonlines",
         "av>=",
     ):
-        assert policy_or_dataset_dependency not in text
+        assert policy_or_dataset_dependency in text
 
 
 def test_local_and_docker_backends_consume_the_locked_group() -> None:
