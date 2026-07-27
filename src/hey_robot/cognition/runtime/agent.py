@@ -295,12 +295,13 @@ class Agent:
                 ] = "completed"
                 if task is not None:
                     current = self._tasks.task(task.task_id)
-                    if current is not None and current.status in {
-                        "blocked",
-                        "cancelled",
-                        "failed",
-                    }:
-                        result_status = current.status
+                    if current is not None:
+                        if current.status == "blocked":
+                            result_status = "blocked"
+                        elif current.status == "cancelled":
+                            result_status = "cancelled"
+                        elif current.status == "failed":
+                            result_status = "failed"
                 elif execution.outcome.status == "failed":
                     result_status = "failed"
                 return AgentRunResult(

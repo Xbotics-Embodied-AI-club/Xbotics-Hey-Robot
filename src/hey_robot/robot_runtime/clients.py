@@ -128,7 +128,7 @@ class LocalRobotClient:
         observation_error: str | None = None
         try:
             candidate = await runtime.observe()
-            if candidate.frame_id >= status.frame_id:
+            if status.frame_id is None or candidate.frame_id >= status.frame_id:
                 observation = candidate
             else:
                 observation_error = (
