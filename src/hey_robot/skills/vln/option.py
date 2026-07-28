@@ -6,6 +6,8 @@ from typing import Any
 from hey_robot.skills.context import SkillContext
 from hey_robot.skills.models import SkillResult
 
+DEFAULT_VLN_MAX_STEPS = 90
+
 
 @dataclass(frozen=True)
 class VLNOptionRequest:
@@ -93,7 +95,7 @@ class VLNOptionRunner:
                 error="robot client is unavailable",
             )
 
-        max_steps = max(1, int(arguments.get("max_steps", 30)))
+        max_steps = max(1, int(arguments.get("max_steps", DEFAULT_VLN_MAX_STEPS)))
         fresh_timeout = float(arguments.get("fresh_observation_timeout_sec", 2.0))
         observation = await ctx.observe(timeout_sec=fresh_timeout)
         trace = _ExecutionTrace()
@@ -288,6 +290,25 @@ def _vln_payload(
         "proprioception": list(observation.proprioception),
         "raw": dict(observation.raw),
     }
+    depth_artifact = next(
+        (
+            artifact
+            for artifact in observation.artifacts
+            if artifact.artifact_type == "policy_observation"
+            and artifact.metadata.get("modality") == "depth"
+            and artifact.metadata.get("camera") == "front"
+        ),
+        None,
+    )
+    if depth_artifact is not None:
+        payload["depth_uri"] = depth_artifact.uri
+    base_pose = observation.raw.get("base_pose")
+    if isinstance(base_pose, dict):
+        payload["pose"] = [
+            float(base_pose.get("x_cm", 0.0)) / 100.0,
+            float(base_pose.get("y_cm", 0.0)) / 100.0,
+            float(base_pose.get("yaw_deg", 0.0)) * 3.141592653589793 / 180.0,
+        ]
     payload["policy_session_id"] = policy_session_id
     payload["reset_policy"] = reset_policy
     if look_down:

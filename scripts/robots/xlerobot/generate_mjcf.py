@@ -402,12 +402,13 @@ def _ensure_camera(
 
 
 def _add_official_cameras(root: ET.Element) -> None:
-    # Official ManiSkill mounts cameras on these links with identity pose.
-    # MuJoCo fixed cameras use a different camera frame convention, so the
-    # +90deg X rotation aligns the native views with the official task-facing
-    # camera direction. The small +Y offset moves the viewpoint to the lens
-    # instead of leaving it inside the camera body mesh.
-    mujoco_camera_quat = "0.7071068 0.7071068 0 0"
+    # The official URDF expresses the RGB optical frame as
+    # ``rpy=(0, -pi/2, -pi/2)``.  The Hey Robot MJCF keeps the XLeRobot base
+    # convention with +X as the forward direction, while the URDF's chassis
+    # frame points forward along -Y.  This quaternion is the official optical
+    # transform composed with that base-frame conversion; it keeps the native
+    # front view level and aligned with the simulation's +X heading.
+    mujoco_camera_quat = "0.43376147 0.55843620 -0.55843620 -0.43376147"
     lens_pos = "0 0.04 0"
     for body_name, camera_name, fovy in (
         ("head_camera_link", "front", "91.673"),

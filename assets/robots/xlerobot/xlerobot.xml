@@ -285,7 +285,7 @@
                         <inertial pos="0 0 0" mass="0.001" diaginertia="1e-06 1e-06 1e-06" />
                       </body>
                     </body>
-                  <camera name="front" pos="0 0.04 0" quat="-0.49029034 -0.40194193 0.59805807 0.49029034" fovy="91.673" /></body>
+                  <camera name="front" pos="0 0.04 0" quat="0.43376147 0.55843620 -0.55843620 -0.43376147" fovy="91.673" /></body>
                 </body>
               </body>
             </body>

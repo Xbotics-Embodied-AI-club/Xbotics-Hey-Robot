@@ -80,6 +80,11 @@ class XLeRobotSimDriver:
         self._control_hz = float(self.settings.get("control_hz", 2.0))
         self._render_width = int(self.settings.get("render_width", 640))
         self._render_height = int(self.settings.get("render_height", 480))
+        self._head_tilt_rad = float(self.settings.get("head_tilt_rad", 0.25))
+        initial_offset = self.settings.get("initial_base_offset_m", [0.0, 0.0, 0.0])
+        if not isinstance(initial_offset, (list, tuple)) or len(initial_offset) != 3:
+            raise ValueError("initial_base_offset_m must be [x_m, y_m, yaw_rad]")
+        self._initial_base_offset = tuple(float(value) for value in initial_offset)
         self._camera_names = self._resolve_camera_names()
         self._default_camera = (
             context.embodiment.default_camera
@@ -99,6 +104,7 @@ class XLeRobotSimDriver:
             robot_id=self.robot_id,
             adapter=self.adapter,
             camera_layout=_DEFAULT_SIM_CAMERA_LAYOUT,
+            head_tilt_rad=self._head_tilt_rad,
         )
         viewer_cfg = self.settings.get("viewer", {}) or {}
         self._viewer_enabled = bool(viewer_cfg.get("enabled", False))
@@ -211,6 +217,7 @@ class XLeRobotSimDriver:
                 self.data.ctrl[idx] = pos
                 self._kernel.set_actuator_joint_position(idx, pos)
         self._kernel.hold_head_camera()
+        self._kernel.set_initial_base_offset(self._initial_base_offset)
 
         mujoco.mj_forward(self.model, self.data)
         self._initialize_dock_manipulation()
@@ -254,7 +261,7 @@ class XLeRobotSimDriver:
             action_dimensions=None,
             control_hz=self._control_hz,
             cameras=list(self._camera_names),
-            observation_modalities=["image", "arm_state", "status"],
+            observation_modalities=["image", "depth", "arm_state", "status"],
             supports_reset=True,
             supports_interrupt=True,
             metadata={
@@ -297,6 +304,7 @@ class XLeRobotSimDriver:
         self._kernel.update_arm_status()
 
         frames = self._kernel.render_frames()
+        depth_frames = self._kernel.render_depth_frames()
         with self._data_lock:
             self._kernel.sync_viewer()
         image = frames.get(self._default_camera)
@@ -326,6 +334,22 @@ class XLeRobotSimDriver:
                     metadata={"driver": "xlerobot_sim", "camera_role": name},
                 )
             )
+            depth = depth_frames.get(name)
+            if depth is not None:
+                assets.append(
+                    ObservationAsset(
+                        kind="depth",
+                        role="camera",
+                        name=f"{name}_depth",
+                        data={"depth": depth},
+                        metadata={
+                            "artifact_type": "policy_observation",
+                            "modality": "depth",
+                            "camera": name,
+                            "units": "meters",
+                        },
+                    )
+                )
 
         return DriverObservation(
             envelope=self._envelope(),
@@ -447,6 +471,7 @@ class XLeRobotSimDriver:
             return self._status_for_action(action, success=False)
 
         is_gripper_command = cmd.jaw_left is not None or cmd.jaw_right is not None
+        base_control: dict[str, float | int | bool] | None = None
         if is_gripper_command:
             logger.info(
                 f"{self.robot_id} gripper_debug phase=decoded "
@@ -522,6 +547,20 @@ class XLeRobotSimDriver:
                 self.state = "idle"
                 self.last_error = result.message
                 return self._status_for_action(action, success=False)
+            # Keep the complete command visible in the skill result.  In
+            # particular, a VLN velocity step can translate and rotate in the
+            # same MuJoCo control interval, so reporting only the final pose
+            # hides a meaningful part of what was executed.
+            base_control = {
+                "vx": cmd.vx,
+                "vy": cmd.vy,
+                "wz": cmd.vw,
+                "duration_ms": round(cmd.duration_sec * 1000),
+                "steps": steps,
+                "combined_motion": bool(
+                    (cmd.vx != 0.0 or cmd.vy != 0.0) and cmd.vw != 0.0
+                ),
+            }
         elif cmd.skill_name == "stop_motion":
             self._kernel.stop_base_motion()
             self._emergency_stop_active = bool(skill.arguments.get("emergency", False))
@@ -603,6 +642,7 @@ class XLeRobotSimDriver:
             {
                 "skill": skill.to_dict(),
                 "base_pose": self._base_pose(),
+                **({"base_control": base_control} if base_control else {}),
             },
         )
         self.last_skill_result = result
@@ -636,6 +676,7 @@ class XLeRobotSimDriver:
                     self.data.ctrl[idx] = pos
                     self._kernel.set_actuator_joint_position(idx, pos)
             self._kernel.hold_head_camera()
+            self._kernel.set_initial_base_offset(self._initial_base_offset)
             self._kernel.stop_base_motion()
             mujoco.mj_forward(self.model, self.data)
         self.state = "idle"
@@ -893,6 +934,11 @@ class XLeRobotSimDriver:
         }
 
     def _status_for_action(self, action: RobotAction, *, success: bool) -> RobotStatus:
+        base_control = (
+            self.last_skill_result.data.get("base_control")
+            if self.last_skill_result
+            else None
+        )
         stop_confirmed = bool(
             self.last_skill_result
             and self.last_skill_result.data.get("stop_confirmed", False)
@@ -917,6 +963,7 @@ class XLeRobotSimDriver:
                 "arm_status": self.last_arm_status,
                 "battery": self.last_battery,
                 "base_pose": self._base_pose(),
+                **({"base_control": base_control} if base_control else {}),
                 "last_skill_result": self.last_skill_result.to_dict()
                 if self.last_skill_result
                 else None,

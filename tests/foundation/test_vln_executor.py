@@ -17,6 +17,7 @@ from hey_robot.foundation.backends.vln.internvla_n1 import (
     action_to_heading,
 )
 from hey_robot.foundation.backends.vln.models import VLNPlannerResult
+from hey_robot.robot_media import LocalMediaStore
 
 
 class InternVLAN1DualVLNExecutor(VLNPlannerExecutor):
@@ -182,6 +183,38 @@ def test_internvla_n1_dualvln_mock_can_return_stop() -> None:
     assert result["success"] is True
     assert result["metrics"]["vln"]["mode"] == "stop"
     assert result["metrics"]["vln"]["stop"] is True
+
+
+def test_internvla_n1_reads_depth_artifact_from_local_media(tmp_path) -> None:
+    image_path = tmp_path / "front.png"
+    _write_rgb(image_path)
+    depth = np.full((6, 8), 2.5, dtype=np.float32)
+    media = LocalMediaStore(tmp_path / "media")
+    depth_ref = media.put_npz_artifact(
+        {"depth": depth},
+        artifact_type="policy_observation",
+        role="camera",
+        robot_id="xlerobot",
+        metadata={"modality": "depth", "camera": "front"},
+    )
+    executor = InternVLAN1DualVLNExecutor(
+        "vln_nav", _real_spec({"media_root": str(tmp_path / "media")})
+    )
+    model = _FakeS2Model(SimpleNamespace(output_action=[1], output_pixel=None))
+    executor._model = model
+
+    result = executor.execute(
+        {
+            "arguments": {
+                "target": "desk",
+                "image_path": str(image_path),
+                "depth_uri": depth_ref.uri,
+            }
+        }
+    )
+
+    assert result["success"] is True
+    assert np.array_equal(model.calls[0]["depth"], depth)
 
 
 def test_base_action_chunk_publishes_calibrated_control_contract() -> None:

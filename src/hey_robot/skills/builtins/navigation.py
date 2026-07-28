@@ -114,7 +114,15 @@ NAVIGATE_TO = Skill(
             "camera": {"type": "string"},
             "image_path": {"type": "string"},
             "execute_primitives": {"type": "boolean"},
-            "max_steps": {"type": "integer"},
+            "max_steps": {
+                "type": "integer",
+                "default": 90,
+                "description": (
+                    "Maximum VLN primitive steps. Default to 90 for the "
+                    "long-horizon simulation test unless the user specifies "
+                    "a lower safety cap."
+                ),
+            },
             "model_timeout_sec": {"type": "number"},
             "fresh_observation_timeout_sec": {"type": "number"},
         },
@@ -123,7 +131,7 @@ NAVIGATE_TO = Skill(
     },
     handler=navigate_to,
     resources=("camera", "base"),
-    timeout_sec=180.0,
+    timeout_sec=900.0,
     required_actions=(
         "move_base",
         "turn_base",
@@ -139,7 +147,7 @@ APPROACH_OBJECT = Skill(
     parameters=NAVIGATE_TO.parameters,
     handler=approach_object,
     resources=("camera", "base"),
-    timeout_sec=180.0,
+    timeout_sec=900.0,
     required_actions=(
         "move_base",
         "turn_base",

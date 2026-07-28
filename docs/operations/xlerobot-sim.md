@@ -215,7 +215,7 @@ model_services:
       internnav_repo: third_party/InternNav
       control_mode: base_action_chunk
       base_linear_speed: 0.25
-      base_angular_speed: 0.30
+      base_angular_speed: 0.60
       max_action_chunk_steps: 4
       system1_replans_per_waypoint: 4
       camera: front
@@ -223,7 +223,7 @@ model_services:
       image_height: 480
       resize_w: 384
       resize_h: 384
-      discrete_turn_deg: 15       # InternNav 离散转向 token 的官方步长
+      discrete_turn_deg: 30       # Home/ObjectNav profile: InternNav 离散转向 token 步长
       discrete_forward_cm: 25     # InternNav 离散前进 token 的官方步长
       num_history: 8
       max_new_tokens: 128
@@ -279,13 +279,17 @@ model_services:
 实验 VLN 配置已将这两个 Skill 暴露给 Agent。`base_action_chunk` 模式保留
 DualVLN 的原生双系统边界：System 2 输出转向、像素 waypoint 或 STOP；System 1
 消费 latent waypoint 和连续 RGB 观测，生成最多4步局部轨迹动作。ModelService 将原生
-动作按 `15°` / `25 cm` 语义校准为 `base_velocity_chunk`，Robot Runtime 逐个执行其中的
+动作按 `30°` / `25 cm` 语义校准为 `base_velocity_chunk`，Robot Runtime 逐个执行其中的
 `base_velocity_step`，每步之间获取 fresh observation，整个 chunk 完成后再规划。一个
 `navigate_to` run 内保持同一 policy session 和 waypoint latent；模型不直接访问串口或
 仿真驱动。纯 `InternVLA-N1-System2` checkpoint 缺少 System 1 权重，配置会在加载阶段
 明确失败，不能以固定前进或随机 latent 代替。启用时必须同时验证 ModelService health、capability name、observation
 mapping、fresh frame 和 budget termination。仓库测试覆盖接口链路，不代表指定
 checkpoint 已经完成真实任务效果验证。
+
+实验 VLN 配置默认允许一个导航 option 执行 **90 个**底盘 primitive step，Skill 总时限为
+15 分钟，单次模型 RPC 时限为 120 秒。它仍会在模型输出 STOP、任务取消、动作失败、观测
+过期或预算耗尽时立即结束；如需更短测试，可在 `max_steps` 显式指定。
 
 ## Docker 状态
 

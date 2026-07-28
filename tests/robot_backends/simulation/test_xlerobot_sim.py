@@ -5,6 +5,7 @@ import importlib.util
 import threading
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from hey_robot.config import RobotSpec
@@ -322,6 +323,12 @@ class TestXLeRobotSimDriver:
         assert obs.frame_id == 1
         assert len(obs.assets) >= 1
         assert obs.assets[0].kind == "image"
+        depth = next(asset for asset in obs.assets if asset.kind == "depth")
+        depth_array = depth.data["depth"]
+        assert depth.name == "front_depth"
+        assert depth_array.shape == (480, 640)
+        assert np.isfinite(depth_array).all()
+        assert float(depth_array.max()) > 0.0
         assert "cameras" in obs.metadata
 
         await driver.close()
@@ -367,6 +374,34 @@ class TestXLeRobotSimDriver:
         assert status.state == "idle"
         assert status.metrics["base_pose"] == driver._base_pose()
 
+        await driver.close()
+
+    @pytest.mark.asyncio
+    async def test_driver_reports_combined_linear_and_angular_velocity(
+        self, sim_context: RobotDriverContext
+    ) -> None:
+        from hey_robot.robot_backends.simulation.xlerobot_sim_driver import (
+            XLeRobotSimDriver,
+        )
+
+        driver = XLeRobotSimDriver(sim_context)
+        await driver.start()
+        action = RobotSkillAction(
+            "base_velocity_step",
+            {"vx": 0.2, "vy": 0.0, "wz": 0.3, "duration_ms": 250},
+        ).to_robot_action(_intent("base_velocity_step"))
+
+        status = await driver.apply_action(action)
+
+        assert status.success is True
+        assert status.metrics["base_control"] == {
+            "vx": 0.0,
+            "vy": 0.2,
+            "wz": 0.3,
+            "duration_ms": 250,
+            "steps": 125,
+            "combined_motion": True,
+        }
         await driver.close()
 
     @pytest.mark.asyncio

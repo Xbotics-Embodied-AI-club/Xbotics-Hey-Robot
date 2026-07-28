@@ -162,6 +162,11 @@ def test_xlerobot_vln_config_exposes_only_navigation_options() -> None:
 
     assert config.skills.mode == "bringup"
     assert set(config.skills.tools) == VLN_MOBILE_SKILLS
+    # The Home scene uses the InternVLA ObjectNav profile, whose discrete turn
+    # token is 30°.  A 15° executor silently desynchronizes policy history.
+    assert config.model_services["vln_nav"].settings["discrete_turn_deg"] == 30
+    assert config.model_services["vln_nav"].settings["base_angular_speed"] == 0.60
+    assert config.model_services["vln_nav"].timeout_sec == 120.0
 
 
 def test_protocol_does_not_export_skill_contract_runtime() -> None:

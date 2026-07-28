@@ -38,10 +38,12 @@ class XLeRobotSimKernel:
         robot_id: str,
         adapter: Any,
         camera_layout: dict[str, dict[str, Any]],
+        head_tilt_rad: float = _DEFAULT_HEAD_TILT,
     ) -> None:
         self.robot_id = robot_id
         self.adapter = adapter
         self.camera_layout = camera_layout
+        self.head_tilt_rad = float(head_tilt_rad)
         self.model: Any = None
         self.data: Any = None
         self.renderer: Any = None
@@ -72,6 +74,32 @@ class XLeRobotSimKernel:
                 self.scene_camera = camera
                 frames[name] = self.render_frame()
             self.scene_camera = previous
+            return frames
+
+    def render_depth_frames(self) -> dict[str, np.ndarray | None]:
+        """Render metric depth for every configured scene camera.
+
+        MuJoCo exposes depth from the same calibrated camera used for RGB.  Keep
+        it as a separate render pass so callers can materialize it as a compact
+        numerical artifact instead of trying to encode it as an image.
+        """
+        if self.renderer is None:
+            return {}
+        with self.data_lock:
+            previous = self.scene_camera
+            frames: dict[str, np.ndarray | None] = {}
+            try:
+                self.renderer.enable_depth_rendering()
+                for name, camera in self.scene_cameras.items():
+                    self.scene_camera = camera
+                    self.renderer.update_scene(self.data, camera=camera)
+                    frames[name] = np.array(self.renderer.render(), dtype=np.float32)
+            except Exception as exc:
+                logger.warning(f"{self.robot_id} simulation depth render failed: {exc}")
+                frames = {}
+            finally:
+                self.renderer.disable_depth_rendering()
+                self.scene_camera = previous
             return frames
 
     def step_velocity(
@@ -185,7 +213,7 @@ class XLeRobotSimKernel:
             return
         targets = {
             "head_pan_hold": ("head_pan_joint", _DEFAULT_HEAD_PAN),
-            "head_tilt_hold": ("head_tilt_joint", _DEFAULT_HEAD_TILT),
+            "head_tilt_hold": ("head_tilt_joint", self.head_tilt_rad),
         }
         for actuator_name, (joint_name, target) in targets.items():
             actuator_id = mujoco.mj_name2id(
@@ -201,6 +229,27 @@ class XLeRobotSimKernel:
                 dof_addr = int(self.model.jnt_dofadr[joint_id])
                 self.data.qpos[qpos_addr] = target
                 self.data.qvel[dof_addr] = 0.0
+
+    def set_initial_base_offset(self, offset: tuple[float, float, float]) -> None:
+        """Apply a reproducible XY/yaw offset from the MJCF spawn pose."""
+        import mujoco
+
+        if self.model is None or self.data is None:
+            return
+        for joint_name, value in zip(
+            ("root_x_axis_joint", "root_y_axis_joint", "root_z_rotation_joint"),
+            offset,
+            strict=True,
+        ):
+            joint_id = mujoco.mj_name2id(
+                self.model, mujoco.mjtObj.mjOBJ_JOINT, joint_name
+            )
+            if joint_id < 0:
+                continue
+            qpos_addr = int(self.model.jnt_qposadr[joint_id])
+            dof_addr = int(self.model.jnt_dofadr[joint_id])
+            self.data.qpos[qpos_addr] = value
+            self.data.qvel[dof_addr] = 0.0
 
     def sync_viewer(self) -> None:
         if self.viewer is not None and self.viewer.is_running():

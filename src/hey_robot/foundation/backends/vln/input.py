@@ -37,7 +37,7 @@ def planner_input_from_payload(
     )
     return VLNPlannerInput(
         rgb=rgb,
-        depth=_depth_from_payload(arguments, rgb.shape[:2]),
+        depth=_depth_from_payload(arguments, rgb.shape[:2], media_root=media_root),
         pose=_pose_from_payload(arguments, payload),
         instruction=instruction,
         intrinsic=_intrinsic_from_payload(
@@ -242,7 +242,7 @@ def _as_uint8_rgb(image: np.ndarray) -> np.ndarray:
 
 
 def _depth_from_payload(
-    arguments: dict[str, Any], image_shape: tuple[int, int]
+    arguments: dict[str, Any], image_shape: tuple[int, int], *, media_root: str | None
 ) -> np.ndarray | None:
     if arguments.get("depth") is not None:
         return np.asarray(arguments["depth"], dtype=np.float32)
@@ -253,6 +253,24 @@ def _depth_from_payload(
         except OSError as exc:
             raise VLNPlanningError(
                 "image_unavailable", f"cannot read VLN depth image: {exc}"
+            ) from exc
+    if arguments.get("depth_uri") is not None:
+        path = _path_from_image_reference(
+            str(arguments["depth_uri"]), media_root=media_root
+        )
+        try:
+            with np.load(path, allow_pickle=False) as archive:
+                manifest = archive["__manifest__"]
+                if manifest.size == 0:
+                    raise ValueError("empty typed depth artifact")
+                import json
+
+                node = json.loads(bytes(manifest.tolist()).decode("utf-8"))
+                depth_node = node["items"]["depth"]
+                return np.asarray(archive[depth_node["key"]], dtype=np.float32)
+        except (OSError, KeyError, ValueError, TypeError) as exc:
+            raise VLNPlanningError(
+                "image_unavailable", f"cannot read VLN depth artifact: {exc}"
             ) from exc
     height, width = image_shape
     return np.zeros((height, width), dtype=np.float32)

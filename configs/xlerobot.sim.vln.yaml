@@ -133,6 +133,11 @@ robots:
       mjcf_path: assets/scenes/home_scene.xml
       render_width: 640
       render_height: 480
+      # ObjectNav experiment baseline; override for camera-pitch A/B tests.
+      head_tilt_rad: 0.25
+      # [x_m, y_m, yaw_rad] offset from the Home-scene spawn; used for
+      # repeatable ObjectNav multi-start experiments.
+      initial_base_offset_m: [0.0, 0.0, 0.0]
       control_hz: 2.0
       linear_speed: 0.2
       angular_speed: 0.45
@@ -147,14 +152,17 @@ model_services:
     provides:
     - navigate_to
     - approach_object
-    timeout_sec: 60.0
+    # Each InternNav inference may take several seconds on the Home scene.
+    # The navigation option itself remains bounded at 90 primitive steps.
+    timeout_sec: 120.0
     settings:
       host: 127.0.0.1
       port: 9091
       backend: internvla_n1_dualvln
       control_mode: base_action_chunk
       base_linear_speed: 0.25
-      base_angular_speed: 0.30
+      # 30° ObjectNav turn token in the bounded 1s control window (≈873ms).
+      base_angular_speed: 0.60
       max_action_chunk_steps: 4
       system1_replans_per_waypoint: 4
       mock_mode: false
@@ -170,7 +178,9 @@ model_services:
       image_height: 480
       resize_w: 384
       resize_h: 384
-      discrete_turn_deg: 15
+      # InternVLA-N1 ObjectNav action tokens use 30° turns.  Executing these
+      # tokens at 15° makes the policy history disagree with the rendered pose.
+      discrete_turn_deg: 30
       discrete_forward_cm: 25
       num_history: 8
       max_new_tokens: 128
