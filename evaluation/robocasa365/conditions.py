@@ -19,7 +19,7 @@ _CONDITIONS = {
     "b0": ExperimentCondition(
         "b0",
         "Use exactly one manipulate call with the complete root goal and "
-        "max_steps=300; do not decompose it.",
+        "max_steps=600; do not decompose it.",
         manipulate_call_limit=1,
     ),
     "b1": ExperimentCondition(

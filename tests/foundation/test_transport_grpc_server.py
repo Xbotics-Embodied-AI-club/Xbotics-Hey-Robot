@@ -8,6 +8,7 @@ import pytest
 from hey_robot.config import DeploymentConfig, ModelServiceSpec
 from hey_robot.foundation.backends.lerobot import LeRobotPolicyExecutor
 from hey_robot.foundation.backends.lerobot.executor import _image_bytes
+from hey_robot.foundation.backends.rldx import RLDXPolicyExecutor
 from hey_robot.foundation.transport.grpc.server import (
     RobotPolicyService,
     VLNPlannerService,
@@ -205,6 +206,26 @@ def test_robot_policy_service_uses_the_configured_lerobot_runtime() -> None:
     service = RobotPolicyService(config, service_id="policy")
 
     assert isinstance(service.executor, LeRobotPolicyExecutor)
+
+
+def test_robot_policy_service_uses_the_configured_rldx_runtime() -> None:
+    settings = {**dict(_spec().settings), "runtime": "rldx"}
+    config = DeploymentConfig.from_dict(
+        {
+            "model_services": {
+                "policy": {
+                    "type": "robot_policy",
+                    "robot_id": "robot",
+                    "provides": ["manipulate"],
+                    "settings": settings,
+                }
+            }
+        }
+    )
+
+    service = RobotPolicyService(config, service_id="policy")
+
+    assert isinstance(service.executor, RLDXPolicyExecutor)
 
 
 def test_build_model_service_supports_robot_policy_and_vln() -> None:

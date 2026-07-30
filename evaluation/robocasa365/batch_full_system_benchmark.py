@@ -88,13 +88,38 @@ async def run_batch(args: argparse.Namespace) -> dict[str, object]:
                         poll_sec=args.poll_sec,
                         timeout_sec=args.timeout_sec,
                     )
-                    result = await run_trial(trial_args)
+                    try:
+                        result = await run_trial(trial_args)
+                    except Exception as exc:
+                        result = {
+                            "task": task,
+                            "seed": seed,
+                            "condition": condition,
+                            "official_success": False,
+                            "false_completion": False,
+                            "failure_stage": "trial_exception",
+                            "termination_reason": "trial_exception",
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                        }
+                        child.mkdir(parents=True, exist_ok=True)
+                        (child / "result.json").write_text(
+                            json.dumps(result, indent=2, sort_keys=True) + "\n",
+                            encoding="utf-8",
+                        )
+                        sys.stderr.write(
+                            f"trial failed; continuing: {suite}/{task}/{seed}/{condition}: "
+                            f"{type(exc).__name__}: {exc}\n"
+                        )
                     results.append({"suite": suite, **result})
     summary = {
         "manifest": manifest,
         "count": len(results),
         "official_successes": sum(bool(item["official_success"]) for item in results),
         "false_completions": sum(bool(item["false_completion"]) for item in results),
+        "trial_errors": sum(
+            item.get("failure_stage") == "trial_exception" for item in results
+        ),
         "trials": results,
     }
     (args.output_root / "summary.json").write_text(

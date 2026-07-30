@@ -162,24 +162,27 @@ class RobotPolicyService:
         host: str | None = None,
         port: int | None = None,
     ) -> None:
-        from hey_robot.foundation.backends.lerobot import (
-            LeRobotPolicyExecutor,
-        )
-
         self.config = config
         self.service_id = service_id
         self.spec = config.model_services[service_id]
         runtime = str(self.spec.settings.get("runtime") or "")
-        if runtime != "lerobot":
+        executor_type: type[ModelServiceExecutor]
+        if runtime == "lerobot":
+            from hey_robot.foundation.backends.lerobot import LeRobotPolicyExecutor
+
+            executor_type = LeRobotPolicyExecutor
+        elif runtime == "rldx":
+            from hey_robot.foundation.backends.rldx import RLDXPolicyExecutor
+
+            executor_type = RLDXPolicyExecutor
+        else:
             raise ValueError(
                 f"robot policy service {service_id} has unsupported runtime {runtime!r}"
             )
         self.host = host or str(self.spec.settings.get("host", "127.0.0.1"))
         self.port = port or int(self.spec.settings.get("port", 9090))
         self.state = ModelServiceState(service_id, self.spec)
-        self.executor: ModelServiceExecutor = LeRobotPolicyExecutor(
-            service_id, self.spec
-        )
+        self.executor: ModelServiceExecutor = executor_type(service_id, self.spec)
         self._server: grpc.aio.Server | None = None
 
     async def start(self) -> None:

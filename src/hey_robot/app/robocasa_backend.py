@@ -41,6 +41,7 @@ async def serve(
             manager=manager,
             evaluator_token=evaluator_token,
             data_token=data_token,
+            step_timeout_sec=float(robot_spec.settings.get("timeout_sec", 60.0)),
         ),
         server,
     )

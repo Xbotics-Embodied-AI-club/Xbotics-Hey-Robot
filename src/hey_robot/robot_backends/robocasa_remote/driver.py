@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import math
 import time
@@ -57,6 +58,9 @@ class RoboCasaRemoteDriver:
         self.last_error: str | None = None
         self.last_reward: float | None = None
         self._last_observation: RemoteObservation | None = None
+        self._rpc_timeout_sec = max(
+            float(context.settings.get("timeout_sec", 10.0)), 1.0
+        )
 
     async def start(self) -> None:
         health = await self.client.health()
@@ -169,14 +173,17 @@ class RoboCasaRemoteDriver:
             if self.episode_id is None:
                 raise ValueError("RoboCasa episode has not been created")
             self.state = "executing"
-            step = await self.client.step(
-                action=[float(value) for value in action.values],
-                expected_frame_id=self.frame_id,
-                raw_action=[
-                    float(value)
-                    for value in action.metadata.get("raw_action", action.values)
-                ],
-                action_clipped=bool(action.metadata.get("action_clipped", False)),
+            step = await asyncio.wait_for(
+                self.client.step(
+                    action=[float(value) for value in action.values],
+                    expected_frame_id=self.frame_id,
+                    raw_action=[
+                        float(value)
+                        for value in action.metadata.get("raw_action", action.values)
+                    ],
+                    action_clipped=bool(action.metadata.get("action_clipped", False)),
+                ),
+                timeout=self._rpc_timeout_sec,
             )
             self.last_reward = float(step.reward)
             self.done = bool(step.done)
@@ -279,14 +286,28 @@ class RoboCasaRemoteDriver:
         observation = await self.client.observe() if refresh else self._last_observation
         if observation is None:
             raise RuntimeError("RoboCasa runtime returned no observation")
-        self._accept_observation(observation)
+        self._accept_observation(observation, allow_episode_switch=refresh)
         return observation
 
-    def _accept_observation(self, observation: RemoteObservation) -> None:
+    def _accept_observation(
+        self,
+        observation: RemoteObservation,
+        *,
+        allow_episode_switch: bool = False,
+    ) -> None:
         if self.episode_id is not None and observation.episode_id != self.episode_id:
-            raise ValueError(
-                "RoboCasa runtime returned an observation for another episode"
-            )
+            if not allow_episode_switch:
+                raise ValueError(
+                    "RoboCasa runtime returned an observation for another episode"
+                )
+            # The evaluator owns trial lifecycle. A refreshed Observe response is
+            # therefore the authoritative signal that a batch advanced to its
+            # next trial; action responses must never be allowed to switch it.
+            self._last_observation = None
+            self.frame_id = 0
+            self.done = False
+            self.success = None
+            self.state = "idle"
         if self._last_observation and observation.frame_id < self.frame_id:
             raise ValueError("RoboCasa runtime returned a stale observation frame")
         if len(observation.state) != 16 or not all(

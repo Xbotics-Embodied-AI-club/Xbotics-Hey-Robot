@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import sys
+import time
 import types
 
 import numpy as np
@@ -47,6 +49,12 @@ class _Env:
 
     def close(self) -> None:
         self.closed = True
+
+
+class _SlowEnv(_Env):
+    def step(self, _action):
+        time.sleep(0.05)
+        return _observation(), 0.0, False, False, {}
 
 
 class _Context:
@@ -134,6 +142,27 @@ async def test_runtime_service_rejects_wrong_role_and_action_schema() -> None:
         )
 
 
+@pytest.mark.asyncio
+async def test_runtime_service_times_out_a_stuck_environment_step() -> None:
+    manager = EpisodeManager(
+        allowed_tasks=frozenset({"CloseFridge"}),
+        env_factory=lambda _spec: (_SlowEnv(), _observation()),
+    )
+    service = RoboCasaRuntimeService(manager=manager, step_timeout_sec=0.01)
+    context = _Context("")
+    await service.BeginTrial(
+        pb.BeginTrialRequest(trial_id="slow", task="CloseFridge", seed=1000),
+        context,
+    )
+
+    with pytest.raises(RuntimeError, match=r"exceeded 0\.0s"):
+        await service.Step(
+            pb.StepRequest(action=[0.0] * 12, raw_action=[0.0] * 12), context
+        )
+    assert "environment step exceeded" in str(service._last_error)
+    await asyncio.sleep(0.06)
+
+
 def test_runtime_helpers_validate_assets_observations_and_numpy(
     tmp_path, monkeypatch
 ) -> None:
@@ -141,6 +170,7 @@ def test_runtime_helpers_validate_assets_observations_and_numpy(
         "textures",
         "generative_textures",
         "fixtures",
+        "objects/objaverse",
         "objects/lightwheel",
     ):
         (tmp_path / relative).mkdir(parents=True)

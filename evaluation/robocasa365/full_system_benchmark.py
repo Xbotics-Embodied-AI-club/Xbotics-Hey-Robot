@@ -83,12 +83,12 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
         for service_id, spec in config.model_services.items()
         if spec.enabled
         and spec.type == "robot_policy"
-        and str(spec.settings.get("runtime") or "") == "lerobot"
+        and str(spec.settings.get("runtime") or "") in {"lerobot", "rldx"}
         and str(spec.settings.get("embodiment") or "") == "robocasa"
     ]
     if len(model_candidates) != 1:
         raise ValueError(
-            "config must contain exactly one RoboCasa LeRobot robot_policy service"
+            "config must contain exactly one supported RoboCasa robot_policy service"
         )
     model_service_id, model_spec = model_candidates[0]
     credentials = json.loads(args.credentials_file.read_text(encoding="utf-8"))
@@ -220,6 +220,7 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
         runtime_summary: dict[str, object] = {}
         agent_task: dict[str, object] | None = None
         termination_reason = "wall_clock_timeout"
+        runtime_error: str | None = None
         while time.time() - started < args.timeout_sec:
             if agent_turn_task.done():
                 await agent_turn_task
@@ -227,7 +228,12 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
                 termination_reason = "episode_done"
                 break
             await asyncio.sleep(max(0.05, args.poll_sec))
-            observation = await data_runtime.observe()
+            try:
+                observation = await data_runtime.observe()
+            except Exception as exc:
+                runtime_error = f"{type(exc).__name__}: {exc}"
+                termination_reason = "runtime_unavailable"
+                break
             if observation.frame_id != last_recorded_frame or observation.done:
                 observations.append(
                     {"frame_id": observation.frame_id, "done": observation.done}
@@ -260,14 +266,29 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
                     or item.get("ended_at") is not None
                 ]
                 if len(terminal_options) >= condition.manipulate_call_limit:
-                    termination_reason = "condition_manipulate_limit"
+                    latest_option = terminal_options[-1]
+                    termination_reason = (
+                        "option_failed"
+                        if latest_option.get("phase") in {"failed", "cancelled"}
+                        or latest_option.get("success") is False
+                        else "condition_manipulate_limit"
+                    )
                     break
             if agent_task is not None and agent_task.get("status") != "active":
                 termination_reason = f"agent_{agent_task['status']}"
                 break
         if agent_turn_task.done():
             await agent_turn_task
-        truth = await runtime.read_truth()
+        try:
+            truth = await asyncio.wait_for(runtime.read_truth(), timeout=30.0)
+        except Exception as exc:
+            runtime_error = runtime_error or f"{type(exc).__name__}: {exc}"
+            truth = {
+                "done": False,
+                "official_success": False,
+                "frame_id": last_recorded_frame,
+                "metrics": {"runtime_error": runtime_error},
+            }
         if truth["done"] and truth["official_success"] and agent_task:
             await _mark_environment_complete(
                 args.agent_url,
@@ -314,6 +335,7 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
                 model_options=model_options,
                 official_success=bool(truth["official_success"]),
             ),
+            "error": runtime_error,
         }
         (args.output_dir / "result.json").write_text(
             json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -355,7 +377,9 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
                 await turn_task
         try:
             if "initial" in locals():
-                await runtime.end_trial(reason="benchmark_finished")
+                await asyncio.wait_for(
+                    runtime.end_trial(reason="benchmark_finished"), timeout=10.0
+                )
         except Exception:
             logging.getLogger(__name__).exception("failed to close RoboCasa trial")
         await runtime.close()
@@ -522,6 +546,8 @@ def _failure_stage(
         return None
     if termination_reason == "condition_manipulate_limit":
         return "condition_budget"
+    if termination_reason == "option_failed":
+        return "vla_or_action"
     if termination_reason == "wall_clock_timeout":
         return "planner_or_budget"
     if agent_task and agent_task.get("status") == "completed":

@@ -923,7 +923,9 @@ human-follow = [
 ]
 model-service = [
     { name = "grpcio", marker = "sys_platform == 'linux' or sys_platform == 'win32' or (extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-robocasa365') or (extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-vln') or (extra == 'group-9-hey-robot-robocasa365' and extra == 'group-9-hey-robot-vln')" },
+    { name = "msgpack", marker = "sys_platform == 'linux' or sys_platform == 'win32' or (extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-robocasa365') or (extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-vln') or (extra == 'group-9-hey-robot-robocasa365' and extra == 'group-9-hey-robot-vln')" },
     { name = "protobuf", marker = "sys_platform == 'linux' or sys_platform == 'win32' or (extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-robocasa365') or (extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-vln') or (extra == 'group-9-hey-robot-robocasa365' and extra == 'group-9-hey-robot-vln')" },
+    { name = "pyzmq", marker = "sys_platform == 'linux' or sys_platform == 'win32' or (extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-robocasa365') or (extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-vln') or (extra == 'group-9-hey-robot-robocasa365' and extra == 'group-9-hey-robot-vln')" },
 ]
 robot = [
     { name = "feetech-servo-sdk", marker = "sys_platform == 'linux' or sys_platform == 'win32' or (extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-robocasa365') or (extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-vln') or (extra == 'group-9-hey-robot-robocasa365' and extra == 'group-9-hey-robot-vln')" },
@@ -1068,6 +1070,7 @@ requires-dist = [
     { name = "jinja2", marker = "extra == 'agent'", specifier = ">=3.1.0" },
     { name = "jinja2", marker = "extra == 'gateway'", specifier = ">=3.1.0" },
     { name = "lark-oapi", marker = "extra == 'gateway'", specifier = ">=1.5.0,<2.0.0" },
+    { name = "msgpack", marker = "extra == 'model-service'", specifier = ">=1.1.0,<2.0.0" },
     { name = "nats-py", specifier = ">=2.8.0" },
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "openai", marker = "extra == 'agent'", specifier = ">=1.90.0" },
@@ -1078,6 +1081,7 @@ requires-dist = [
     { name = "pyserial", marker = "extra == 'robot'", specifier = ">=3.5" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "pyzmq", marker = "extra == 'model-service'", specifier = ">=27.0.0,<28.0.0" },
     { name = "sherpa-onnx", marker = "extra == 'voice'", specifier = ">=1.12.0" },
     { name = "sherpa-onnx-core", marker = "extra == 'voice'", specifier = ">=1.12.0" },
     { name = "sounddevice", marker = "extra == 'voice'", specifier = ">=0.4.6" },
@@ -1772,6 +1776,23 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/e0/47/dd32fa426cc72114383ac549964eecb20ecfd886d1e5ccf5340b55b02f57/mpmath-1.3.0.tar.gz", hash = "sha256:7a28eb2a9774d00c7bc92411c19a89209d5da7c4c9a9e227be8330a23a25b91f", size = 508106, upload-time = "2023-03-07T16:47:11.061Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl", hash = "sha256:a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c", size = 536198, upload-time = "2023-03-07T16:47:09.197Z" },
+]
+
+[[package]]
+name = "msgpack"
+version = "1.2.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/31/f9/c0a1c127f9049db9155afc316952ea571720dd01833ff5e4d7e8e6352dbb/msgpack-1.2.1.tar.gz", hash = "sha256:04c721c2c7448767e9e3f2520a475663d8ee0f09c31890f6d2bd70fd636a9647", size = 183960, upload-time = "2026-06-18T16:13:52.594Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/26/aa/753ad8b007b464e1d8aa0c8e650b9c5f4f725e658fc5ac8a7635c55b7f6e/msgpack-1.2.1-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:60926b75d00c8e816ef98f3034f484a8bc64242d66839cef4cf7e503142316a0", size = 410634, upload-time = "2026-06-18T16:13:00.383Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/fd/6adabd4f6d5e686f97dd02ce7fce3fe4cf672cbac36b8f67ff4040e8ad8b/msgpack-1.2.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:020e881a764b20d8d7ca1a54fc01b8175519d108e3c3f194fddc200bda95951a", size = 419989, upload-time = "2026-06-18T16:13:01.776Z" },
+    { url = "https://files.pythonhosted.org/packages/5a/cc/85039b7b0eb168aaad7383a23c97e291a11f08351cb45a606ce865e4e3f1/msgpack-1.2.1-cp312-cp312-manylinux_2_31_riscv64.manylinux_2_39_riscv64.whl", hash = "sha256:4202c74688ca06591f78cb18988228bd4cca2cc75d57b60008372892d2f1e6e6", size = 377544, upload-time = "2026-06-18T16:13:03.637Z" },
+    { url = "https://files.pythonhosted.org/packages/ed/bf/35963899493b32030c85fc513b723ae66144ac70c11ebc52e889e16e3d99/msgpack-1.2.1-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:8b267ce94efb76fbd1b3373511420074ee3187f0f7811bf394531de13294735a", size = 400842, upload-time = "2026-06-18T16:13:05.012Z" },
+    { url = "https://files.pythonhosted.org/packages/a6/df/8e2ac970c8f99264cd9997d1c73df5466bc19da3301d7dc5500862a9b089/msgpack-1.2.1-cp312-cp312-musllinux_1_2_riscv64.whl", hash = "sha256:e4f1d0f8f98ade9634e01fb704a408f9336c0a8f1117b369f5db83dc7551d8b1", size = 374108, upload-time = "2026-06-18T16:13:06.232Z" },
+    { url = "https://files.pythonhosted.org/packages/17/dd/fa8bd265110dfa51c20cb529f9e6d240a16fafe7e645004c6af2d01353ba/msgpack-1.2.1-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:f02cf17a6ca1abe29b5f980644f7551f94d71f2011509b26d8625ce038f0df64", size = 414939, upload-time = "2026-06-18T16:13:07.478Z" },
+    { url = "https://files.pythonhosted.org/packages/2e/b9/8377a5ad8953fc0437c70cc98d9ae29f27fe5ac5109fbec0812085865735/msgpack-1.2.1-cp312-cp312-win32.whl", hash = "sha256:0c0d9802354507bcba62af19c17918e3eb437cc25e6f50657d511b5856a77aac", size = 64504, upload-time = "2026-06-18T16:13:08.822Z" },
+    { url = "https://files.pythonhosted.org/packages/57/7f/ce1e377df7e62461fefd9eb23bfb93a4a523f40a517b377b8f844d836828/msgpack-1.2.1-cp312-cp312-win_amd64.whl", hash = "sha256:5c24aa15d5963051e1a5c62b12c50cd705992502b5ec1f3bece6046f33c9fc24", size = 71421, upload-time = "2026-06-18T16:13:09.828Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/32/ebfe84c9929f08f188d56c7a2fd913406a9ddad76a634697c1c43b8112e6/msgpack-1.2.1-cp312-cp312-win_arm64.whl", hash = "sha256:4227224aaec8f7fbcbfbd4272319347b2bb4030366502600f8c45588c5187b07", size = 64775, upload-time = "2026-06-18T16:13:11.056Z" },
 ]
 
 [[package]]
@@ -2771,6 +2792,26 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/7f/be/2d07ad85e3d593d69640876a8686eae2c533db8cb7bf298d25c421b4d2d5/pyyaml-include-1.4.1.tar.gz", hash = "sha256:1a96e33a99a3e56235f5221273832464025f02ff3d8539309a3bf00dec624471", size = 20592, upload-time = "2024-03-25T14:56:43.748Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d5/ca/6a2cc3a73170d10b5af1f1613baa2ed1f8f46f62dd0bfab2bffd2c2fe260/pyyaml_include-1.4.1-py3-none-any.whl", hash = "sha256:323c7f3a19c82fbc4d73abbaab7ef4f793e146a13383866831631b26ccc7fb00", size = 19079, upload-time = "2024-03-25T14:56:41.274Z" },
+]
+
+[[package]]
+name = "pyzmq"
+version = "27.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cffi", marker = "(implementation_name == 'pypy' and sys_platform == 'linux') or (implementation_name == 'pypy' and sys_platform == 'win32') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-robocasa365') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-vln') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'group-9-hey-robot-robocasa365' and extra == 'group-9-hey-robot-vln') or (sys_platform == 'linux' and extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-robocasa365') or (sys_platform == 'linux' and extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-vln') or (sys_platform == 'linux' and extra == 'group-9-hey-robot-robocasa365' and extra == 'group-9-hey-robot-vln') or (sys_platform == 'win32' and extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-robocasa365') or (sys_platform == 'win32' and extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-vln') or (sys_platform == 'win32' and extra == 'group-9-hey-robot-robocasa365' and extra == 'group-9-hey-robot-vln')" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/04/0b/3c9baedbdf613ecaa7aa07027780b8867f57b6293b6ee50de316c9f3222b/pyzmq-27.1.0.tar.gz", hash = "sha256:ac0765e3d44455adb6ddbf4417dcce460fc40a05978c08efdf2948072f6db540", size = 281750, upload-time = "2025-09-08T23:10:18.157Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e8/5e/c3c49fdd0f535ef45eefcc16934648e9e59dace4a37ee88fc53f6cd8e641/pyzmq-27.1.0-cp312-abi3-manylinux2014_i686.manylinux_2_17_i686.whl", hash = "sha256:1c179799b118e554b66da67d88ed66cd37a169f1f23b5d9f0a231b4e8d44a113", size = 895645, upload-time = "2025-09-08T23:08:05.301Z" },
+    { url = "https://files.pythonhosted.org/packages/f8/e5/b0b2504cb4e903a74dcf1ebae157f9e20ebb6ea76095f6cfffea28c42ecd/pyzmq-27.1.0-cp312-abi3-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:3837439b7f99e60312f0c926a6ad437b067356dc2bc2ec96eb395fd0fe804233", size = 652574, upload-time = "2025-09-08T23:08:06.828Z" },
+    { url = "https://files.pythonhosted.org/packages/f8/9b/c108cdb55560eaf253f0cbdb61b29971e9fb34d9c3499b0e96e4e60ed8a5/pyzmq-27.1.0-cp312-abi3-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:43ad9a73e3da1fab5b0e7e13402f0b2fb934ae1c876c51d0afff0e7c052eca31", size = 840995, upload-time = "2025-09-08T23:08:08.396Z" },
+    { url = "https://files.pythonhosted.org/packages/c2/bb/b79798ca177b9eb0825b4c9998c6af8cd2a7f15a6a1a4272c1d1a21d382f/pyzmq-27.1.0-cp312-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:0de3028d69d4cdc475bfe47a6128eb38d8bc0e8f4d69646adfbcd840facbac28", size = 1642070, upload-time = "2025-09-08T23:08:09.989Z" },
+    { url = "https://files.pythonhosted.org/packages/9c/80/2df2e7977c4ede24c79ae39dcef3899bfc5f34d1ca7a5b24f182c9b7a9ca/pyzmq-27.1.0-cp312-abi3-musllinux_1_2_i686.whl", hash = "sha256:cf44a7763aea9298c0aa7dbf859f87ed7012de8bda0f3977b6fb1d96745df856", size = 2021121, upload-time = "2025-09-08T23:08:11.907Z" },
+    { url = "https://files.pythonhosted.org/packages/46/bd/2d45ad24f5f5ae7e8d01525eb76786fa7557136555cac7d929880519e33a/pyzmq-27.1.0-cp312-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:f30f395a9e6fbca195400ce833c731e7b64c3919aa481af4d88c3759e0cb7496", size = 1878550, upload-time = "2025-09-08T23:08:13.513Z" },
+    { url = "https://files.pythonhosted.org/packages/e6/2f/104c0a3c778d7c2ab8190e9db4f62f0b6957b53c9d87db77c284b69f33ea/pyzmq-27.1.0-cp312-abi3-win32.whl", hash = "sha256:250e5436a4ba13885494412b3da5d518cd0d3a278a1ae640e113c073a5f88edd", size = 559184, upload-time = "2025-09-08T23:08:15.163Z" },
+    { url = "https://files.pythonhosted.org/packages/fc/7f/a21b20d577e4100c6a41795842028235998a643b1ad406a6d4163ea8f53e/pyzmq-27.1.0-cp312-abi3-win_amd64.whl", hash = "sha256:9ce490cf1d2ca2ad84733aa1d69ce6855372cb5ce9223802450c9b2a7cba0ccf", size = 619480, upload-time = "2025-09-08T23:08:17.192Z" },
+    { url = "https://files.pythonhosted.org/packages/78/c2/c012beae5f76b72f007a9e91ee9401cb88c51d0f83c6257a03e785c81cc2/pyzmq-27.1.0-cp312-abi3-win_arm64.whl", hash = "sha256:75a2f36223f0d535a0c919e23615fc85a1e23b71f40c7eb43d7b1dedb4d8f15f", size = 552993, upload-time = "2025-09-08T23:08:18.926Z" },
 ]
 
 [[package]]

@@ -73,13 +73,14 @@ def test_lerobot_is_a_runtime_backend_not_a_vla_subtype() -> None:
     assert "fastwam" not in source
 
 
-def test_benchmark_selects_the_generic_lerobot_service() -> None:
+def test_benchmark_selects_a_supported_generic_robot_policy_service() -> None:
     source = (ROOT / "evaluation/robocasa365/full_system_benchmark.py").read_text(
         encoding="utf-8"
     )
 
     assert 'spec.type == "robot_policy"' in source
     assert 'spec.settings.get("runtime")' in source
+    assert '{"lerobot", "rldx"}' in source
     assert 'spec.settings.get("embodiment")' in source
     assert "robocasa_lerobot_policy" not in source
 

@@ -31,7 +31,11 @@ backend 内只有一个 `EpisodeManager`，它是 simulator、observation、fram
 - 批量入口：`evaluation/robocasa365/batch_full_system_benchmark.py`；
 - 唯一任务清单：`evaluation/robocasa365/tasks.yaml`；
 - 唯一 Agent 配置：`configs/evaluation/robocasa365.yaml`；
-- 唯一推荐启动器：`scripts/evaluation/run_robocasa365_full_system.sh`。
+- 唯一启动器：`scripts/evaluation/run_robocasa365.sh`，通过 `single` 或 `batch`
+  选择评测模式，通过 `--config` 选择策略后端。
+
+RLDX-1 使用同一条 Runtime、ModelService、Agent 和官方成功谓词链路，只通过
+`configs/evaluation/robocasa365.rldx.yaml` 替换策略后端。
 
 ## 2. 已验证状态
 
@@ -137,7 +141,6 @@ PI052 checkpoint、device、prompt mode、horizon 和 timeout 只在
 policy_path: lerobot/pi052_robocasa
 policy_device: cuda
 prompt_mode: environment_root
-option_horizon: 50
 ```
 
 `pi052_robocasa` 使用 `subtask_mem` recipe：推理时从官方根任务生成并保持自己的低层 subtask。
@@ -153,7 +156,8 @@ steerable VLA，应作为同一 `manipulate` 接口的另一个模型配置验�
 在仓库根目录执行：
 
 ```bash
-bash scripts/evaluation/run_robocasa365_full_system.sh \
+bash scripts/evaluation/run_robocasa365.sh single \
+  --config configs/evaluation/robocasa365.yaml \
   --task CloseFridge \
   --seed 1000 \
   --condition b1 \
@@ -184,6 +188,46 @@ PI052 checkpoint 约 10.9 GB，当前宿主首次冷加载通常需要 4～5 分
 为 0，属于正常现象。
 
 每次运行必须使用新的 `--output-dir`。入口拒绝覆盖已有目录，从而避免历史实验被静默覆盖。
+
+### 5.1 使用 RLDX-1
+
+RLDX-1 模型服务运行在独立 Python 3.10 环境中，默认路径为 `/root/.venv-rldx`，源码默认位于
+`/root/.cache/rldx-src/RLDX-1`，checkpoint 为 `RLWRLD/RLDX-1-FT-RC365`。Hey Robot 会启动官方 RLDX
+ZeroMQ server，将 RoboCasa365 的 3 路相机和 16 维状态转换成官方 modality contract，并按
+官方设置执行每个 16 步 action chunk 的前 8 步。
+当前双 3090 主机配置让 MuJoCo 使用 GPU 0、RLDX-1 使用 GPU 1；换到单 GPU 主机时需同步修改
+`mujoco_device` 和 `policy_device`。宿主没有 CUDA toolkit，不能本地编译 `flash-attn`，因此
+当前配置使用 PyTorch `sdpa` attention backend。
+
+单任务冒烟评测：
+
+```bash
+bash scripts/evaluation/run_robocasa365.sh single \
+  --config configs/evaluation/robocasa365.rldx.yaml \
+  --task CloseFridge \
+  --seed 1000 \
+  --condition b0 \
+  --output-dir /root/hey-robot-rldx-results/close-fridge-b0-seed1000 \
+  --timeout-sec 7200
+```
+
+长程组合任务批量评测：
+
+```bash
+bash scripts/evaluation/run_robocasa365.sh batch \
+  --config configs/evaluation/robocasa365.rldx.yaml \
+  --output-root /root/hey-robot-rldx-results/composite-b0-seed1000 \
+  --suite composite_seen \
+  --suite composite_unseen \
+  --condition b0 \
+  --seeds 1000 \
+  --timeout-sec 7200
+```
+
+`b0` 是最直接的 RLDX-1 flat-policy 基线；需要评估 Hey Robot 分层规划时，再运行相同任务的
+`b1` 和 `b2`。首次运行会把 checkpoint 下载到 `/root/.cache/huggingface`，不占用已满的
+`/workspace` 文件系统；运行产物同样默认放在 `/root`。当前配置通过
+`https://hf-mirror.com` 获取 Hugging Face 文件。
 
 ## 6. B0、B1、B2
 

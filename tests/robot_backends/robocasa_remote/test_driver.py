@@ -130,6 +130,35 @@ def test_driver_attaches_to_evaluator_owned_active_trial() -> None:
     asyncio.run(run())
 
 
+def test_driver_reattaches_when_evaluator_advances_to_next_trial() -> None:
+    async def run() -> None:
+        driver, client = _driver()
+        await driver.start()
+        await driver.observe()
+
+        async def observe_next():
+            return RemoteObservation(
+                episode_id="trial-2",
+                frame_id=0,
+                state=[0.0] * 16,
+                images=[
+                    RemoteImage(camera=f"camera{index}", data=_jpeg(index))
+                    for index in range(1, 4)
+                ],
+                task="PrepareCoffee",
+            )
+
+        client.observe = observe_next
+        observation = await driver.observe()
+
+        assert observation.frame_id == 0
+        assert driver.episode_id == "trial-2"
+        assert driver.task == "PrepareCoffee"
+        assert driver.state == "idle"
+
+    asyncio.run(run())
+
+
 def test_driver_close_does_not_end_evaluator_trial() -> None:
     async def run() -> None:
         driver, client = _driver()

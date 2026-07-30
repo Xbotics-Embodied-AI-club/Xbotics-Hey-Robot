@@ -96,6 +96,33 @@ def test_validate_deployment_requires_explicit_lerobot_policy_contract(
     assert "model service policy requires positive action_dimensions" in messages
 
 
+def test_validate_deployment_accepts_rldx_robot_policy_runtime(tmp_path) -> None:
+    config = DeploymentConfig.from_dict(
+        {
+            "resources": {"runtime_dir": str(tmp_path / "runtime")},
+            "model_services": {
+                "policy": {
+                    "type": "robot_policy",
+                    "robot_id": "robot",
+                    "settings": {
+                        "runtime": "rldx",
+                        "policy_path": "RLWRLD/RLDX-1-FT-RC365",
+                        "policy_device": "cuda",
+                        "action_space": "robocasa_12d",
+                        "action_dimensions": 12,
+                    },
+                }
+            },
+        }
+    )
+
+    messages = {issue.message for issue in validate_deployment(config)}
+
+    assert not any(
+        "unsupported robot policy runtime" in message for message in messages
+    )
+
+
 def test_validate_deployment_requires_explicit_vln_backend_contract(tmp_path) -> None:
     config = DeploymentConfig.from_dict(
         {

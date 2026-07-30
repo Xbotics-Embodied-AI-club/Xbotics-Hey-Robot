@@ -1,16 +1,16 @@
 deployment:
-  id: robocasa365.agent
+  id: robocasa365.rldx
   bus:
     type: in_memory
-    url: memory://robocasa365.agent
+    url: memory://robocasa365.rldx
 resources:
-  runtime_dir: runtime/robocasa365.agent
+  runtime_dir: /root/hey-robot-rldx-runtime/runtime
   media:
-    root: runtime/robocasa365.agent/media
+    root: /root/hey-robot-rldx-runtime/media
     max_items: 10000
     image_save_every_n: 1
   episodes:
-    root: runtime/robocasa365.agent/episodes
+    root: /root/hey-robot-rldx-runtime/episodes
   events:
     retain: 10000
 identity:
@@ -52,7 +52,7 @@ robots:
       target: grpc://127.0.0.1:9092
       managed_backend: true
       backend_python: .venv-robocasa365/bin/python
-      backend_startup_timeout_sec: 600
+      backend_startup_timeout_sec: 1800
       timeout_sec: 60
       control_hz: 20
       supported_driver_primitives:
@@ -62,9 +62,10 @@ robots:
       default_seed: 1000
       task_split: target
       object_registries:
+      - objaverse
       - lightwheel
       mujoco_gl: egl
-      mujoco_device: auto_separate
+      mujoco_device: "0"
 model_services:
   robocasa365:
     type: robot_policy
@@ -75,14 +76,13 @@ model_services:
     - manipulate
     timeout_sec: 1800
     settings:
-      runtime: lerobot
-      service_python: .venv-robocasa365/bin/python
+      runtime: rldx
+      service_python: .venv/bin/python
       health_timeout_sec: 10
       auth_token_env: ROBOCASA_DATA_TOKEN
-      policy_path: lerobot/pi052_robocasa
-      policy_device: cuda
+      policy_path: RLWRLD/RLDX-1-FT-RC365
+      policy_device: cuda:1
       embodiment: robocasa
-      robot_type: robocasa
       action_space: robocasa_12d
       action_dimensions: 12
       action_low: -1.0
@@ -92,16 +92,20 @@ model_services:
       - camera1
       - camera2
       - camera3
-      observation_features:
-        observation.images.robot0_agentview_left: observation.images.camera1
-        observation.images.robot0_agentview_right: observation.images.camera2
-        observation.images.robot0_eye_in_hand: observation.images.camera3
-      media_root: runtime/robocasa365.agent/media
+      media_root: /root/hey-robot-rldx-runtime/media
       prompt_mode: environment_root
+      execution_horizon: 8
+      video_delta_indices: [-6, -4, -2, 0]
       control_hz: 20
-      load_timeout_sec: 600
-      request_timeout_sec: 300
-      offline: true
+      request_timeout_sec: 600
+      server_startup_timeout_sec: 1500
+      server_port: 15555
+      rldx_repo: /root/.cache/rldx-src/RLDX-1
+      rldx_python: /root/.venv-rldx/bin/python
+      attention_impl: sdpa
+      hf_home: /root/.cache/huggingface
+      hf_endpoint: https://hf-mirror.com
+      hf_xet_high_performance: true
 policies:
   embodied_skills:
     enabled: true

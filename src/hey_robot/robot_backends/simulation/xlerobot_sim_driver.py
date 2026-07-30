@@ -5,7 +5,7 @@ import contextlib
 import functools
 import threading
 import time
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -84,7 +84,9 @@ class XLeRobotSimDriver:
         initial_offset = self.settings.get("initial_base_offset_m", [0.0, 0.0, 0.0])
         if not isinstance(initial_offset, (list, tuple)) or len(initial_offset) != 3:
             raise ValueError("initial_base_offset_m must be [x_m, y_m, yaw_rad]")
-        self._initial_base_offset = tuple(float(value) for value in initial_offset)
+        self._initial_base_offset = cast(
+            tuple[float, float, float], tuple(float(value) for value in initial_offset)
+        )
         self._camera_names = self._resolve_camera_names()
         self._default_camera = (
             context.embodiment.default_camera

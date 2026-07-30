@@ -1,6 +1,6 @@
 version: robocasa-1.0.0-target-v1
 split: target
-registries: [lightwheel]
+registries: [objaverse, lightwheel]
 
 suites:
   atomic_gate:

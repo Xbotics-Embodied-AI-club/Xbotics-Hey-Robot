@@ -34,11 +34,11 @@ def _config(tmp_path) -> DeploymentConfig:
                         "policy_path": "p",
                         "policy_device": "cpu",
                         "runtime": "lerobot",
+                        "service_python": "model-python",
                         "embodiment": "robocasa",
                         "action_space": "robocasa_12d",
                         "action_dimensions": 12,
                         "prompt_mode": "environment_root",
-                        "option_horizon": 50,
                     },
                 }
             },
@@ -91,7 +91,7 @@ async def test_managed_backend_owns_credentials_process_and_cleanup(
         "hey_robot.app.robocasa_backend",
     )
     assert spawns[1][0][:4] == (
-        "backend-python",
+        "model-python",
         "-m",
         "hey_robot.cli.main",
         "model-service",
@@ -100,6 +100,15 @@ async def test_managed_backend_owns_credentials_process_and_cleanup(
     await sidecar.stop()
     assert all(process.terminated for process in processes)
     assert not sidecar.credentials_path.exists()
+
+
+def test_managed_backend_accepts_rldx_policy(tmp_path) -> None:
+    config = _config(tmp_path)
+    config.model_services["m"].settings["runtime"] = "rldx"
+
+    sidecar = ManagedRoboCasaBackend(config, config_path="deployment.yaml")
+
+    assert sidecar.service_id == "m"
 
 
 @pytest.mark.asyncio

@@ -4,10 +4,12 @@ import asyncio
 import base64
 import io
 import json
+from argparse import Namespace
 
 import numpy as np
 from PIL import Image
 
+from evaluation.robocasa365 import batch_full_system_benchmark
 from evaluation.robocasa365.conditions import condition_for
 from evaluation.robocasa365.full_system_benchmark import (
     _find_trial_task,
@@ -28,6 +30,60 @@ from hey_robot.skills import (
     load_skill_registry,
 )
 from hey_robot.skills.resources import ResourceManager
+
+
+def test_batch_benchmark_records_one_trial_error_and_continues(
+    tmp_path, monkeypatch
+) -> None:
+    calls: list[str] = []
+
+    async def run_trial(args):
+        calls.append(args.task)
+        if args.task == "broken":
+            args.output_dir.mkdir(parents=True)
+            raise RuntimeError("scene sampling failed")
+        return {
+            "task": args.task,
+            "seed": args.seed,
+            "condition": args.condition,
+            "official_success": True,
+            "false_completion": False,
+            "failure_stage": None,
+        }
+
+    monkeypatch.setattr(
+        batch_full_system_benchmark,
+        "load_manifest",
+        lambda _: {"suites": {"long": ["broken", "working"]}},
+    )
+    monkeypatch.setattr(batch_full_system_benchmark, "run_trial", run_trial)
+    args = Namespace(
+        output_root=tmp_path / "batch",
+        manifest=tmp_path / "tasks.yaml",
+        config=tmp_path / "config.yaml",
+        suite=["long"],
+        condition=["b0"],
+        seeds="1000",
+        objective_template=None,
+        agent_url="http://127.0.0.1:18080/turn",
+        runtime_target="grpc://127.0.0.1:9092",
+        credentials_file=tmp_path / "credentials.json",
+        poll_sec=0.01,
+        timeout_sec=1.0,
+    )
+
+    summary = asyncio.run(batch_full_system_benchmark.run_batch(args))
+
+    assert calls == ["broken", "working"]
+    assert summary["count"] == 2
+    assert summary["official_successes"] == 1
+    assert summary["trial_errors"] == 1
+    failure = json.loads(
+        (
+            args.output_root / "trials" / "long-b0-broken-1000" / "result.json"
+        ).read_text()
+    )
+    assert failure["failure_stage"] == "trial_exception"
 
 
 class _AuthContext:

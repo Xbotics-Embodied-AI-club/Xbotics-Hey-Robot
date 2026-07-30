@@ -133,6 +133,7 @@ class TestXLeRobotSimSkillAdapter:
         # A native VLA action can drive base, both arms, and grippers together.
         # The semantic skill therefore owns the whole actuator boundary.
         assert MANIPULATE.resources == ("robot_control", "camera")
+        assert MANIPULATE.timeout_sec >= 600 * 5
 
     def test_decode_gripper_open_close(self) -> None:
         adapter = self._adapter()

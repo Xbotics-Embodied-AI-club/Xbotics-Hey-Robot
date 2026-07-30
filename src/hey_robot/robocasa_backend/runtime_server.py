@@ -4,6 +4,7 @@ import asyncio
 import io
 import math
 import os
+import time
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
@@ -54,6 +55,7 @@ class RoboCasaRuntimeService(robocasa_runtime_pb2_grpc.RoboCasaRuntimeServicer):
         evaluator_token: str | None = None,
         data_token: str | None = None,
         prepare_trial: Callable[[], None] | None = None,
+        step_timeout_sec: float = 60.0,
     ) -> None:
         self.manager = manager or EpisodeManager(allowed_tasks=ALLOWED_TASKS)
         self._lock = asyncio.Lock()
@@ -63,6 +65,7 @@ class RoboCasaRuntimeService(robocasa_runtime_pb2_grpc.RoboCasaRuntimeServicer):
         self._evaluator_token = evaluator_token
         self._data_token = data_token
         self._prepare_trial = prepare_trial
+        self._step_timeout_sec = max(float(step_timeout_sec), 0.001)
 
     @property
     def busy(self) -> bool:
@@ -146,19 +149,35 @@ class RoboCasaRuntimeService(robocasa_runtime_pb2_grpc.RoboCasaRuntimeServicer):
         ):
             raise ValueError("raw_action must contain exactly 12 finite values")
         async with self._lock:
-            outcome = await asyncio.to_thread(
-                self.manager.step,
-                action,
-                expected_frame_id=int(request.expected_frame_id),
-                raw_action=raw_action or action,
-                action_clipped=bool(request.action_clipped),
-            )
+            started = time.monotonic()
+            try:
+                outcome = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self.manager.step,
+                        action,
+                        expected_frame_id=int(request.expected_frame_id),
+                        raw_action=raw_action or action,
+                        action_clipped=bool(request.action_clipped),
+                    ),
+                    timeout=self._step_timeout_sec,
+                )
+            except TimeoutError as exc:
+                self._last_error = (
+                    f"RoboCasa environment step exceeded {self._step_timeout_sec:.1f}s"
+                )
+                await context.abort(grpc.StatusCode.DEADLINE_EXCEEDED, self._last_error)
+                raise AssertionError("context.abort must not return") from exc
             trial = self.manager.current_trial()
             return robocasa_runtime_pb2.StepResponse(
                 observation=self._response_observation(trial),
                 reward=outcome.reward,
                 done=outcome.done,
-                metrics=_struct({"truncated": outcome.truncated}),
+                metrics=_struct(
+                    {
+                        "truncated": outcome.truncated,
+                        "step_duration_sec": round(time.monotonic() - started, 3),
+                    }
+                ),
             )
 
     async def ReadTruth(self, request, context):  # noqa: N802
@@ -275,6 +294,7 @@ def _assets_available() -> bool:
             root / "textures",
             root / "generative_textures",
             root / "fixtures",
+            root / "objects" / "objaverse",
             root / "objects" / "lightwheel",
         )
         if not all(path.is_dir() for path in required):

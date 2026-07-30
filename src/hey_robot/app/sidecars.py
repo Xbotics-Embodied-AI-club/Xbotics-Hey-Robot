@@ -38,7 +38,7 @@ class ManagedRoboCasaBackend:
             if spec.enabled
             and spec.robot_id == self.robot_id
             and spec.type == "robot_policy"
-            and str(spec.settings.get("runtime") or "") == "lerobot"
+            and str(spec.settings.get("runtime") or "") in {"lerobot", "rldx"}
             and str(spec.settings.get("embodiment") or "") == "robocasa"
             and tuple(spec.provides) == ("manipulate",)
         ]
@@ -82,9 +82,14 @@ class ManagedRoboCasaBackend:
             encoding="utf-8",
         )
         self.credentials_path.chmod(0o600)
-        python = str(
+        backend_python = str(
             os.environ.get("HEY_ROBOT_ROBOCASA_BACKEND_PYTHON")
             or self.robot_spec.settings.get("backend_python")
+            or sys.executable
+        )
+        model_python = str(
+            os.environ.get("HEY_ROBOT_MODEL_SERVICE_PYTHON")
+            or self.model_spec.settings.get("service_python")
             or sys.executable
         )
         runtime_environment = _service_environment()
@@ -99,7 +104,7 @@ class ManagedRoboCasaBackend:
                 }
             )
         self.runtime_process = await asyncio.create_subprocess_exec(
-            python,
+            backend_python,
             "-m",
             "hey_robot.app.robocasa_backend",
             "--host",
@@ -116,7 +121,7 @@ class ManagedRoboCasaBackend:
         )
         try:
             self.model_process = await asyncio.create_subprocess_exec(
-                python,
+                model_python,
                 "-m",
                 "hey_robot.cli.main",
                 "model-service",

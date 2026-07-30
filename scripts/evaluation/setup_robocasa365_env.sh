@@ -11,6 +11,25 @@ lerobot_ref="cb73cf3ffa1cec60640a06b924c2174548ae2b1b"
 robocasa_ref="56e355ccc64389dfc1b8a61a33b9127b975ba681"
 robosuite_cache="$source_cache/../downloads/robosuite-git-cache"
 robosuite_ref="aaa8b9b214ce8e77e82926d677b4d61d55e577ab"
+required_assets=(
+  textures
+  generative_textures
+  fixtures
+  objects/objaverse
+  objects/lightwheel
+  .robocasa-assets-ready
+)
+
+validate_assets() {
+  local assets_root="$1"
+  local relative
+  for relative in "${required_assets[@]}"; do
+    if [[ ! -e "$assets_root/$relative" ]]; then
+      printf 'RoboCasa365 asset is missing: %s\n' "$assets_root/$relative" >&2
+      return 1
+    fi
+  done
+}
 
 if [[ "${1:-}" == "--recreate" ]]; then
   resolved_env="$(realpath -m "$env_dir")"
@@ -34,17 +53,7 @@ if [[ ! -e "$canonical_assets" ]]; then
   ln -s "$legacy_assets" "$canonical_assets"
 fi
 
-for required in \
-  textures \
-  generative_textures \
-  fixtures \
-  objects/lightwheel \
-  .robocasa-assets-ready; do
-  if [[ ! -e "$canonical_assets/$required" ]]; then
-    printf 'RoboCasa365 asset is missing: %s\n' "$canonical_assets/$required" >&2
-    exit 2
-  fi
-done
+validate_assets "$canonical_assets"
 
 # A previously verified source cache may satisfy the immutable Git URLs when
 # GitHub is slow or unavailable. Git still checks out the exact commits stored
@@ -66,7 +75,7 @@ if git -C "$robosuite_cache" cat-file -e "$robosuite_ref^{commit}" 2>/dev/null; 
   git_rewrites+="'url.file://$robosuite_cache/.insteadOf=https://github.com/ARISE-Initiative/robosuite.git'"
 fi
 if [[ -n "$git_rewrites" ]]; then
-  export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS:-}$git_rewrites"
+  export GIT_CONFIG_PARAMETERS="${GIT_CONFIG_PARAMETERS:+$GIT_CONFIG_PARAMETERS }$git_rewrites"
 fi
 
 UV_PROJECT_ENVIRONMENT="$env_dir" \
@@ -89,6 +98,7 @@ elif [[ -d "$package_assets" ]]; then
   mv "$package_assets" "$packaged_backup"
 fi
 ln -s "$canonical_assets" "$package_assets"
+validate_assets "$package_assets"
 
 "$env_dir/bin/python" - <<'PY'
 from importlib.metadata import version
@@ -102,15 +112,6 @@ import robosuite
 import torch
 
 assets = Path(robocasa.__file__).resolve().parent / "models" / "assets"
-required = (
-    assets / "textures",
-    assets / "generative_textures",
-    assets / "fixtures",
-    assets / "objects" / "lightwheel",
-    assets / ".robocasa-assets-ready",
-)
-if not all(path.exists() for path in required):
-    raise SystemExit(f"RoboCasa365 asset validation failed: {assets}")
 print(
     "RoboCasa365 environment ready:",
     f"torch={torch.__version__}",
