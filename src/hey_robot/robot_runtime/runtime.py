@@ -224,7 +224,7 @@ class RobotRuntime:
     async def _inspect_scene(
         self, snapshot: PerceptionSnapshot, arguments: dict[str, Any]
     ) -> dict[str, Any]:
-        caption, entities = await self._caption_scene(
+        caption, entities, verification, visual_evidence = await self._caption_scene(
             snapshot.observation,
             question=str(arguments.get("question") or "").strip() or None,
         )
@@ -249,19 +249,28 @@ class RobotRuntime:
             "failure_mode": None if snapshot.has_images else "camera_unavailable",
             "semantic_available": bool(caption),
             "entities": [_entity_payload(item) for item in entities],
+            "verification": verification,
+            "verification_target": str(arguments.get("question") or "").strip() or None,
+            "visual_evidence": visual_evidence,
+            "decision_state": {
+                "verification": verification,
+                "verification_target": str(arguments.get("question") or "").strip()
+                or None,
+                "visual_evidence": visual_evidence,
+            },
             **snapshot.summary(),
         }
 
     async def _caption_scene(
         self, observation: RobotObservation, *, question: str | None = None
-    ) -> tuple[str | None, tuple[SceneEntity, ...]]:
+    ) -> tuple[str | None, tuple[SceneEntity, ...], str, str | None]:
         """在启用视觉描述器时，返回模型生成的场景摘要。
 
         原始相机元数据不会被当作场景描述：成功采集到一帧图像，并不能证明图像中
         可见什么内容。
         """
         if self.scene_captioner is None or not observation.images:
-            return None, ()
+            return None, (), "unknown", None
         try:
             understanding = await self.scene_captioner.caption(
                 observation, await self.status(), question=question
@@ -270,7 +279,7 @@ class RobotRuntime:
             logger.exception(
                 f"场景理解调用异常: robot={self.robot_id} frame={observation.frame_id}"
             )
-            return None, ()
+            return None, (), "unknown", None
         metadata = getattr(understanding, "metadata", None)
         confidence = getattr(understanding, "confidence", 0.0)
         if not isinstance(metadata, dict):
@@ -278,14 +287,14 @@ class RobotRuntime:
                 f"场景理解结果无元数据，已丢弃: robot={self.robot_id} "
                 f"frame={observation.frame_id}"
             )
-            return None, ()
+            return None, (), "unknown", None
         if metadata.get("error") or not confidence > 0.0:
             logger.warning(
                 f"场景理解结果不可用，已丢弃: robot={self.robot_id} "
                 f"frame={observation.frame_id} confidence={confidence} "
                 f"reason={metadata.get('error') or metadata.get('raw') or 'unknown'}"
             )
-            return None, ()
+            return None, (), "unknown", None
         summary = _structured_scene_summary(understanding)
         entities = tuple(
             entity
@@ -296,7 +305,13 @@ class RobotRuntime:
         if entities:
             self._scene_entities = entities
             self._scene_entities_frame_id = observation.frame_id
-        return summary or None, entities
+        verification = str(
+            getattr(understanding, "verification", "unknown") or "unknown"
+        )
+        visual_evidence = str(
+            getattr(understanding, "visual_evidence", "") or ""
+        ).strip()
+        return summary or None, entities, verification, visual_evidence or None
 
     def _with_scene_entities(self, observation: RobotObservation) -> RobotObservation:
         cached_frame_id = self._scene_entities_frame_id
@@ -477,6 +492,14 @@ def _structured_scene_summary(understanding: Any) -> str:
     hint = str(getattr(understanding, "next_observation_hint", "") or "").strip()
     if hint:
         parts.append(f"next_observation_hint={hint}")
+    verification = str(
+        getattr(understanding, "verification", "unknown") or "unknown"
+    ).strip()
+    if verification != "unknown":
+        parts.append(f"verification={verification}")
+    visual_evidence = str(getattr(understanding, "visual_evidence", "") or "").strip()
+    if visual_evidence:
+        parts.append(f"visual_evidence={visual_evidence}")
     return "; ".join(part for part in parts if part)
 
 

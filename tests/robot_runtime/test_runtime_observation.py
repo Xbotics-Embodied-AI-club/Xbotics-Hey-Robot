@@ -177,6 +177,8 @@ async def test_inspect_scene_preserves_structured_object_locations(tmp_path) -> 
                 summary="kitchen counter",
                 objects=[SceneObject("kettle", "left counter", 0.93)],
                 task_relevance="the requested kettle is visible",
+                verification="yes",
+                visual_evidence="kettle is resting on the left counter",
                 confidence=0.9,
             )
 
@@ -194,9 +196,14 @@ async def test_inspect_scene_preserves_structured_object_locations(tmp_path) -> 
 
     status = await runtime.apply_action(action)
 
-    summary = status.metrics["last_skill_result"]["summary"]
+    result = status.metrics["last_skill_result"]
+    summary = result["summary"]
     assert "objects=[kettle@left counter(0.93)]" in summary
     assert "task_relevance=the requested kettle is visible" in summary
+    assert "verification=yes" in summary
+    assert result["verification"] == "yes"
+    assert result["verification_target"] == "find the kettle"
+    assert result["visual_evidence"] == "kettle is resting on the left counter"
 
 
 async def test_inspect_scene_publishes_frame_scoped_entities(tmp_path) -> None:

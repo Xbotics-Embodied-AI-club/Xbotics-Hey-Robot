@@ -31,6 +31,7 @@ from hey_robot.skills.models import SkillEvent, SkillResult
 class _TaskRuntime:
     hard_max_skills = 24
     hard_max_wall_time_sec = 3600.0
+    completion_authority = "agent"
 
 
 class _Config:
@@ -39,6 +40,14 @@ class _Config:
     @staticmethod
     def default_robot_id(_agent_id: str | None) -> str:
         return "sim_robot"
+
+
+class _EnvironmentTaskRuntime(_TaskRuntime):
+    completion_authority = "environment"
+
+
+class _EnvironmentConfig(_Config):
+    agent_runtime = _EnvironmentTaskRuntime()
 
 
 class _Runner:
@@ -260,6 +269,34 @@ def test_task_store_persists_one_canonical_envelope(tmp_path) -> None:
     assert "task_envelopes" not in tables
 
 
+def test_agent_context_surfaces_unverified_subgoal_state(tmp_path) -> None:
+    tasks = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    conversations = ConversationStore(tmp_path / "conversations.sqlite3")
+    context = AgentContextBuilder(_Templates(), conversations, tasks)
+    proposal = PhysicalToolCall(
+        "manipulate", {"task_prompt": "place jam on scale", "max_steps": 64}
+    )
+    outcome = ToolOutcome(
+        "completed",
+        "execution window ended",
+        {
+            "decision_state": {
+                "execution_success": True,
+                "termination_reason": "max_steps",
+                "subgoal_status": "unknown",
+                "subgoal_succeeded": None,
+            },
+        },
+    )
+
+    rendered = context.outcome_context(proposal, outcome)
+
+    assert '"subgoal_status": "unknown"' in rendered
+    assert '"termination_reason": "max_steps"' in rendered
+    conversations.close()
+    tasks.close()
+
+
 def test_task_store_updates_continuation_route_without_changing_task_identity(
     tmp_path,
 ) -> None:
@@ -323,40 +360,25 @@ async def test_agent_returns_waiting_after_physical_submit(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_plain_text_after_tool_outcome_keeps_task_active(tmp_path) -> None:
+async def test_plain_text_after_tool_outcome_fails_without_retry_loop(tmp_path) -> None:
     observe = PhysicalToolCall("inspect_scene", {})
-    response = AgentResponseCall("none", "done")
     runner = _Runner(
         [
             _decision("observe-1", observe),
             AgentTurnResult("returned", "done", "model_returned"),
-            _decision("respond-1", response),
         ]
     )
-    executions = [
-        ToolExecution("continue", ToolOutcome("completed", "seen"), observe),
-        ToolExecution(
-            "respond",
-            ToolOutcome("completed", "done"),
-            response,
-            final_text="done",
-        ),
-    ]
+    executions = [ToolExecution("continue", ToolOutcome("completed", "seen"), observe)]
     agent, tasks, conversations = _agent(tmp_path, runner, executions)
 
     result = await agent.prompt(
         AgentCommand("session-1", "turn-1", Envelope(robot_id="sim_robot"), "inspect")
     )
 
-    assert result.status == "responded"
-    assert result.text == "done"
-    assert len(runner.requests) == 3
+    assert result.status == "failed"
+    assert "function schema" in result.text
+    assert len(runner.requests) == 2
     assert runner.requests[1].messages[-1].role == "tool"
-    assert (
-        runner.requests[2]
-        .messages[-1]
-        .content.startswith("普通文本不是有效的 Agent 响应")
-    )
     assert tasks.active_task("session-1") is not None
     conversations.close()
     tasks.close()
@@ -447,20 +469,8 @@ async def test_steer_during_inference_rebuilds_context(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_plain_text_does_not_implicitly_complete_active_task(tmp_path) -> None:
     returned = AgentTurnResult("returned", "still working", "model_returned")
-    response = AgentResponseCall("none", "still working")
-    runner = _Runner([returned, _decision("respond-1", response)])
-    agent, tasks, conversations = _agent(
-        tmp_path,
-        runner,
-        [
-            ToolExecution(
-                "respond",
-                ToolOutcome("completed", "still working"),
-                response,
-                final_text="still working",
-            )
-        ],
-    )
+    runner = _Runner([returned])
+    agent, tasks, conversations = _agent(tmp_path, runner, [])
     task = tasks.create_task(
         session_key="session-1",
         envelope=Envelope(robot_id="sim_robot"),
@@ -476,9 +486,8 @@ async def test_plain_text_does_not_implicitly_complete_active_task(tmp_path) -> 
         )
     )
 
-    assert result.status == "responded"
-    assert result.text == "still working"
-    assert len(runner.requests) == 2
+    assert result.status == "failed"
+    assert len(runner.requests) == 1
     assert tasks.task(task.task_id).status == "active"  # type: ignore[union-attr]
     conversations.close()
     tasks.close()
@@ -744,6 +753,48 @@ async def test_tool_executor_rejects_completion_without_physical_evidence(
 
     assert completion.directive == "respond"
     assert completion.outcome.data["failure_mode"] == "task_evidence_missing"
+    assert tasks.active_task("session-1") is not None
+    tasks.close()
+
+
+@pytest.mark.asyncio
+async def test_tool_executor_keeps_environment_authoritative_task_active(
+    tmp_path,
+) -> None:
+    tasks = AgentTaskStore(tmp_path / "tasks.sqlite3")
+    executor = AgentToolExecutor(
+        _EnvironmentConfig(),  # type: ignore[arg-type]
+        tasks,
+        _SubmittingCoordinator(tasks),  # type: ignore[arg-type]
+        _SkillClient(),  # type: ignore[arg-type]
+    )
+    envelope = Envelope(robot_id="sim_robot")
+    waiting = await executor.execute(
+        session_key="session-1",
+        envelope=envelope,
+        objective="place the jar",
+        proposal=AgentResponseCall("wait", "working"),
+        tool_call_id="wait-1",
+    )
+    assert waiting.task is not None
+    tasks.add_step(
+        waiting.task.task_id,
+        PhysicalToolCall("manipulate", {"task_prompt": "place the jar"}),
+        ToolOutcome("completed", "jar appears placed"),
+    )
+
+    completion = await executor.execute(
+        session_key="session-1",
+        envelope=envelope,
+        objective="place the jar",
+        proposal=AgentResponseCall("complete", "done"),
+        tool_call_id="complete-1",
+    )
+
+    assert completion.directive == "continue"
+    assert completion.outcome.data["failure_mode"] == (
+        "awaiting_environment_completion"
+    )
     assert tasks.active_task("session-1") is not None
     tasks.close()
 

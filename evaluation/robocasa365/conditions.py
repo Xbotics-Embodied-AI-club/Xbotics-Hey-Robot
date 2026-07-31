@@ -18,20 +18,27 @@ class ExperimentCondition:
 _CONDITIONS = {
     "b0": ExperimentCondition(
         "b0",
-        "Use exactly one manipulate call with the complete root goal and "
-        "max_steps=600; do not decompose it.",
+        "Submit the complete root objective as one bounded physical option without "
+        "decomposing it.",
         manipulate_call_limit=1,
     ),
     "b1": ExperimentCondition(
         "b1",
-        "Use normal Hey Robot hierarchical planning and re-observe at option boundaries.",
+        "Use the root goal and the latest scene observation to select exactly one "
+        "currently achievable and observable subgoal. Treat execution completion and "
+        "world-state evidence as separate facts. Advance only when the latest evidence "
+        "covers the complete subgoal, preserve the subgoal identity during a bounded "
+        "retry, and otherwise choose a recovery subgoal or report blocked progress. "
+        "Do not combine multiple unfinished stages or repeat a stage already supported "
+        "by evidence. Continue until the live "
+        "environment reports completion or the hard trial budget is exhausted.",
     ),
     "b2": ExperimentCondition(
         "b2",
-        "Follow the frozen oracle pattern: inspect, run manipulate on the complete "
-        "root goal, then re-observe and repeat until the environment terminates or "
-        "the hard trial budget is exhausted. Do not declare success or failure from "
-        "an inconclusive image caption alone.",
+        "Follow the frozen single-option baseline: use the complete root objective as "
+        "the option, refresh evidence after each bounded attempt, and continue until "
+        "the environment terminates or the hard trial budget is exhausted. Do not "
+        "declare success or failure from inconclusive evidence alone.",
     ),
 }
 

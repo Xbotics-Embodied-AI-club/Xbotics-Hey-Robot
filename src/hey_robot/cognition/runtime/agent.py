@@ -251,20 +251,13 @@ class Agent:
                 )
                 return AgentRunResult("failed", f"这次请求没有完成：{detail}")
             if decision.status == "returned":
-                text = decision.final_text or ""
-                messages.extend(
+                return AgentRunResult(
+                    "failed",
                     (
-                        ModelMessage(role="assistant", content=text),
-                        ModelMessage(
-                            role="user",
-                            content=(
-                                "普通文本不是有效的 Agent 响应。请使用当前 function "
-                                "schema 暴露的结构化响应能力。"
-                            ),
-                        ),
-                    )
+                        "这次请求没有完成：模型未使用当前 function schema "
+                        "返回结构化决策。"
+                    ),
                 )
-                continue
             proposal = decision.proposal
             if proposal is None or not decision.tool_calls:
                 return AgentRunResult("failed", "工具没有产生有效调用。")

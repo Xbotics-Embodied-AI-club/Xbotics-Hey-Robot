@@ -34,7 +34,7 @@ def _spec(**settings: Any) -> ModelServiceSpec:
             "action_dimensions": 12,
             "state_dimensions": 16,
             "camera_names": ["camera1", "camera2", "camera3"],
-            "prompt_mode": "environment_root",
+            "prompt_mode": "agent_subgoal",
             "execution_horizon": 8,
             **settings,
         },
@@ -139,7 +139,7 @@ def test_rldx_executor_maps_observation_and_caches_official_eight_step_chunk() -
     assert observation["state.base_position"].tolist() == [[[7.0, 8.0, 9.0]]]
     assert observation["state.base_rotation"].shape == (1, 1, 4)
     assert observation["state.gripper_qpos"].tolist() == [[[14.0, 15.0]]]
-    assert observation["annotation.human.task_description"] == ["boil the kettle"]
+    assert observation["annotation.human.task_description"] == ["agent subgoal"]
     assert options == {"session_ids": ["episode-1"], "reset_memory": [True]}
     values = first["metrics"]["policy_result"]["actions"][0]["arguments"]["values"]
     assert values == [1.0] * 3 + [2.0] * 3 + [3.0] + [4.0] * 4 + [5.0]

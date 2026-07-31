@@ -23,6 +23,7 @@ agent_runtime:
   robot_id: robocasa365
   hard_max_wall_time_sec: 7200
   hard_max_skills: 220
+  completion_authority: environment
 channels:
   web:
     type: web
@@ -93,7 +94,7 @@ model_services:
       - camera2
       - camera3
       media_root: /root/hey-robot-rldx-runtime/media
-      prompt_mode: environment_root
+      prompt_mode: agent_subgoal
       execution_horizon: 8
       video_delta_indices: [-6, -4, -2, 0]
       control_hz: 20

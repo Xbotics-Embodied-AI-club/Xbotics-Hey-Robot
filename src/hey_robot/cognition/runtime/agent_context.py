@@ -123,6 +123,9 @@ class AgentContextBuilder:
         task: AgentTask | None = None,
     ) -> str:
         summary = outcome.user_summary or "no user-visible summary"
+        result_state = outcome.data.get("decision_state")
+        if not isinstance(result_state, dict):
+            result_state = {}
         evidence = ""
         if step is not None and step.evidence_ids:
             evidence = "; evidence_ids=" + ",".join(step.evidence_ids)
@@ -130,6 +133,10 @@ class AgentContextBuilder:
             f"tool_result status={outcome.status}; skill={proposal.name}; "
             f"summary={summary}{evidence}"
         )
+        if result_state:
+            context += "; result_state=" + json.dumps(
+                result_state, ensure_ascii=False, sort_keys=True
+            )
         if task is not None:
             context += f"\nactive_task id={task.task_id}"
         return context

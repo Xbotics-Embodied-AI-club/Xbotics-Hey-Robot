@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from hey_robot.protocol import SceneEntity, SceneRelation
 
@@ -25,6 +25,8 @@ class SceneUnderstanding:
     task_relevance: str | None = None
     risks: list[str] = field(default_factory=list)
     next_observation_hint: str | None = None
+    verification: Literal["yes", "no", "unknown"] = "unknown"
+    visual_evidence: str | None = None
     confidence: float = 0.0
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -59,6 +61,8 @@ class SceneUnderstanding:
             risks=_string_list(payload.get("risks")),
             next_observation_hint=payload.get("next_observation_hint")
             or payload.get("next_hint"),
+            verification=_verification(payload.get("verification")),
+            visual_evidence=payload.get("visual_evidence"),
             confidence=_float(payload.get("confidence"), 0.0),
             metadata={
                 key: value for key, value in payload.items() if key not in _KNOWN_KEYS
@@ -75,8 +79,19 @@ _KNOWN_KEYS = {
     "risks",
     "next_observation_hint",
     "next_hint",
+    "verification",
+    "visual_evidence",
     "confidence",
 }
+
+
+def _verification(value: Any) -> Literal["yes", "no", "unknown"]:
+    normalized = str(value or "unknown").strip().lower()
+    if normalized == "yes":
+        return "yes"
+    if normalized == "no":
+        return "no"
+    return "unknown"
 
 
 def _scene_entity(value: Any) -> SceneEntity | None:

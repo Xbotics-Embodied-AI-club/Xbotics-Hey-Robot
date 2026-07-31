@@ -168,6 +168,17 @@ class AgentToolExecutor:
                     task=task,
                     final_text="当前机器人操作仍在执行，暂时不能完成任务。",
                 )
+            if self._config.agent_runtime.completion_authority == "environment":
+                return ToolExecution(
+                    "continue",
+                    ToolOutcome(
+                        "failed",
+                        "环境尚未报告完整目标完成，请根据最新证据继续选择下一步。",
+                        {"failure_mode": "awaiting_environment_completion"},
+                    ),
+                    proposal,
+                    task=task,
+                )
             if not self._tasks.has_successful_step(task.task_id):
                 return ToolExecution(
                     "respond",

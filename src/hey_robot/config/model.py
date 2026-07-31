@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 import yaml
 from dotenv import find_dotenv, load_dotenv
@@ -197,6 +197,7 @@ class AgentRuntimeSpec:
     robot_id: str | None = None
     hard_max_wall_time_sec: float = 3600.0
     hard_max_skills: int = 24
+    completion_authority: Literal["agent", "environment"] = "agent"
 
 
 @dataclass(frozen=True)
@@ -244,6 +245,16 @@ class DeploymentConfig:
             raise ValueError(
                 f"agent_runtime uses removed fields: {sorted(unsupported)}"
             )
+        completion_authority_raw = str(
+            agent_runtime_data.get("completion_authority", "agent")
+        )
+        if completion_authority_raw not in {"agent", "environment"}:
+            raise ValueError(
+                "agent_runtime.completion_authority must be 'agent' or 'environment'"
+            )
+        completion_authority = cast(
+            Literal["agent", "environment"], completion_authority_raw
+        )
         for service_id, service_data in dict(
             data.get("model_services", {}) or {}
         ).items():
@@ -489,6 +500,7 @@ class DeploymentConfig:
                     agent_runtime_data.get("hard_max_wall_time_sec", 3600.0)
                 ),
                 hard_max_skills=int(agent_runtime_data.get("hard_max_skills", 24)),
+                completion_authority=completion_authority,
             ),
         )
 

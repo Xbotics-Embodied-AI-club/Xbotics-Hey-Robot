@@ -640,7 +640,7 @@ class AgentTaskStore:
             counts = "，".join(
                 f"{name}×{count}" for name, count in sorted(completed_counts.items())
             )
-            lines.append(f"已确认完成动作汇总：{counts}。")
+            lines.append(f"已结束工具调用汇总（不代表物理子目标已完成）：{counts}。")
         if steps:
             lines.append("最近证据：")
             for step in steps:

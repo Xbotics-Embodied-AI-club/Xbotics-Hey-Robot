@@ -322,15 +322,34 @@ async def test_native_vla_manipulate_uses_model_router_and_robot_client() -> Non
     sink = Sink()
 
     result = await _runner(robot, sink, models=models).execute(
-        _command("manipulate", {"task_prompt": "close gripper"})
+        _command("manipulate", {"task_prompt": "close gripper", "max_steps": 1})
     )
 
     assert result.success is True
     assert result.data["option_completed"] is True
     assert result.data["subgoal_succeeded"] is None
+    assert result.data["subgoal_status"] == "unknown"
+    assert result.data["execution_success"] is True
+    assert "subgoal completion is unverified" in result.summary
     assert models.requests[0]["capability"] == "manipulate"
     assert models.requests[0]["request"]["observation"]["frame_id"] == 12
-    assert robot.calls == [("mock0", "set_gripper", {"action": "close"}, "run-1")]
+    assert robot.calls[0] == (
+        "mock0",
+        "set_gripper",
+        {"action": "close"},
+        "run-1",
+    )
+    assert robot.calls[1][1] == "inspect_scene"
+    assert "close gripper" in robot.calls[1][2]["question"]
+
+
+async def test_native_vla_schema_owns_default_execution_budget() -> None:
+    registry = load_skill_registry(("hey_robot.skills.builtins",))
+
+    assert (
+        registry.get("manipulate").parameters["properties"]["max_steps"]["default"]
+        == 128
+    )
 
 
 async def test_native_vla_manipulate_reobserves_between_bounded_steps() -> None:
@@ -582,7 +601,13 @@ async def test_native_tabletop_implementation_selection() -> None:
 
     assert result.success is True
     assert models.requests[0]["request"]["task_prompt"] == "grasp cup"
-    assert robot.calls == [("mock0", "set_gripper", {"action": "close"}, "run-1")]
+    assert robot.calls[0] == (
+        "mock0",
+        "set_gripper",
+        {"action": "close"},
+        "run-1",
+    )
+    assert robot.calls[1][1] == "inspect_scene"
 
 
 async def test_vla_pick_preserves_prompt_and_maps_only_child_parameters() -> None:

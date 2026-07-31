@@ -96,6 +96,7 @@ async def test_conversation_can_return_text_with_the_shared_runner() -> None:
     )
     assert result.status == "returned"
     assert result.final_text == "你好"
+    assert "tool_choice" not in model.calls[0]
 
 
 @pytest.mark.asyncio

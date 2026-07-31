@@ -17,7 +17,7 @@ from evaluation.robocasa365.full_system_benchmark import (
     _parser as trial_parser,
     _write_evaluator_action_artifact,
 )
-from hey_robot.config import ModelServiceSpec
+from hey_robot.config import DeploymentConfig, ModelServiceSpec
 from hey_robot.foundation.backends.lerobot import LeRobotPolicyExecutor
 from hey_robot.foundation.clients.models import ModelInferenceResult
 from hey_robot.protocol import Envelope, ImageRef, RobotObservation
@@ -216,6 +216,24 @@ def test_flat_condition_has_an_executable_single_option_limit() -> None:
     assert condition_for("b1").manipulate_call_limit is None
 
 
+def test_rldx_evaluation_reserves_completion_for_environment() -> None:
+    config = DeploymentConfig.from_yaml("configs/evaluation/robocasa365.rldx.yaml")
+
+    assert config.agent_runtime.completion_authority == "environment"
+
+
+def test_hierarchical_condition_requires_observe_subgoal_act_feedback() -> None:
+    prompt = condition_for("b1").prompt("Prepare coffee.")
+
+    assert "latest scene observation" in prompt
+    assert "exactly one" in prompt
+    assert "complete subgoal" in prompt
+    assert "task_prompt" not in prompt
+    assert "max_steps" not in prompt
+    assert "verification=" not in prompt
+    assert prompt.endswith("Goal: Prepare coffee.")
+
+
 def test_trial_defaults_to_live_environment_objective() -> None:
     args = trial_parser().parse_args(
         [
@@ -402,6 +420,18 @@ def test_generic_manipulate_executes_native_action_option() -> None:
         ):
             del robot_id, run_id
             self.calls.append((action, arguments, expected_frame_id))
+            if action == "inspect_scene":
+                observation = self.observations[0]
+                return RobotActionResult(
+                    True,
+                    "verified",
+                    frame_id=observation.frame_id,
+                    data={
+                        "verification": "yes",
+                        "visual_evidence": "The fridge door is visibly closed.",
+                    },
+                    observation=observation,
+                )
             frame_id = self.observations[0].frame_id + 1
             self.observations[0] = make_observation(frame_id)
             return RobotActionResult(True, "applied", frame_id=frame_id)
@@ -467,12 +497,16 @@ def test_generic_manipulate_executes_native_action_option() -> None:
         )
         assert result.success is True
         assert len(models.calls) == 50
-        assert len(robot.calls) == 50
+        assert len(robot.calls) == 51
         assert models.calls[0][0] == "manipulate"
         assert models.calls[0][1]["task_prompt"] == "Close the fridge."
         assert models.calls[0][1]["policy_session_id"] == "trial-1"
         assert robot.calls[0][0] == "embodiment_native_action"
         assert result.data["termination_reason"] == "max_steps"
+        assert result.data["subgoal_status"] == "achieved"
+        assert result.data["verification_target"] == "Close the fridge."
+        assert robot.calls[-1][0] == "inspect_scene"
+        assert "Close the fridge." in robot.calls[-1][1]["question"]
 
     asyncio.run(run_once())
 

@@ -14,6 +14,18 @@ async def _noop_skill(_ctx, _arguments) -> SkillResult:
     return SkillResult(True, "done", "completed")
 
 
+def test_agent_runtime_validates_completion_authority() -> None:
+    config = DeploymentConfig.from_dict(
+        {"agent_runtime": {"completion_authority": "environment"}}
+    )
+
+    assert config.agent_runtime.completion_authority == "environment"
+    with pytest.raises(ValueError, match="completion_authority"):
+        DeploymentConfig.from_dict(
+            {"agent_runtime": {"completion_authority": "captioner"}}
+        )
+
+
 def test_validate_deployment_reports_missing_robot_and_policy(tmp_path) -> None:
     config = DeploymentConfig.from_dict(
         {

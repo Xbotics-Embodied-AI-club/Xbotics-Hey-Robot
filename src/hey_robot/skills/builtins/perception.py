@@ -24,7 +24,7 @@ async def detect_marker(ctx: SkillContext, arguments: dict[str, Any]) -> SkillRe
 
 INSPECT_SCENE = Skill(
     name="inspect_scene",
-    description="Inspect the current scene and return grounded visual evidence.",
+    description="Inspect the current scene and answer one visual question with evidence.",
     parameters={
         "type": "object",
         "properties": {"question": {"type": "string"}},

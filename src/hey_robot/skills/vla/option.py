@@ -39,6 +39,13 @@ class VLAOptionResult:
     error: str | None = None
 
     def to_skill_result(self) -> SkillResult:
+        subgoal_status = (
+            "achieved"
+            if self.subgoal_succeeded is True
+            else "not_achieved"
+            if self.subgoal_succeeded is False
+            else "unknown"
+        )
         return SkillResult(
             self.success,
             self.summary,
@@ -48,11 +55,19 @@ class VLAOptionResult:
                 "vla_history": [dict(item) for item in self.model_outputs],
                 "steps": [dict(item) for item in self.executed_actions],
                 "termination_reason": self.termination_reason,
+                "execution_success": self.success,
                 "option_completed": self.option_completed,
                 "subgoal_succeeded": self.subgoal_succeeded,
+                "subgoal_status": subgoal_status,
                 "before_frame_id": self.before_frame_id,
                 "after_frame_id": self.after_frame_id,
                 "steps_used": len(self.executed_actions),
+                "decision_state": {
+                    "execution_success": self.success,
+                    "termination_reason": self.termination_reason,
+                    "subgoal_status": subgoal_status,
+                    "subgoal_succeeded": self.subgoal_succeeded,
+                },
             },
             evidence_ids=self.evidence_ids,
             failure_mode=self.failure_mode,
@@ -251,7 +266,10 @@ class VLAOptionRunner:
             if decision.terminate:
                 return self._decision_result(
                     decision,
-                    f"VLA reached bounded limit ({request.max_steps} steps).",
+                    (
+                        "VLA execution window ended after "
+                        f"{request.max_steps} steps; subgoal completion is unverified."
+                    ),
                     request,
                     before_frame_id,
                     after_frame_id,
