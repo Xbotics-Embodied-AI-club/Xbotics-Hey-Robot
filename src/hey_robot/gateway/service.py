@@ -234,8 +234,8 @@ class GatewayService:
             "emergencystop",
             "e-stop",
             "estop",
-            "\u6025\u505c",
-            "\u7d27\u6025\u505c\u6b62",
+            "急停",
+            "紧急停止",
         }
         if compact in {item.replace(" ", "") for item in emergency}:
             await self.bus.publish(
@@ -256,7 +256,7 @@ class GatewayService:
             "cancel current task",
             "cancel task",
             "stop current task",
-            "\u53d6\u6d88\u5f53\u524d\u4efb\u52a1",
+            "取消当前任务",
         }
         if compact in {item.replace(" ", "") for item in cancel}:
             await self.bus.publish(
@@ -289,7 +289,7 @@ class GatewayService:
             )
             return True
 
-        confirmations = {"confirm", "yes", "\u786e\u8ba4", "\u7ee7\u7eed"}
+        confirmations = {"confirm", "yes", "确认", "继续"}
         if compact in confirmations:
             await self.bus.publish(
                 self.topics.agent_control,
@@ -309,8 +309,8 @@ class GatewayService:
             "status",
             "task status",
             "current progress",
-            "\u5f53\u524d\u8fdb\u5ea6",
-            "\u673a\u5668\u4eba\u72b6\u6001",
+            "当前进度",
+            "机器人状态",
         }
         if compact in {item.replace(" ", "") for item in query}:
             return False

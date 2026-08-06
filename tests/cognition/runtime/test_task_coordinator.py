@@ -313,7 +313,7 @@ def test_pause_keeps_one_open_task(tmp_path) -> None:
 
     assert store.active_task("session-1") is None
     assert store.current_task("session-1").status == "paused"  # type: ignore[union-attr]
-    with pytest.raises(ValueError, match="\u5df2有"):
+    with pytest.raises(ValueError, match="已有"):
         store.create_task(
             session_key="session-1",
             envelope=Envelope(robot_id="sim_robot"),

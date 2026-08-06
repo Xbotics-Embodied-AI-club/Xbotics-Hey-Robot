@@ -77,9 +77,9 @@ def main() -> None:
     if issues:
         out.append(f"\n  ✗ 配置问题 ({len(issues)} 个):")
         for issue in issues:
-            tag = "✗" if issue.level == "error" else "\u26a0"
+            tag = "✗" if issue.level == "error" else "⚠"
             out.append(f"    {tag} [{issue.level}] {issue.message}")
     else:
-        out.append("\n  \u2713 配置有效，可以启动 runtime。")
+        out.append("\n  ✓ 配置有效，可以启动 runtime。")
     out.append("")
     sys.stdout.write("\n".join(out) + "\n")
