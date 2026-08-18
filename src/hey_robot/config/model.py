@@ -1,11 +1,34 @@
 from __future__ import annotations
 
+import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, cast
 
 import yaml
 from dotenv import find_dotenv, load_dotenv
+
+_ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _expand_env(value: Any) -> Any:
+    """Expand ``${VAR}`` references against the process environment.
+
+    Recursively walks dict/list/str values so path-like settings can be
+    declared as ``${HEY_ROBOT_...}`` in deployment YAML instead of
+    hardcoding a per-user absolute path. Unknown variables are left as-is.
+    """
+    if isinstance(value, str):
+        return _ENV_PATTERN.sub(
+            lambda match: os.environ.get(match.group(1), match.group(0)),
+            value,
+        )
+    if isinstance(value, dict):
+        return {key: _expand_env(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_expand_env(item) for item in value]
+    return value
 
 
 @dataclass(frozen=True)
@@ -219,7 +242,7 @@ class DeploymentConfig:
         load_dotenv(find_dotenv(usecwd=True))
         with Path(path).open(encoding="utf-8") as handle:
             data = yaml.safe_load(handle) or {}
-        return cls.from_dict(data)
+        return cls.from_dict(_expand_env(data))
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DeploymentConfig:

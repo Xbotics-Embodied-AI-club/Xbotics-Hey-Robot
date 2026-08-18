@@ -38,7 +38,7 @@ class ManagedRoboCasaBackend:
             if spec.enabled
             and spec.robot_id == self.robot_id
             and spec.type == "robot_policy"
-            and str(spec.settings.get("runtime") or "") in {"lerobot", "rldx"}
+            and str(spec.settings.get("runtime") or "") in {"lerobot", "rldx", "xiaomi"}
             and str(spec.settings.get("embodiment") or "") == "robocasa"
             and tuple(spec.provides) == ("manipulate",)
         ]

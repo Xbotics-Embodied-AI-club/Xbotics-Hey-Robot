@@ -26,6 +26,9 @@ def create_model_client(
         temperature=float(model_config.get("temperature", 0.1)),
         max_tokens=int(model_config.get("max_tokens", 2048)),
         reasoning_effort=model_config.get("reasoning_effort"),
+        timeout_sec=float(model_config.get("timeout_sec", 60.0)),
+        max_retries=int(model_config.get("max_retries", 2)),
+        disable_keepalive=bool(model_config.get("disable_keepalive", False)),
         extra_headers=dict(model_config.get("extra_headers", {}) or {}) or None,
         extra_body=dict(model_config.get("extra_body", {}) or {}) or None,
     )

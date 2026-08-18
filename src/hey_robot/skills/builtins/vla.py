@@ -21,7 +21,16 @@ _MAX_MANIPULATE_TIMEOUT_SEC = 3600.0
 MANIPULATE_PARAMETERS = {
     "type": "object",
     "properties": {
-        "task_prompt": {"type": "string", "minLength": 1},
+        "task_prompt": {
+            "type": "string",
+            "minLength": 1,
+            "description": (
+                "One concise semantic physical outcome in English. Include known "
+                "concrete object identity and source/target spatial relations from "
+                "the latest observation so the instruction is grounded, but omit "
+                "motion details and visual-verification requirements."
+            ),
+        },
         "max_steps": {
             "type": "integer",
             "minimum": 1,
@@ -55,7 +64,10 @@ async def manipulate(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResul
         "inspect_scene",
         {
             "question": (
-                "Is the complete end state requested by this subgoal visibly true now? "
+                "Is the primary current-state physical outcome of this subgoal visibly "
+                "true now? Ignore historical preconditions, motion details, and "
+                "nonessential fine-grained placement qualifiers that cannot be judged "
+                "from the final image. "
                 f"Subgoal: {task_prompt}"
             )
         },

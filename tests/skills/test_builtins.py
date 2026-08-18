@@ -340,12 +340,15 @@ async def test_native_vla_manipulate_uses_model_router_and_robot_client() -> Non
         "run-1",
     )
     assert robot.calls[1][1] == "inspect_scene"
+    assert "primary current-state physical outcome" in robot.calls[1][2]["question"]
     assert "close gripper" in robot.calls[1][2]["question"]
 
 
 async def test_native_vla_schema_owns_default_execution_budget() -> None:
     registry = load_skill_registry(("hey_robot.skills.builtins",))
 
+    task_prompt = registry.get("manipulate").parameters["properties"]["task_prompt"]
+    assert "source/target spatial relations" in task_prompt["description"]
     assert (
         registry.get("manipulate").parameters["properties"]["max_steps"]["default"]
         == 128

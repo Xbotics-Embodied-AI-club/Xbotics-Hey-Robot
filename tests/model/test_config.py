@@ -30,6 +30,9 @@ def test_create_model_client_resolves_explicit_env_names(monkeypatch) -> None:
                 "base_url_env": "TEST_BASE_URL",
                 "temperature": 0.0,
                 "max_tokens": 512,
+                "timeout_sec": 30,
+                "max_retries": 0,
+                "disable_keepalive": True,
             }
         ),
         "main",
@@ -41,6 +44,9 @@ def test_create_model_client_resolves_explicit_env_names(monkeypatch) -> None:
     assert client.base_url == "https://example.invalid/v1"
     assert client.temperature == 0.0
     assert client.max_tokens == 512
+    assert client.timeout_sec == 30
+    assert client.max_retries == 0
+    assert client.disable_keepalive is True
 
 
 def test_model_config_does_not_fall_back_to_global_environment(monkeypatch) -> None:

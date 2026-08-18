@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import mujoco
 import numpy as np
 import pytest
+
+mujoco = pytest.importorskip("mujoco", reason="requires optional sim dependency")
 
 from hey_robot.config.model import RobotSpec
 from hey_robot.robot_backends.simulation.xlerobot_sim_driver import XLeRobotSimDriver

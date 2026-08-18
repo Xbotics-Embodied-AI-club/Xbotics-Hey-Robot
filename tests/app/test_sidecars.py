@@ -111,6 +111,15 @@ def test_managed_backend_accepts_rldx_policy(tmp_path) -> None:
     assert sidecar.service_id == "m"
 
 
+def test_managed_backend_accepts_xiaomi_policy(tmp_path) -> None:
+    config = _config(tmp_path)
+    config.model_services["m"].settings["runtime"] = "xiaomi"
+
+    sidecar = ManagedRoboCasaBackend(config, config_path="deployment.yaml")
+
+    assert sidecar.service_id == "m"
+
+
 @pytest.mark.asyncio
 async def test_unexpected_backend_exit_is_propagated(tmp_path) -> None:
     sidecar = ManagedRoboCasaBackend(_config(tmp_path), config_path="deployment.yaml")

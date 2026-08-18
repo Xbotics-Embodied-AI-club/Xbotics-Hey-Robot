@@ -167,7 +167,7 @@ def _robot_policy_configuration_issues(
         if service.type != "robot_policy":
             continue
         runtime = str(service.settings.get("runtime") or "")
-        if runtime not in {"lerobot", "rldx"}:
+        if runtime not in {"lerobot", "rldx", "xiaomi"}:
             issues.append(
                 ValidationIssue(
                     "error",
@@ -292,7 +292,8 @@ def _robocasa_configuration_issues(
     for service_id, service in config.model_services.items():
         if not (
             service.type == "robot_policy"
-            and str(service.settings.get("runtime") or "") in {"lerobot", "rldx"}
+            and str(service.settings.get("runtime") or "")
+            in {"lerobot", "rldx", "xiaomi"}
             and str(service.settings.get("embodiment") or "") == "robocasa"
         ):
             continue
@@ -330,7 +331,8 @@ def _robocasa_configuration_issues(
             if service.enabled
             and service.robot_id == robot_id
             and service.type == "robot_policy"
-            and str(service.settings.get("runtime") or "") in {"lerobot", "rldx"}
+            and str(service.settings.get("runtime") or "")
+            in {"lerobot", "rldx", "xiaomi"}
             and str(service.settings.get("embodiment") or "") == "robocasa"
         ]
         if len(matching) != 1:

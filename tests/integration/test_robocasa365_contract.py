@@ -213,6 +213,10 @@ def test_option_records_accept_current_gateway_run_payload() -> None:
 
 def test_flat_condition_has_an_executable_single_option_limit() -> None:
     assert condition_for("b0").manipulate_call_limit == 1
+    prompt = condition_for("b0").prompt("Close the fridge.")
+    assert "max_steps=600" in prompt
+    assert "Goal text verbatim as task_prompt" in prompt
+    assert "Do not inspect" in prompt
     assert condition_for("b1").manipulate_call_limit is None
 
 
@@ -222,16 +226,41 @@ def test_rldx_evaluation_reserves_completion_for_environment() -> None:
     assert config.agent_runtime.completion_authority == "environment"
 
 
-def test_hierarchical_condition_requires_observe_subgoal_act_feedback() -> None:
+def test_hierarchical_condition_uses_root_first_sparse_recovery() -> None:
     prompt = condition_for("b1").prompt("Prepare coffee.")
 
-    assert "latest scene observation" in prompt
-    assert "exactly one" in prompt
-    assert "complete subgoal" in prompt
-    assert "task_prompt" not in prompt
-    assert "max_steps" not in prompt
-    assert "verification=" not in prompt
+    assert "complete root Goal" in prompt
+    assert "exact task_prompt and max_steps=600" in prompt
+    assert "If the live environment has not completed" in prompt
+    assert "unfinished semantic remainder" in prompt
+    assert "Atomic-Seen instruction" in prompt
+    assert "single-state-transition style" in prompt
+    assert "short natural English task_prompt" in prompt
+    assert "commands exactly one physical outcome" in prompt
+    assert "minimum root-task context" in prompt
+    assert "already-achieved state" in prompt
+    assert "Do not copy the full multi-step root Goal" in prompt
+    assert "Root goal / Current state / Current subgoal" in prompt
+    assert "source/target spatial relations" in prompt
+    assert "primary current-state outcome" in prompt
+    assert "historical preconditions" in prompt
+    assert "Verification unknown is not automatically failure" in prompt
+    assert "never issue an identical recovery task_prompt more than once" in prompt
+    assert "park the arm" in prompt
     assert prompt.endswith("Goal: Prepare coffee.")
+
+
+def test_early_checkpoint_condition_changes_only_the_root_horizon() -> None:
+    prompt = condition_for("b3").prompt("Load the dishwasher.")
+
+    assert "complete root Goal" in prompt
+    assert "exact task_prompt and max_steps=400" in prompt
+    assert "single-state-transition style" in prompt
+    assert "commands exactly one physical outcome" in prompt
+    assert "minimum root-task context" in prompt
+    assert "normally use 300-400 steps" in prompt
+    assert "max_steps=600" not in prompt
+    assert prompt.endswith("Goal: Load the dishwasher.")
 
 
 def test_trial_defaults_to_live_environment_objective() -> None:

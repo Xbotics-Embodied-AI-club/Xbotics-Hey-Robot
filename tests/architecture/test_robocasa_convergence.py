@@ -52,6 +52,28 @@ def test_agent_surface_has_only_generic_manipulate() -> None:
     ]
 
 
+def test_xiaomi_agent_subgoal_evaluation_uses_non_reasoning_gpt() -> None:
+    config = DeploymentConfig.from_yaml(
+        ROOT / "configs" / "evaluation" / "robocasa365.xiaomi.yaml"
+    )
+
+    assert config.model_services["robocasa365"].settings["prompt_mode"] == (
+        "agent_subgoal"
+    )
+    models = config.agents["main"].settings["models"]
+    for purpose in ("planner", "scene_captioner"):
+        assert models[purpose]["model"] == "gpt-5.6-sol"
+        assert models[purpose]["api_key_env"] == "OPENAI_API_KEY"
+        assert models[purpose]["base_url_env"] == "OPENAI_BASE_URL"
+        assert models[purpose]["reasoning_effort"] == "none"
+        assert models[purpose]["timeout_sec"] == 30
+        assert models[purpose]["max_retries"] == 0
+        assert models[purpose]["disable_keepalive"] is True
+    assert not [
+        issue for issue in validate_deployment(config) if issue.level == "error"
+    ]
+
+
 def test_lerobot_has_one_production_executor() -> None:
     root = ROOT / "src" / "hey_robot" / "foundation" / "backends" / "lerobot"
     source = "\n".join(path.read_text(encoding="utf-8") for path in root.glob("*.py"))
@@ -80,7 +102,7 @@ def test_benchmark_selects_a_supported_generic_robot_policy_service() -> None:
 
     assert 'spec.type == "robot_policy"' in source
     assert 'spec.settings.get("runtime")' in source
-    assert '{"lerobot", "rldx"}' in source
+    assert '{"lerobot", "rldx", "xiaomi"}' in source
     assert 'spec.settings.get("embodiment")' in source
     assert "robocasa_lerobot_policy" not in source
 

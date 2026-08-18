@@ -175,6 +175,10 @@ class RobotPolicyService:
             from hey_robot.foundation.backends.rldx import RLDXPolicyExecutor
 
             executor_type = RLDXPolicyExecutor
+        elif runtime == "xiaomi":
+            from hey_robot.foundation.backends.xiaomi import XiaomiPolicyExecutor
+
+            executor_type = XiaomiPolicyExecutor
         else:
             raise ValueError(
                 f"robot policy service {service_id} has unsupported runtime {runtime!r}"

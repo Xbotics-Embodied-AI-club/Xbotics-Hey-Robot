@@ -32,6 +32,9 @@ class ModelClient:
         temperature: float = 0.1,
         max_tokens: int = 2048,
         reasoning_effort: str | None = None,
+        timeout_sec: float = 60.0,
+        max_retries: int = 2,
+        disable_keepalive: bool = False,
         extra_headers: dict[str, str] | None = None,
         extra_body: dict[str, Any] | None = None,
     ) -> None:
@@ -43,6 +46,9 @@ class ModelClient:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.reasoning_effort = reasoning_effort
+        self.timeout_sec = timeout_sec
+        self.max_retries = max_retries
+        self.disable_keepalive = disable_keepalive
         self.extra_headers = extra_headers
         self.extra_body = extra_body
         self._client: Any | None = None
@@ -51,9 +57,19 @@ class ModelClient:
         if self._client is not None:
             return self._client
 
+        import httpx
         from openai import AsyncOpenAI
 
-        options: dict[str, Any] = {"api_key": self.api_key, "timeout": 60.0}
+        options: dict[str, Any] = {
+            "api_key": self.api_key,
+            "timeout": self.timeout_sec,
+            "max_retries": self.max_retries,
+        }
+        if self.disable_keepalive:
+            options["http_client"] = httpx.AsyncClient(
+                timeout=self.timeout_sec,
+                limits=httpx.Limits(max_keepalive_connections=0),
+            )
         if self.base_url:
             options["base_url"] = self.base_url
         if self.extra_headers:
@@ -74,12 +90,20 @@ class ModelClient:
         on_text_delta: TextDeltaCallback | None = None,
     ) -> ModelResponse:
         effort = self.reasoning_effort if reasoning_effort is None else reasoning_effort
+        model_name = model or self.model
+        is_reasoning = _reasoning_enabled(effort) or _reasoning_model(model_name)
         body: dict[str, Any] = {
-            "model": model or self.model,
+            "model": model_name,
             "messages": [_message_payload(message) for message in messages],
-            "max_tokens": self.max_tokens if max_tokens is None else max_tokens,
         }
-        if not _reasoning_enabled(effort):
+        if is_reasoning:
+            # Reasoning models (gpt-5.x / o-series) reject ``max_tokens`` and
+            # ``temperature``; they use a completion-token cap instead.
+            body["max_completion_tokens"] = (
+                self.max_tokens if max_tokens is None else max_tokens
+            )
+        else:
+            body["max_tokens"] = self.max_tokens if max_tokens is None else max_tokens
             body["temperature"] = (
                 self.temperature if temperature is None else temperature
             )
@@ -310,3 +334,9 @@ def _text_content(value: Any) -> str | None:
 
 def _reasoning_enabled(effort: str | None) -> bool:
     return bool(effort and effort.lower() not in {"none", "minimal", "minimum"})
+
+
+def _reasoning_model(model: str | None) -> bool:
+    """Reasoning-model families reject ``max_tokens``/``temperature``."""
+    name = (model or "").lower()
+    return name.startswith(("gpt-5", "o1", "o3", "o4", "o5", "o6"))
