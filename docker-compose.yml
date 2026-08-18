@@ -99,7 +99,7 @@ services:
       ROBOCASA_MODEL_ASSET_ROOT: /opt/bridge/.venv/lib/python3.12/site-packages/robocasa/models/assets
       ROBOCASA_ASSET_READY_FILE: /opt/bridge/.venv/lib/python3.12/site-packages/robocasa/models/assets/.robocasa-assets-ready
     volumes:
-      - ${HF_CACHE_DIR:-/home/liber/.cache/huggingface}:/cache/huggingface
+      - ${HF_CACHE_DIR:-./.cache/huggingface}:/cache/huggingface
       # RoboCasa creates derived MJCF XML next to object assets during environment reset.
       - ./artifacts/robocasa365/merged-assets:/opt/bridge/.venv/lib/python3.12/site-packages/robocasa/models/assets
       - ./runtime/robocasa365:/outputs
@@ -126,7 +126,7 @@ services:
     volumes:
       - ./configs:/app/configs:ro
       - ./models:/app/models:ro
-      - ${HF_CACHE_DIR:-/home/liber/.cache/huggingface}:/cache/huggingface
+      - ${HF_CACHE_DIR:-./.cache/huggingface}:/cache/huggingface
     ports:
       - "${HEY_ROBOT_ROBOCASA_POLICY_PORT:-9091}:9091"
     command:

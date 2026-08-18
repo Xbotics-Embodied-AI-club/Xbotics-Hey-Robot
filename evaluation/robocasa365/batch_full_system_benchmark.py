@@ -27,9 +27,16 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("configs/evaluation/robocasa365.yaml"),
     )
+    parser.add_argument(
+        "--split",
+        help="Optional RoboCasa dataset split override (for example, pretrain).",
+    )
     parser.add_argument("--suite", action="append", default=[])
     parser.add_argument(
-        "--condition", action="append", choices=("b0", "b1", "b2"), default=[]
+        "--condition",
+        action="append",
+        choices=("b0", "b1", "b2", "b3"),
+        default=[],
     )
     parser.add_argument("--seeds", default="1000")
     parser.add_argument(
@@ -80,6 +87,7 @@ async def run_batch(args: argparse.Namespace) -> dict[str, object]:
                         ),
                         condition=condition,
                         manifest=args.manifest,
+                        split=getattr(args, "split", None),
                         config=args.config,
                         agent_url=args.agent_url,
                         runtime_target=args.runtime_target,

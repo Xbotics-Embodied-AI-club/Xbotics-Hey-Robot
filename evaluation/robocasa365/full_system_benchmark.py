@@ -45,11 +45,15 @@ def _parser() -> argparse.ArgumentParser:
             "the canonical instruction returned by the live RoboCasa environment."
         ),
     )
-    parser.add_argument("--condition", choices=("b0", "b1", "b2"), default="b1")
+    parser.add_argument("--condition", choices=("b0", "b1", "b2", "b3"), default="b1")
     parser.add_argument(
         "--manifest",
         type=Path,
         default=Path("evaluation/robocasa365/tasks.yaml"),
+    )
+    parser.add_argument(
+        "--split",
+        help="Optional RoboCasa dataset split override (for example, pretrain).",
     )
     parser.add_argument(
         "--config",
@@ -83,7 +87,7 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
         for service_id, spec in config.model_services.items()
         if spec.enabled
         and spec.type == "robot_policy"
-        and str(spec.settings.get("runtime") or "") in {"lerobot", "rldx"}
+        and str(spec.settings.get("runtime") or "") in {"lerobot", "rldx", "xiaomi"}
         and str(spec.settings.get("embodiment") or "") == "robocasa"
     ]
     if len(model_candidates) != 1:
@@ -143,7 +147,7 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
             trial_id=trial_id,
             task=args.task,
             seed=args.seed,
-            split=str(manifest["split"]),
+            split=str(args.split or manifest["split"]),
             registries=tuple(manifest["registries"]),
         )
         official_objective = str(
@@ -348,7 +352,10 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
             "".join(json.dumps(item, sort_keys=True) + "\n" for item in observations),
             encoding="utf-8",
         )
-        compact_events = runtime_summary.get("events", [])
+        compact_events_value = runtime_summary.get("events", [])
+        compact_events = (
+            compact_events_value if isinstance(compact_events_value, list) else []
+        )
         (args.output_dir / "agent_events.jsonl").write_text(
             "".join(
                 json.dumps(item, sort_keys=True) + "\n"

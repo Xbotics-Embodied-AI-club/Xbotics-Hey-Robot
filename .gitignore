@@ -61,8 +61,10 @@ backup/*
 # Python virtual environment
 venv/*
 .venv/
+.venv-rldx/
 .venv-vln/
 .venv-robocasa365/
+.deps/
 
 # Disable upload .env
 .env

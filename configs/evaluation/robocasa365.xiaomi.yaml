@@ -1,16 +1,16 @@
 deployment:
-  id: robocasa365.rldx
+  id: robocasa365.xiaomi
   bus:
     type: in_memory
-    url: memory://robocasa365.rldx
+    url: memory://robocasa365.xiaomi
 resources:
-  runtime_dir: runtime/robocasa365.rldx
+  runtime_dir: runtime/robocasa365.xiaomi
   media:
-    root: runtime/robocasa365.rldx/media
+    root: runtime/robocasa365.xiaomi/media
     max_items: 10000
     image_save_every_n: 1
   episodes:
-    root: runtime/robocasa365.rldx/episodes
+    root: runtime/robocasa365.xiaomi/episodes
   events:
     retain: 10000
 identity:
@@ -23,7 +23,6 @@ agent_runtime:
   robot_id: robocasa365
   hard_max_wall_time_sec: 7200
   hard_max_skills: 220
-  completion_authority: environment
 channels:
   web:
     type: web
@@ -53,20 +52,19 @@ robots:
       target: grpc://127.0.0.1:9092
       managed_backend: true
       backend_python: .venv-robocasa365/bin/python
-      backend_startup_timeout_sec: 1800
+      backend_startup_timeout_sec: 2100
       timeout_sec: 60
       control_hz: 20
       supported_driver_primitives:
       - inspect_scene
       - embodiment_native_action
       default_task: CloseFridge
-      default_seed: 1000
-      task_split: target
+      default_seed: 7
+      task_split: pretrain
       object_registries:
-      - objaverse
       - lightwheel
       mujoco_gl: egl
-      mujoco_device: "0"
+      mujoco_device: auto_separate
 model_services:
   robocasa365:
     type: robot_policy
@@ -77,13 +75,14 @@ model_services:
     - manipulate
     timeout_sec: 1800
     settings:
-      runtime: rldx
-      service_python: .venv/bin/python
+      runtime: xiaomi
+      service_python: .venv-xiaomi/bin/python
       health_timeout_sec: 10
       auth_token_env: ROBOCASA_DATA_TOKEN
-      policy_path: RLWRLD/RLDX-1-FT-RC365
-      policy_device: cuda:1
+      policy_path: artifacts/xiaomi-robotics-1/checkpoints/Xiaomi-Robotics-1-RoboCasa365
+      policy_device: cuda
       embodiment: robocasa
+      robot_type: robocasa365
       action_space: robocasa_12d
       action_dimensions: 12
       action_low: -1.0
@@ -93,19 +92,20 @@ model_services:
       - camera1
       - camera2
       - camera3
-      media_root: runtime/robocasa365.rldx/media
+      media_root: runtime/robocasa365.xiaomi/media
       prompt_mode: agent_subgoal
-      execution_horizon: 8
-      video_delta_indices: [-6, -4, -2, 0]
+      execution_horizon: 16
+      observation_delta_indices: [-6, -4, -2, 0]
+      crop_ratio: 0.95
       control_hz: 20
       request_timeout_sec: 600
-      server_startup_timeout_sec: 1500
-      server_port: 15555
-      rldx_repo: .deps/RLDX-1
-      rldx_python: .venv-rldx/bin/python
-      attention_impl: sdpa
-      hf_home: .cache/huggingface
-      hf_xet_high_performance: true
+      server_startup_timeout_sec: 1800
+      server_host: 127.0.0.1
+      server_port: 10086
+      manage_server: true
+      xiaomi_repo: artifacts/xiaomi-robotics-1/Xiaomi-Robotics-1
+      xiaomi_python: .venv-xiaomi/bin/python
+      hf_home: artifacts/huggingface
 policies:
   embodied_skills:
     enabled: true
@@ -120,14 +120,22 @@ agents:
       mode: autonomous
       models:
         planner:
-          model_env: OPENAI_MODEL
+          model: gpt-5.6-sol
           api_key_env: OPENAI_API_KEY
           base_url_env: OPENAI_BASE_URL
           temperature: 0.0
+          reasoning_effort: none
+          timeout_sec: 30
+          max_retries: 0
+          disable_keepalive: true
           max_tokens: 2048
         scene_captioner:
-          model_env: OPENAI_MODEL
+          model: gpt-5.6-sol
           api_key_env: OPENAI_API_KEY
           base_url_env: OPENAI_BASE_URL
           temperature: 0.0
+          reasoning_effort: none
+          timeout_sec: 30
+          max_retries: 0
+          disable_keepalive: true
           max_tokens: 1024

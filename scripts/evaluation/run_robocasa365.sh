@@ -43,6 +43,8 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 export PYTHONPATH="$repo_root/src:$repo_root${PYTHONPATH:+:$PYTHONPATH}"
 export PYTHONUNBUFFERED=1
+launcher_python="${HEY_ROBOT_PYTHON:-.venv/bin/python}"
+launcher_cli="${HEY_ROBOT_CLI:-.venv/bin/hey-robot}"
 
 if [[ -f .env ]]; then
   set -a
@@ -51,12 +53,19 @@ if [[ -f .env ]]; then
   set +a
 fi
 
+# Some local HTTP proxies intermittently stall TLS handshakes for long-running
+# multimodal Agent trials. Allow an evaluation to use the configured model API
+# directly without changing the user's general shell or .env proxy settings.
+if [[ "${HEY_ROBOT_DIRECT_MODEL_API:-0}" == "1" ]]; then
+  unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
+fi
+
 if [[ ! -f "$config_path" ]]; then
   printf 'deployment config does not exist: %s\n' "$config_path" >&2
   exit 2
 fi
 
-mapfile -t launcher_settings < <(.venv/bin/python - "$config_path" <<'PY'
+mapfile -t launcher_settings < <("$launcher_python" - "$config_path" <<'PY'
 import math
 import sys
 
@@ -72,6 +81,17 @@ if len(managed) != 1:
     raise SystemExit("config requires exactly one managed RoboCasa robot")
 print(config.resources.runtime_dir)
 print(math.ceil(float(managed[0].settings.get("backend_startup_timeout_sec") or 600) + 60))
+required = set()
+for agent in config.agents.values():
+    models = agent.settings.get("models") or {}
+    for model in models.values():
+        if not isinstance(model, dict):
+            continue
+        for field in ("model_env", "api_key_env", "base_url_env"):
+            if model.get(field):
+                required.add(str(model[field]))
+for name in sorted(required):
+    print(name)
 PY
 )
 runtime_dir="${launcher_settings[0]}"
@@ -80,17 +100,17 @@ credentials_path="$runtime_dir/robocasa.credentials.json"
 launcher_log_dir="$runtime_dir/launcher-logs"
 agent_log="$launcher_log_dir/agent.log"
 
-: "${DASHSCOPE_MODEL:?configure DashScope in .env}"
-: "${DASHSCOPE_API_KEY:?configure DashScope in .env}"
-: "${DASHSCOPE_BASE_URL:?configure DashScope in .env}"
-: "${DEEPSEEK_MODEL:?configure DeepSeek in .env}"
-: "${DEEPSEEK_API_KEY:?configure DeepSeek in .env}"
-: "${DEEPSEEK_BASE_URL:?configure DeepSeek in .env}"
+for env_name in "${launcher_settings[@]:2}"; do
+  if [[ -z "${!env_name:-}" ]]; then
+    printf 'configure %s in .env for %s\n' "$env_name" "$config_path" >&2
+    exit 2
+  fi
+done
 
 # A host may need a userspace EGL bundle matching its kernel driver.
 if [[ -z "${ROBOCASA_NVIDIA_USER_LIB_DIR:-}" ]]; then
   driver_version="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1 || true)"
-  candidate_root="$(dirname "$repo_root")/.cache/Xbotics-Hey-Robot"
+  candidate_root="$repo_root/.cache/robocasa365"
   if [[ -n "$driver_version" ]]; then
     candidate_dir="$candidate_root/nvidia-$driver_version/extracted"
     if [[ -d "$candidate_dir" ]]; then
@@ -111,7 +131,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-.venv/bin/hey-robot run --config "$config_path" >"$agent_log" 2>&1 &
+"$launcher_cli" run --config "$config_path" >"$agent_log" 2>&1 &
 agent_pid=$!
 printf 'robocasa365: deployment started with %s\n' "$config_path"
 
@@ -125,7 +145,7 @@ until curl --fail --silent http://127.0.0.1:18080/api/tasks >/dev/null; do
 done
 printf '%s\n' 'robocasa365: web channel ready'
 
-.venv/bin/python -m "$benchmark_module" \
+"$launcher_python" -m "$benchmark_module" \
   --config "$config_path" \
   --agent-url http://127.0.0.1:18080/turn \
   --runtime-target grpc://127.0.0.1:9092 \

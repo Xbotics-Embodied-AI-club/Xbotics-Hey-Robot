@@ -136,7 +136,7 @@ config → composition root → interface/protocol → module implementation
 
 ## 4. pi-agent-core：参考小循环，不复制大 Harness
 
-参考代码：`/home/liber/embodied_agent/pi/packages/agent`
+参考代码：PI 项目中的 `packages/agent` 目录。
 
 ### 4.1 小核心为什么有价值
 
@@ -201,7 +201,7 @@ hardening、model registry、semi-durable recovery 等列为仍在推进的工�
 
 ## 5. RPent：参考直接实验闭环，不复制领域复杂度
 
-参考代码：`/home/liber/embodied_agent/RPent`
+参考代码：RPent 项目根目录。
 
 ### 5.1 值得保留的最小形状
 
