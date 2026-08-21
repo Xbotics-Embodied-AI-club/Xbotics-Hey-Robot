@@ -11,9 +11,15 @@ from pathlib import Path
 
 import grpc
 
-from hey_robot.config import DeploymentConfig, RobotSpec
+from hey_robot.config import DeploymentConfig, ModelServiceSpec, RobotSpec
+from hey_robot.foundation.options import LocalPolicyOptionRunner
 from hey_robot.robocasa_backend.contract import ALLOWED_TASKS
 from hey_robot.robocasa_backend.episode_manager import EpisodeManager
+from hey_robot.robocasa_backend.option_runtime import (
+    ExecutorChunkPolicy,
+    RoboCasaOptionRuntime,
+    encode_rldx_observation,
+)
 from hey_robot.robocasa_backend.rpc.v1 import (
     robocasa_runtime_pb2_grpc as runtime_pb2_grpc,
 )
@@ -31,17 +37,33 @@ async def serve(
     config_path: str | Path,
 ) -> None:
     """Serve only the RoboCasa environment and evaluator control plane."""
-    robot_spec = _load_backend_spec(config_path)
+    robot_spec, model_service_id, model_spec = _load_backend_specs(config_path)
     os.environ.update(_runtime_environment(robot_spec))
-    server = grpc.aio.server()
+    # Three lossless RGB observations can exceed gRPC's 4 MiB default on
+    # cluttered RoboCasa scenes.  This is transport capacity, not an evaluator
+    # or policy concern; keep the bound explicit and symmetric with the client.
+    server = grpc.aio.server(
+        options=[
+            ("grpc.max_send_message_length", 64 * 1024 * 1024),
+            ("grpc.max_receive_message_length", 64 * 1024 * 1024),
+        ]
+    )
     manager = EpisodeManager(allowed_tasks=ALLOWED_TASKS)
+    policy_backend = _build_policy_backend(model_service_id, model_spec)
     runtime_pb2_grpc.add_RoboCasaRuntimeServicer_to_server(
         RoboCasaRuntimeService(
             resource_lock=asyncio.Lock(),
             manager=manager,
             evaluator_token=evaluator_token,
             data_token=data_token,
-            step_timeout_sec=float(robot_spec.settings.get("timeout_sec", 60.0)),
+            create_option_runner=lambda episode_manager: LocalPolicyOptionRunner(
+                RoboCasaOptionRuntime(episode_manager),
+                _chunk_policy(policy_backend, model_spec),
+            ),
+            option_timeout_sec=float(
+                model_spec.settings.get("request_timeout_sec", 600.0)
+            )
+            + float(robot_spec.settings.get("timeout_sec", 60.0)),
         ),
         server,
     )
@@ -98,18 +120,56 @@ def main() -> None:
         )
 
 
-def _load_backend_spec(config_path: str | Path) -> RobotSpec:
+def _load_backend_specs(
+    config_path: str | Path,
+) -> tuple[RobotSpec, str, ModelServiceSpec]:
     config = DeploymentConfig.from_yaml(config_path)
     candidates = [
-        spec
-        for spec in config.robots.values()
+        (robot_id, spec)
+        for robot_id, spec in config.robots.items()
         if spec.type == "robocasa" and bool(spec.settings.get("managed_backend", False))
     ]
     if len(candidates) != 1:
         raise ValueError(
             "backend config must contain exactly one managed RoboCasa robot"
         )
-    return candidates[0]
+    model_candidates = [
+        (service_id, spec)
+        for service_id, spec in config.model_services.items()
+        if spec.enabled
+        and spec.type == "robot_policy"
+        and spec.robot_id == candidates[0][0]
+        and str(spec.settings.get("runtime") or "") in {"lerobot", "rldx", "xiaomi"}
+    ]
+    if len(model_candidates) != 1:
+        raise ValueError(
+            "backend config must contain exactly one enabled foundation policy"
+        )
+    service_id, model_spec = model_candidates[0]
+    return candidates[0][1], service_id, model_spec
+
+
+def _build_policy_backend(service_id: str, spec: ModelServiceSpec):
+    runtime = str(spec.settings.get("runtime") or "")
+    if runtime == "rldx":
+        from hey_robot.foundation.backends.rldx import RLDXPolicyExecutor
+
+        return RLDXPolicyExecutor(service_id, spec)
+    if runtime == "lerobot":
+        from hey_robot.foundation.backends.lerobot import LeRobotPolicyExecutor
+
+        return LeRobotPolicyExecutor(service_id, spec)
+    if runtime == "xiaomi":
+        from hey_robot.foundation.backends.xiaomi import XiaomiPolicyExecutor
+
+        return XiaomiPolicyExecutor(service_id, spec)
+    raise ValueError(f"unsupported RoboCasa foundation runtime {runtime!r}")
+
+
+def _chunk_policy(backend, spec: ModelServiceSpec):
+    if str(spec.settings.get("runtime")) == "rldx":
+        return backend.create_chunk_policy(encode_rldx_observation)
+    return ExecutorChunkPolicy(backend)
 
 
 def _runtime_environment(robot_spec: RobotSpec) -> dict[str, str]:

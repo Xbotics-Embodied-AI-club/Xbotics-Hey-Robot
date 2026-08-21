@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
+from hey_robot.foundation.sessions import ModelSessionEpoch
 from hey_robot.logging import HeyRobotLogger
 from hey_robot.protocol import (
     Envelope,
@@ -26,6 +28,16 @@ from hey_robot.robot_runtime.observations import PerceptionService, PerceptionSn
 from hey_robot.robot_runtime.safety import RobotSafetyError, RobotSafetySupervisor
 
 logger = HeyRobotLogger(name="robot_runtime")
+
+
+def _changes_physical_state(action: RobotAction) -> bool:
+    """Whether an action runs outside a foundation-model rollout.
+
+    Model rollouts carry explicit ``model_session_action`` metadata.  All
+    other accepted robot actions are physical interventions, including native
+    controls emitted by analytic skills and real-robot teleoperation.
+    """
+    return not bool(action.metadata.get("model_session_action", False))
 
 
 class SceneCaptioner(Protocol):
@@ -74,6 +86,9 @@ class RobotRuntime:
         self.safety = safety or RobotSafetySupervisor()
         self.scene_captioner = scene_captioner
         self.control_plane = RobotControlPlane()
+        # The runtime, rather than a simulator/model adapter, owns the causal
+        # boundary between direct embodiment control and stateful policy rolls.
+        self._model_session = ModelSessionEpoch()
         self._capabilities: RobotCapabilities | None = None
         self._scene_entities: tuple[SceneEntity, ...] = ()
         self._scene_entities_frame_id: int | None = None
@@ -137,13 +152,40 @@ class RobotRuntime:
             raise RobotSafetyError(
                 decision.reason or "robot action blocked by safety supervisor"
             )
-        return await self.control_plane.apply_action(
-            action,
+        model_action = bool(action.metadata.get("model_session_action", False))
+        dispatched_action = (
+            self._prepare_model_action(action) if model_action else action
+        )
+        status = await self.control_plane.apply_action(
+            dispatched_action,
             apply_fn=self.driver.apply_action,
             stop_fn=lambda current: self.control_plane.stop_motion(
                 current, apply_fn=self.driver.apply_action
             ),
         )
+        # A direct physical action changes the observation/action trajectory on
+        # which stateful foundation models condition.  This belongs to the
+        # runtime contract, independent of which model or embodiment is used.
+        if status.success is not False:
+            if _changes_physical_state(action):
+                self._model_session.mark_physical_intervention()
+            elif model_action:
+                self._model_session.acknowledge_rollout()
+        return status
+
+    def _prepare_model_action(self, action: RobotAction) -> RobotAction:
+        """Attach session coherence data for a stateful foundation rollout."""
+        metadata = dict(action.metadata)
+        requested = bool(metadata.get("reset_model_session", False))
+        metadata.update(
+            {
+                "model_session_epoch": self._model_session.value,
+                "reset_model_session": self._model_session.requires_reseed(
+                    requested=requested
+                ),
+            }
+        )
+        return replace(action, metadata=metadata)
 
     async def emergency_stop(self, *, reason: str) -> RobotStatus:
         """Execute the stop primitive outside the normal buffered action path."""
@@ -224,7 +266,13 @@ class RobotRuntime:
     async def _inspect_scene(
         self, snapshot: PerceptionSnapshot, arguments: dict[str, Any]
     ) -> dict[str, Any]:
-        caption, entities, verification, visual_evidence = await self._caption_scene(
+        (
+            caption,
+            entities,
+            verification,
+            visual_evidence,
+            caption_diagnostic,
+        ) = await self._caption_scene(
             snapshot.observation,
             question=str(arguments.get("question") or "").strip() or None,
         )
@@ -248,6 +296,7 @@ class RobotRuntime:
             "summary": summary,
             "failure_mode": None if snapshot.has_images else "camera_unavailable",
             "semantic_available": bool(caption),
+            "scene_caption_diagnostic": caption_diagnostic,
             "entities": [_entity_payload(item) for item in entities],
             "verification": verification,
             "verification_target": str(arguments.get("question") or "").strip() or None,
@@ -263,14 +312,14 @@ class RobotRuntime:
 
     async def _caption_scene(
         self, observation: RobotObservation, *, question: str | None = None
-    ) -> tuple[str | None, tuple[SceneEntity, ...], str, str | None]:
+    ) -> tuple[str | None, tuple[SceneEntity, ...], str, str | None, str | None]:
         """在启用视觉描述器时，返回模型生成的场景摘要。
 
         原始相机元数据不会被当作场景描述：成功采集到一帧图像，并不能证明图像中
         可见什么内容。
         """
         if self.scene_captioner is None or not observation.images:
-            return None, (), "unknown", None
+            return None, (), "unknown", None, "disabled_or_no_images"
         try:
             understanding = await self.scene_captioner.caption(
                 observation, await self.status(), question=question
@@ -279,7 +328,7 @@ class RobotRuntime:
             logger.exception(
                 f"场景理解调用异常: robot={self.robot_id} frame={observation.frame_id}"
             )
-            return None, (), "unknown", None
+            return None, (), "unknown", None, "caption_exception"
         metadata = getattr(understanding, "metadata", None)
         confidence = getattr(understanding, "confidence", 0.0)
         if not isinstance(metadata, dict):
@@ -287,14 +336,15 @@ class RobotRuntime:
                 f"场景理解结果无元数据，已丢弃: robot={self.robot_id} "
                 f"frame={observation.frame_id}"
             )
-            return None, (), "unknown", None
+            return None, (), "unknown", None, "invalid_metadata"
+        diagnostic = str(metadata.get("diagnostic") or "zero_confidence")
         if metadata.get("error") or not confidence > 0.0:
             logger.warning(
                 f"场景理解结果不可用，已丢弃: robot={self.robot_id} "
                 f"frame={observation.frame_id} confidence={confidence} "
                 f"reason={metadata.get('error') or metadata.get('raw') or 'unknown'}"
             )
-            return None, (), "unknown", None
+            return None, (), "unknown", None, diagnostic
         summary = _structured_scene_summary(understanding)
         entities = tuple(
             entity
@@ -311,7 +361,7 @@ class RobotRuntime:
         visual_evidence = str(
             getattr(understanding, "visual_evidence", "") or ""
         ).strip()
-        return summary or None, entities, verification, visual_evidence or None
+        return summary or None, entities, verification, visual_evidence or None, None
 
     def _with_scene_entities(self, observation: RobotObservation) -> RobotObservation:
         cached_frame_id = self._scene_entities_frame_id
@@ -483,6 +533,13 @@ def _structured_scene_summary(understanding: Any) -> str:
         if location:
             fact += f"@{location}"
         fact += f"({confidence:.2f})"
+        # Include the captioner's pixel estimate so the planner can localize
+        # the object without a separate pixel-hunting round-trip.
+        attributes = dict(getattr(item, "attributes", {}) or {})
+        pixel = attributes.get("pixel")
+        if isinstance(pixel, (list, tuple)) and len(pixel) >= 2:
+            with suppress(TypeError, ValueError):
+                fact += f" pixel=[{int(pixel[0])},{int(pixel[1])}]"
         objects.append(fact)
     if objects:
         parts.append("objects=[" + ", ".join(objects) + "]")

@@ -18,7 +18,7 @@
 | XLeRobot Ubuntu/Windows 仿真 | [XLeRobot 仿真](operations/xlerobot-sim.md) | `configs/xlerobot.sim.*.yaml` |
 | XLeRobot 真机 | [XLeRobot 真机](operations/xlerobot-real.md) | `configs/xlerobot.real.*.yaml` |
 | 飞书通道 | [飞书接入](operations/feishu.md) | `channels.<id>` |
-| RoboCasa365 评测 | [RoboCasa365 runbook](evaluation/robocasa365/runbook.zh-CN.md) | `configs/evaluation/` |
+| RoboCasa365 评测 | [RoboCasa365 评测说明](../evaluation/robocasa365/README.md) | `configs/evaluation/` |
 | 脚本与诊断 | [运行脚本索引](operations/runtime-scripts.md) | `scripts/` |
 
 [部署矩阵](operations/deployment-matrix.md)列出仓库提供的主要 profile。配置文件存在不等于
@@ -29,7 +29,6 @@
 - [系统架构](architecture/system-architecture.md)：当前运行拓扑和边界，架构事实主文档；
 - [论文草稿](references/paper-draft.md)：研究动机、系统主张、局限与待执行实验，不是能力事实源；
 - [部署模式边界](architecture/deployment-modes.zh-CN.md)：`in_memory`、NATS 与 sidecar；
-- [ModelService 协议](architecture/model-service-rpc-proto.md)：proto、gRPC 和 codegen；
 - [Skill 扩展指南](development/skill-extension.md)：新增或修改 Skill；
 - [质量门禁](overview/quality-gates.md)：合并前检查；
 - [贡献指南](../CONTRIBUTING.md)：开发与 PR 约定。

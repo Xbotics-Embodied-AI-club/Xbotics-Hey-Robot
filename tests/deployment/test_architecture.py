@@ -41,24 +41,21 @@ def test_runtime_dependencies_are_partitioned_by_container() -> None:
     assert any(item.startswith("torch") for item in extras["human-follow"])
 
 
-def test_lerobot_policy_has_a_generic_dependency_group_and_dockerfile() -> None:
+def test_lerobot_policy_has_a_generic_dependency_group_without_a_service_image() -> (
+    None
+):
     project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     groups = project["dependency-groups"]
 
     assert "lerobot-policy" in groups
     assert "vla" not in groups
-    assert Path("docker/Dockerfile.policy").is_file()
+    assert not Path("docker/Dockerfile.policy").exists()
     assert not Path("docker/Dockerfile.vla").exists()
-    policy_dockerfile = Path("docker/Dockerfile.policy").read_text(encoding="utf-8")
-    assert "FROM python:${PYTHON_VERSION}-slim-bookworm" in policy_dockerfile
-    assert 'ENTRYPOINT ["/app/.venv/bin/python"' in policy_dockerfile
-    assert "pip install --break-system-packages \\\n    torch" not in policy_dockerfile
 
 
-def test_vln_image_has_one_locked_cuda_runtime() -> None:
+def test_vln_has_one_locked_cuda_runtime_without_a_service_image() -> None:
     project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     vln_dependencies = "\n".join(project["dependency-groups"]["vln"])
-    dockerfile = Path("docker/Dockerfile.vln").read_text(encoding="utf-8")
     compose = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
 
     assert "nvidia-cuda-runtime-cu12" in vln_dependencies
@@ -66,27 +63,19 @@ def test_vln_image_has_one_locked_cuda_runtime() -> None:
     assert "torch==2.6.0" in vln_dependencies
     assert "torchvision==0.21.0" in vln_dependencies
     assert "opencv-python==4.10.0.84" in vln_dependencies
-    assert "FROM python:${PYTHON_VERSION}-slim-bookworm" in dockerfile
-    assert "FROM nvidia/cuda" not in dockerfile
-    assert "CUDA_VERSION" not in compose["services"]["vln"]["build"]["args"]
+    assert not Path("docker/Dockerfile.vln").exists()
+    assert "vln" not in compose["services"]
 
 
-def test_robocasa_uses_generic_lerobot_policy_image() -> None:
+def test_robocasa_has_no_legacy_policy_service() -> None:
     compose = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
     services = compose["services"]
-    robocasa_policy = services["robocasa-policy"]
-
     assert "policy" not in services
-    assert robocasa_policy["build"]["dockerfile"] == "docker/Dockerfile.policy"
-    assert robocasa_policy["image"] == (
-        "${HEY_ROBOT_POLICY_IMAGE:-hey-robot-policy:latest}"
-    )
-    assert robocasa_policy["runtime"] == "nvidia"
-    assert "deploy" not in robocasa_policy
+    assert "robocasa-policy" not in services
     assert services["robocasa365"]["build"]["dockerfile"] == (
         "docker/Dockerfile.robocasa365"
     )
-    assert "robocasa" in robocasa_policy["profiles"]
+    assert "robocasa" in services["robocasa365"]["profiles"]
 
 
 def test_configs_do_not_use_direct_agent_mode() -> None:

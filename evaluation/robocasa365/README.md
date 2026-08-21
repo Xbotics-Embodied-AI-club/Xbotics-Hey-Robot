@@ -27,12 +27,11 @@ backend 内只有一个 `EpisodeManager`，它是 simulator、observation、fram
 
 当前只保留一条执行路线：
 
-- 单任务入口：`evaluation/robocasa365/full_system_benchmark.py`；
-- 批量入口：`evaluation/robocasa365/batch_full_system_benchmark.py`；
+- 唯一评测入口：`evaluation/robocasa365/benchmark.py`；单任务是
+  `--task`、`--seeds` 与 `--condition` 各选择一个值的 batch；
 - 唯一任务清单：`evaluation/robocasa365/tasks.yaml`；
 - 唯一 Agent 配置：`configs/evaluation/robocasa365.yaml`；
-- 唯一启动器：`scripts/evaluation/run_robocasa365.sh`，通过 `single` 或 `batch`
-  选择评测模式，通过 `--config` 选择策略后端。
+- 唯一启动器：`scripts/evaluation/run_robocasa365.sh`，通过 `--config` 选择策略后端。
 
 RLDX-1 和 Xiaomi-Robotics-1 使用同一条 Runtime、ModelService、Agent 和官方成功谓词链路，
 分别通过 `configs/evaluation/robocasa365.rldx.yaml` 和
@@ -103,19 +102,14 @@ RoboCasa assets。它会验证 assets 完整性，并把新环境中的 RoboCasa
 `artifacts/robocasa365/merged-assets`。CUDA driver、EGL/OpenGL 系统库、模型权重和
 RoboCasa assets 是运行资源，不属于 Python dependency group。
 
-容器模式同样保持这个边界，但把两个进程放入不同容器：
+容器模式只启动 RoboCasa backend：
 
 ```bash
-docker-compose --profile robocasa up -d robocasa365 robocasa-policy
+docker-compose --profile robocasa up -d robocasa365
 ```
 
-`robocasa365` 使用 `Dockerfile.robocasa365`，只承担 MuJoCo/RoboCasa
-环境与 evaluator（9092）；`robocasa-policy` 使用通用
-`Dockerfile.policy` 和 `hey-robot-policy` 镜像，加载 PI052 并提供模型服务
-（9091），不与 RoboCasa 环境混装 Python 依赖。环境依赖组仅保留 LeRobot
-环境适配所需的 Torch/torchvision，不安装 Transformers、Datasets 或视频解码工具。
-当前不再维护单独的普通
-XLeRobot Policy Compose 服务。
+`robocasa365` 使用 `Dockerfile.robocasa365`，托管 MuJoCo、RoboCasa 环境和
+当前配置选择的策略执行器。评测入口不依赖独立 policy 容器。
 
 ### 4.2 模型配置
 
@@ -161,12 +155,12 @@ steerable VLA，应作为同一 `manipulate` 接口的另一个模型配置验�
 在仓库根目录执行：
 
 ```bash
-bash scripts/evaluation/run_robocasa365.sh single \
-  --config configs/evaluation/robocasa365.yaml \
+bash scripts/evaluation/run_robocasa365.sh \
+  --config configs/evaluation/robocasa365.rldx.yaml \
   --task CloseFridge \
-  --seed 1000 \
+  --seeds 1000 \
   --condition b1 \
-  --output-dir runtime/robocasa365/close-fridge-b1-seed1000 \
+  --output-root runtime/robocasa365.rldx/close-fridge-b1-seed1000 \
   --timeout-sec 7200
 ```
 
@@ -192,7 +186,7 @@ bash scripts/evaluation/run_robocasa365.sh single \
 PI052 checkpoint 约 10.9 GB，当前宿主首次冷加载通常需要 4～5 分钟。frame 在加载期间保持
 为 0，属于正常现象。
 
-每次运行必须使用新的 `--output-dir`。入口拒绝覆盖已有目录，从而避免历史实验被静默覆盖。
+每次运行必须使用新的 `--output-root`。入口拒绝覆盖已有目录，从而避免历史实验被静默覆盖。
 
 ### 5.1 使用 RLDX-1
 
@@ -215,19 +209,19 @@ ZeroMQ server，将 RoboCasa365 的 3 路相机和 16 维状态转换成官方 m
 单任务冒烟评测：
 
 ```bash
-bash scripts/evaluation/run_robocasa365.sh single \
+bash scripts/evaluation/run_robocasa365.sh \
   --config configs/evaluation/robocasa365.rldx.yaml \
   --task CloseFridge \
-  --seed 1000 \
+  --seeds 1000 \
   --condition b0 \
-  --output-dir runtime/robocasa365.rldx/close-fridge-b0-seed1000 \
+  --output-root runtime/robocasa365.rldx/close-fridge-b0-seed1000 \
   --timeout-sec 7200
 ```
 
 长程组合任务批量评测：
 
 ```bash
-bash scripts/evaluation/run_robocasa365.sh batch \
+bash scripts/evaluation/run_robocasa365.sh \
   --config configs/evaluation/robocasa365.rldx.yaml \
   --output-root runtime/robocasa365.rldx/composite-b0-seed1000 \
   --suite composite_seen \
@@ -237,8 +231,7 @@ bash scripts/evaluation/run_robocasa365.sh batch \
   --timeout-sec 7200
 ```
 
-`b0` 是最直接的 RLDX-1 flat-policy 基线；需要评估 Hey Robot 分层规划时，再运行相同任务的
-`b1` 和 `b2`。首次运行会把 checkpoint 下载到 `.cache/huggingface`；运行产物位于
+`b0` 是最直接的 RLDX-1 flat-policy 基线；`b1` 是 Hey 的自适应策略编排条件。首次运行会把 checkpoint 下载到 `.cache/huggingface`；运行产物位于
 `runtime/robocasa365.rldx`。
 
 ### 5.2 使用 Xiaomi-Robotics-1
@@ -270,13 +263,13 @@ bash scripts/evaluation/setup_xiaomi_policy_env.sh
 单任务冒烟评测：
 
 ```bash
-bash scripts/evaluation/run_robocasa365.sh single \
+bash scripts/evaluation/run_robocasa365.sh \
   --config configs/evaluation/robocasa365.xiaomi.yaml \
   --task CloseFridge \
-  --seed 57 \
+  --seeds 57 \
   --split pretrain \
   --condition b1 \
-  --output-dir runtime/robocasa365-xiaomi/close-fridge-agent-subgoal-b1-seed57 \
+  --output-root runtime/robocasa365-xiaomi/close-fridge-agent-subgoal-b1-seed57 \
   --timeout-sec 7200
 ```
 
@@ -287,18 +280,15 @@ split、seed 57、B0 在 222 个环境 action 后得到 `official_success=true`�
 seed 1022、B0 在 543 步成功。上述结果验证执行链路，不代替 target50、50 trials/task 的
 正式成功率统计；`agent_subgoal` 系统能力应使用 B1 单独评测。
 
-## 6. B0、B1、B2、B3
+## 6. B0、B1
 
 `--condition` 可选：
 
 - `b0`：一次完整根目标 `manipulate`，benchmark 在第一次调用结束后强制结束 trial，保证
   flat-policy 对照不依赖 Agent 是否遵守自然语言提示；
-- `b1`：使用正常层级规划并在 option 边界重新观察；
-- `b2`：冻结“观察—根目标操作—再观察”的 oracle pattern。
-- `b3`：B1 的早检查消融；完整根目标先执行 400 步，再按 Atomic-style 单状态转换进行
-  稀疏恢复，用于测量介入时机而不改变 VLA、Planner 或执行路径。
+- `b1`：自适应策略编排：读取已验证执行记忆、重新定位，以确定性原语完成非接触阶段，并将 VLA 用于局部接触和可恢复重试。
 
-四者只是同一 Agent 入口的实验提示，共用相同 Gateway、SkillWorker、RPC、VLA 和
+二者只是同一 Agent 入口的实验提示，共用相同 Gateway、SkillWorker、RPC、VLA 和
 EpisodeManager，不存在 condition 专属 runner 或动作路径。
 
 ## 7. 批量评测
@@ -306,8 +296,8 @@ EpisodeManager，不存在 condition 专属 runner 或动作路径。
 当 `hey-robot run` 已经启动时，可以运行：
 
 ```bash
-.venv/bin/python -m evaluation.robocasa365.batch_full_system_benchmark \
-  --output-root runtime/robocasa365/atomic-b1-seeds \
+.venv/bin/python -m evaluation.robocasa365.benchmark \
+  --output-root runtime/robocasa365.rldx/atomic-b1-seeds \
   --suite atomic_gate \
   --condition b1 \
   --seeds 1000,1001 \

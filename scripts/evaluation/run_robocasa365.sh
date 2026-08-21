@@ -1,22 +1,18 @@
 #!/usr/bin/env bash
-# Start one managed RoboCasa365 deployment and run a single or batch benchmark.
+# Start one managed RoboCasa365 deployment and run the unified batch benchmark.
 set -euo pipefail
 
 usage() {
   printf '%s\n' \
-    'usage: run_robocasa365.sh <single|batch> [--config PATH] [benchmark options]'
+    'usage: run_robocasa365.sh [--config PATH] [benchmark options]'
 }
 
-mode="${1:-}"
-case "$mode" in
-  single) benchmark_module="evaluation.robocasa365.full_system_benchmark" ;;
-  batch) benchmark_module="evaluation.robocasa365.batch_full_system_benchmark" ;;
-  -h|--help|"") usage; exit 0 ;;
-  *) printf 'unknown evaluation mode: %s\n' "$mode" >&2; usage >&2; exit 2 ;;
-esac
-shift
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
 
-config_path="configs/evaluation/robocasa365.yaml"
+config_path="configs/evaluation/robocasa365.rldx.yaml"
 benchmark_args=()
 while (($#)); do
   case "$1" in
@@ -145,7 +141,7 @@ until curl --fail --silent http://127.0.0.1:18080/api/tasks >/dev/null; do
 done
 printf '%s\n' 'robocasa365: web channel ready'
 
-"$launcher_python" -m "$benchmark_module" \
+"$launcher_python" -m evaluation.robocasa365.benchmark \
   --config "$config_path" \
   --agent-url http://127.0.0.1:18080/turn \
   --runtime-target grpc://127.0.0.1:9092 \

@@ -384,9 +384,7 @@ class _IsolatedPolicyRuntime:
 def _load_policy_runtime(
     policy_path: str, device: str, settings: dict[str, Any]
 ) -> PolicyRuntime:
-    if bool(settings.get("isolate_policy", False)):
-        return _load_isolated_policy_runtime(policy_path, device, settings)
-    return _load_direct_policy_runtime(policy_path, device, settings)
+    return _load_isolated_policy_runtime(policy_path, device, settings)
 
 
 def _load_direct_policy_runtime(

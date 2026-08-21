@@ -9,6 +9,7 @@ service RoboCasaRuntime {
   rpc BeginTrial(BeginTrialRequest) returns (ObservationResponse);
   rpc Observe(EmptyRequest) returns (ObservationResponse);
   rpc Step(StepRequest) returns (StepResponse);
+  rpc StepNative(NativeStepRequest) returns (NativeStepResponse);
   rpc ReadTruth(EmptyRequest) returns (TruthResponse);
   rpc EndTrial(EndTrialRequest) returns (EndTrialResponse);
 }
@@ -30,6 +31,7 @@ message BeginTrialRequest {
   int64 seed = 3;
   string split = 4;
   repeated string registries = 5;
+  string execution_artifact_dir = 6;
 }
 
 message ImageFrame {
@@ -53,20 +55,27 @@ message ObservationResponse {
 }
 
 message StepRequest {
-  repeated float action = 1;
-  int64 expected_frame_id = 2;
-  repeated float raw_action = 3;
-  bool action_clipped = 4;
+  string session_id = 1;
+  string instruction = 2;
+  uint32 max_actions = 3;
+  bool reset_session = 4;
 }
 
 message StepResponse {
   ObservationResponse observation = 1;
-  double reward = 2;
+  string status = 2;
   bool done = 3;
-  reserved 4;
-  reserved "success";
-  google.protobuf.Struct metrics = 5;
+  uint32 actions_executed = 4;
+  uint32 chunks_executed = 5;
+  google.protobuf.Struct progress = 6;
+  google.protobuf.Struct diagnostics = 7;
+  string error_message = 8;
 }
+
+// A single validated RoboCasa action.  This is the environment action channel
+// used by analytic harness primitives; model inference remains out of process.
+message NativeStepRequest { repeated float action = 1; int64 expected_frame_id = 2; }
+message NativeStepResponse { ObservationResponse observation = 1; bool done = 2; google.protobuf.Struct progress = 3; }
 
 message TruthResponse {
   bool done = 1;

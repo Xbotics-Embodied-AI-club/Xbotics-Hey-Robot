@@ -168,7 +168,7 @@ InternNav 仿真需要独立模型环境和 InternNav submodule，具体步骤�
 [`operations/xlerobot-sim.md`](operations/xlerobot-sim.md)。
 
 RoboCasa365 完整系统评测见
-[`evaluation/robocasa365/runbook.zh-CN.md`](evaluation/robocasa365/runbook.zh-CN.md)。
+[`../evaluation/robocasa365/README.md`](../evaluation/robocasa365/README.md)。
 
 <h2 id="real-robot">XLeRobot 真机</h2>
 
@@ -224,7 +224,7 @@ InternNav 和 LeRobot policy 已有统一接入路径，但不要直接把仿真
 - [配置参考](reference/configuration.md)
 - [XLeRobot 仿真](operations/xlerobot-sim.md)
 - [XLeRobot 真机](operations/xlerobot-real.md)
-- [RoboCasa365 评测](evaluation/robocasa365/runbook.zh-CN.md)
+- [RoboCasa365 评测](../evaluation/robocasa365/README.md)
 - [最小 Embodied Agent Harness 开发指南](development/minimal-embodied-agent-harness-guide.zh-CN.md)
 - [论文初稿](references/paper-draft.md)
 

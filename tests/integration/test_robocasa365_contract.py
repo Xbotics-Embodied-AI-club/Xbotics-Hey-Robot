@@ -7,16 +7,18 @@ import json
 from argparse import Namespace
 
 import numpy as np
+import pytest
 from PIL import Image
 
-from evaluation.robocasa365 import batch_full_system_benchmark
-from evaluation.robocasa365.conditions import condition_for
-from evaluation.robocasa365.full_system_benchmark import (
+import evaluation.robocasa365.benchmark as benchmark
+from evaluation.robocasa365.benchmark import (
     _find_trial_task,
     _option_records,
     _parser as trial_parser,
     _write_evaluator_action_artifact,
+    run_batch,
 )
+from evaluation.robocasa365.conditions import condition_for
 from hey_robot.config import DeploymentConfig, ModelServiceSpec
 from hey_robot.foundation.backends.lerobot import LeRobotPolicyExecutor
 from hey_robot.foundation.clients.models import ModelInferenceResult
@@ -52,11 +54,11 @@ def test_batch_benchmark_records_one_trial_error_and_continues(
         }
 
     monkeypatch.setattr(
-        batch_full_system_benchmark,
+        benchmark,
         "load_manifest",
         lambda _: {"suites": {"long": ["broken", "working"]}},
     )
-    monkeypatch.setattr(batch_full_system_benchmark, "run_trial", run_trial)
+    monkeypatch.setattr(benchmark, "run_trial", run_trial)
     args = Namespace(
         output_root=tmp_path / "batch",
         manifest=tmp_path / "tasks.yaml",
@@ -72,16 +74,14 @@ def test_batch_benchmark_records_one_trial_error_and_continues(
         timeout_sec=1.0,
     )
 
-    summary = asyncio.run(batch_full_system_benchmark.run_batch(args))
+    summary = asyncio.run(run_batch(args))
 
     assert calls == ["broken", "working"]
     assert summary["count"] == 2
     assert summary["official_successes"] == 1
     assert summary["trial_errors"] == 1
     failure = json.loads(
-        (
-            args.output_root / "trials" / "long-b0-broken-1000" / "result.json"
-        ).read_text()
+        (args.output_root / "trials" / "b0-broken-1000" / "result.json").read_text()
     )
     assert failure["failure_stage"] == "trial_exception"
 
@@ -214,10 +214,14 @@ def test_option_records_accept_current_gateway_run_payload() -> None:
 def test_flat_condition_has_an_executable_single_option_limit() -> None:
     assert condition_for("b0").manipulate_call_limit == 1
     prompt = condition_for("b0").prompt("Close the fridge.")
-    assert "max_steps=600" in prompt
+    assert "max_steps=560" in prompt
     assert "Goal text verbatim as task_prompt" in prompt
     assert "Do not inspect" in prompt
-    assert condition_for("b1").manipulate_call_limit is None
+
+
+def test_only_baseline_and_harness_conditions_are_available() -> None:
+    with pytest.raises(ValueError, match="expected b0 or b1"):
+        condition_for("b2")
 
 
 def test_rldx_evaluation_reserves_completion_for_environment() -> None:
@@ -226,50 +230,13 @@ def test_rldx_evaluation_reserves_completion_for_environment() -> None:
     assert config.agent_runtime.completion_authority == "environment"
 
 
-def test_hierarchical_condition_uses_root_first_sparse_recovery() -> None:
-    prompt = condition_for("b1").prompt("Prepare coffee.")
-
-    assert "complete root Goal" in prompt
-    assert "exact task_prompt and max_steps=600" in prompt
-    assert "If the live environment has not completed" in prompt
-    assert "unfinished semantic remainder" in prompt
-    assert "Atomic-Seen instruction" in prompt
-    assert "single-state-transition style" in prompt
-    assert "short natural English task_prompt" in prompt
-    assert "commands exactly one physical outcome" in prompt
-    assert "minimum root-task context" in prompt
-    assert "already-achieved state" in prompt
-    assert "Do not copy the full multi-step root Goal" in prompt
-    assert "Root goal / Current state / Current subgoal" in prompt
-    assert "source/target spatial relations" in prompt
-    assert "primary current-state outcome" in prompt
-    assert "historical preconditions" in prompt
-    assert "Verification unknown is not automatically failure" in prompt
-    assert "never issue an identical recovery task_prompt more than once" in prompt
-    assert "park the arm" in prompt
-    assert prompt.endswith("Goal: Prepare coffee.")
-
-
-def test_early_checkpoint_condition_changes_only_the_root_horizon() -> None:
-    prompt = condition_for("b3").prompt("Load the dishwasher.")
-
-    assert "complete root Goal" in prompt
-    assert "exact task_prompt and max_steps=400" in prompt
-    assert "single-state-transition style" in prompt
-    assert "commands exactly one physical outcome" in prompt
-    assert "minimum root-task context" in prompt
-    assert "normally use 300-400 steps" in prompt
-    assert "max_steps=600" not in prompt
-    assert prompt.endswith("Goal: Load the dishwasher.")
-
-
-def test_trial_defaults_to_live_environment_objective() -> None:
+def test_batch_defaults_to_live_environment_objective() -> None:
     args = trial_parser().parse_args(
         [
             "--task",
             "KettleBoiling",
-            "--output-dir",
-            "runtime/test-trial",
+            "--output-root",
+            "runtime/test-batch",
         ]
     )
 
@@ -277,7 +244,7 @@ def test_trial_defaults_to_live_environment_objective() -> None:
 
 
 def test_agent_task_is_correlated_by_the_submitted_condition_prompt() -> None:
-    objective = condition_for("b2").prompt("Close the fridge.")
+    objective = condition_for("b1").prompt("Close the fridge.")
     task = {"objective": objective, "created_at": 11.0, "status": "active"}
     assert _find_trial_task([task], objective=objective, started=10.0) is task
 

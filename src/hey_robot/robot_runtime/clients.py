@@ -86,23 +86,51 @@ class LocalRobotClient:
             values = arguments.get("values")
             if not isinstance(values, list):
                 raise ValueError("embodiment_native_action requires list values")
+            is_chunk = bool(values) and all(isinstance(item, list) for item in values)
+            action_chunk = (
+                [[float(value) for value in item] for item in values]
+                if is_chunk
+                else None
+            )
+            if action_chunk is not None and any(
+                len(item) != 12 for item in action_chunk
+            ):
+                raise ValueError("embodiment_native_action chunk requires 12-D actions")
+            single_values = (
+                action_chunk[0]
+                if action_chunk is not None
+                else [float(value) for value in values]
+            )
+            raw_values = arguments.get("raw_values")
+            raw_chunk = (
+                [[float(value) for value in item] for item in raw_values]
+                if action_chunk is not None and isinstance(raw_values, list)
+                else action_chunk
+            )
             robot_action = RobotAction(
                 envelope=intent.envelope,
-                values=[float(value) for value in values],
+                values=single_values,
                 skill_id=run_id,
                 task_id=run_id,
                 metadata={
                     "action_type": "embodiment_native",
                     "action_space": arguments.get("action_space"),
                     "embodiment": arguments.get("embodiment"),
-                    "raw_action": list(arguments.get("raw_values") or values),
-                    "action_clipped": list(arguments.get("raw_values") or values)
-                    != values,
+                    "raw_action": list(raw_values or single_values),
+                    "action_chunk": action_chunk,
+                    "raw_action_chunk": raw_chunk,
+                    "action_clipped": list(raw_values or single_values)
+                    != single_values,
                 },
             )
         else:
             robot_action = RobotSkillAction(action, dict(arguments)).to_robot_action(
                 intent
+            )
+        if action == "run_policy_option":
+            robot_action = replace(
+                robot_action,
+                metadata={**dict(robot_action.metadata), "model_session_action": True},
             )
         if expected_frame_id is not None:
             robot_action = replace(

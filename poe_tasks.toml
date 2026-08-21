@@ -45,7 +45,3 @@ sequence = [
     { cmd = "python scripts/dev/clean.py test" },
     { cmd = "python scripts/dev/clean.py lint" },
 ]
-
-[tasks.proto]
-help = "Regenerate model service protobuf and gRPC contract artifacts"
-cmd = "powershell -ExecutionPolicy Bypass -File scripts/dev/generate_model_service_proto.ps1"

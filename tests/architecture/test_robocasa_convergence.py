@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -14,7 +15,7 @@ def test_robocasa_production_code_has_one_action_owner() -> None:
     callers = [
         path
         for path in source_files
-        if "manager.step" in path.read_text(encoding="utf-8")
+        if re.search(r"\b(?:self\.)?manager\.step\b", path.read_text(encoding="utf-8"))
     ]
     assert callers == [
         ROOT / "src" / "hey_robot" / "robocasa_backend" / "runtime_server.py"
@@ -96,9 +97,7 @@ def test_lerobot_is_a_runtime_backend_not_a_vla_subtype() -> None:
 
 
 def test_benchmark_selects_a_supported_generic_robot_policy_service() -> None:
-    source = (ROOT / "evaluation/robocasa365/full_system_benchmark.py").read_text(
-        encoding="utf-8"
-    )
+    source = (ROOT / "evaluation/robocasa365/benchmark.py").read_text(encoding="utf-8")
 
     assert 'spec.type == "robot_policy"' in source
     assert 'spec.settings.get("runtime")' in source

@@ -183,14 +183,9 @@ required_actions / required_models
 
 ## 7. Foundation Model
 
-wire contract 的事实源是：
-
-```text
-proto/hey_robot/model_service/v1/model_service.proto
-```
-
-RPC为 `GetHealth`、`ExecuteSkill` 和 `CancelSkill`。`ModelServiceRegistry` 按
-`model_services.<id>.provides` 与 `robot_id`选择服务。
+Foundation Model 由 deployment 的 `model_services.<id>` 选择，并作为独立进程运行。
+模型进程只负责推理；Skill 与 Robot Runtime 保持动作、状态和评测环境的所有权。当前不维护
+通用 ModelService protobuf/gRPC contract：每个 backend 通过其明确的本地执行端口与运行时集成。
 
 ### VLN
 

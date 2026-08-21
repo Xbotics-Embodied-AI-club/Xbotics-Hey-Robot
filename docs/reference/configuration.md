@@ -192,9 +192,8 @@ model_services:
 - `robot_policy` 当前只支持 `runtime: lerobot`，并要求 `policy_path`、
   `policy_device`、`action_space`、正数 `action_dimensions`。
 
-`provides` 必须与 Skill 的 `required_models` 匹配。模型服务通常由
-`hey-robot model-service` 独立启动；`hey-robot run` 不会因配置中存在普通
-ModelService entry 就自动启动它。
+`provides` 必须与 Skill 的 `required_models` 匹配。模型后端由 `hey-robot run`
+托管，并在需要时启动独立的模型进程；不提供独立的模型服务 CLI。
 
 ## agent_runtime
 

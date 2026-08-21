@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import io
-import math
 import os
 import time
 from collections.abc import Callable
@@ -16,6 +15,7 @@ from google.protobuf.json_format import ParseDict
 from google.protobuf.struct_pb2 import Struct
 from PIL import Image
 
+from hey_robot.foundation.options import LocalPolicyOptionRunner, OptionRequest
 from hey_robot.robocasa_backend.contract import (
     ALLOWED_TASKS,
     CAMERA_RENAME_MAP,
@@ -54,8 +54,9 @@ class RoboCasaRuntimeService(robocasa_runtime_pb2_grpc.RoboCasaRuntimeServicer):
         resource_lock: asyncio.Lock | None = None,
         evaluator_token: str | None = None,
         data_token: str | None = None,
-        prepare_trial: Callable[[], None] | None = None,
-        step_timeout_sec: float = 60.0,
+        create_option_runner: Callable[[EpisodeManager], LocalPolicyOptionRunner]
+        | None = None,
+        option_timeout_sec: float = 1800.0,
     ) -> None:
         self.manager = manager or EpisodeManager(allowed_tasks=ALLOWED_TASKS)
         self._lock = asyncio.Lock()
@@ -64,8 +65,9 @@ class RoboCasaRuntimeService(robocasa_runtime_pb2_grpc.RoboCasaRuntimeServicer):
         self._last_error: str | None = None
         self._evaluator_token = evaluator_token
         self._data_token = data_token
-        self._prepare_trial = prepare_trial
-        self._step_timeout_sec = max(float(step_timeout_sec), 0.001)
+        self._create_option_runner = create_option_runner
+        self._option_runner: LocalPolicyOptionRunner | None = None
+        self._option_timeout_sec = max(float(option_timeout_sec), 0.001)
 
     @property
     def busy(self) -> bool:
@@ -111,13 +113,19 @@ class RoboCasaRuntimeService(robocasa_runtime_pb2_grpc.RoboCasaRuntimeServicer):
                     trial_id=request.trial_id or None,
                     split=request.split or DEFAULT_SPLIT,
                     registries=tuple(request.registries) or DEFAULT_REGISTRIES,
+                    execution_artifact_dir=request.execution_artifact_dir or None,
                 )
                 trial = await asyncio.to_thread(
                     self.manager.begin_trial,
                     spec,
                 )
-                if self._prepare_trial is not None:
-                    await asyncio.to_thread(self._prepare_trial)
+                if self._create_option_runner is None:
+                    raise RuntimeError(
+                        "RoboCasa backend has no foundation policy runner"
+                    )
+                self._option_runner = await asyncio.to_thread(
+                    self._create_option_runner, self.manager
+                )
             except Exception:
                 if self.manager.active:
                     await asyncio.to_thread(self.manager.end_trial)
@@ -140,43 +148,73 @@ class RoboCasaRuntimeService(robocasa_runtime_pb2_grpc.RoboCasaRuntimeServicer):
 
     async def Step(self, request, context):  # noqa: N802
         await self._authorize(context, role="data")
-        action = [float(value) for value in request.action]
-        raw_action = [float(value) for value in request.raw_action]
-        if len(action) != 12 or not all(math.isfinite(value) for value in action):
-            raise ValueError("action must contain exactly 12 finite values")
-        if len(raw_action) != 12 or not all(
-            math.isfinite(value) for value in raw_action
-        ):
-            raise ValueError("raw_action must contain exactly 12 finite values")
+        session_id = str(request.session_id).strip()
+        instruction = str(request.instruction).strip()
+        if not session_id or not instruction or int(request.max_actions) < 1:
+            raise ValueError("Step requires session_id, instruction, and max_actions")
         async with self._lock:
             started = time.monotonic()
             try:
-                outcome = await asyncio.wait_for(
+                if not self.manager.active or self._option_runner is None:
+                    raise RuntimeError("trial_unavailable: begin a trial before Step")
+                result = await asyncio.wait_for(
                     asyncio.to_thread(
-                        self.manager.step,
-                        action,
-                        expected_frame_id=int(request.expected_frame_id),
-                        raw_action=raw_action or action,
-                        action_clipped=bool(request.action_clipped),
+                        self._option_runner.run,
+                        OptionRequest(
+                            session_id=session_id,
+                            instruction=instruction,
+                            max_actions=int(request.max_actions),
+                            reset_session=bool(request.reset_session),
+                        ),
                     ),
-                    timeout=self._step_timeout_sec,
+                    timeout=self._option_timeout_sec,
                 )
             except TimeoutError as exc:
                 self._last_error = (
-                    f"RoboCasa environment step exceeded {self._step_timeout_sec:.1f}s"
+                    f"RoboCasa policy option exceeded {self._option_timeout_sec:.1f}s"
                 )
                 await context.abort(grpc.StatusCode.DEADLINE_EXCEEDED, self._last_error)
                 raise AssertionError("context.abort must not return") from exc
             trial = self.manager.current_trial()
             return robocasa_runtime_pb2.StepResponse(
                 observation=self._response_observation(trial),
-                reward=outcome.reward,
-                done=outcome.done,
-                metrics=_struct(
+                status=result.status.value,
+                done=result.environment_done,
+                actions_executed=result.actions_executed,
+                chunks_executed=result.chunks_executed,
+                progress=_struct(result.progress),
+                diagnostics=_struct(
                     {
-                        "truncated": outcome.truncated,
-                        "step_duration_sec": round(time.monotonic() - started, 3),
+                        **result.diagnostics,
+                        "duration_sec": round(time.monotonic() - started, 3),
                     }
+                ),
+                error_message=result.error or "",
+            )
+
+    async def StepNative(self, request, context):  # noqa: N802
+        """Advance exactly one raw 12-D environment action.
+
+        This is intentionally separate from ``Step``: it is a robot action
+        transport, never a model-inference endpoint.
+        """
+        await self._authorize(context, role="data")
+        async with self._lock:
+            try:
+                outcome = await asyncio.to_thread(
+                    self.manager.step,
+                    list(request.action),
+                    expected_frame_id=int(request.expected_frame_id),
+                )
+            except Exception as exc:
+                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, str(exc))
+                raise AssertionError("context.abort must not return") from exc
+            trial = self.manager.current_trial()
+            return robocasa_runtime_pb2.NativeStepResponse(
+                observation=self._response_observation(trial),
+                done=bool(outcome.done),
+                progress=_struct(
+                    _json_safe(self.manager.read_truth().get("last_info", {}))
                 ),
             )
 
@@ -200,6 +238,7 @@ class RoboCasaRuntimeService(robocasa_runtime_pb2_grpc.RoboCasaRuntimeServicer):
             if not self.manager.active:
                 return robocasa_runtime_pb2.EndTrialResponse(ended=False)
             await asyncio.to_thread(self.manager.end_trial)
+            self._option_runner = None
             self._release_resource()
             return robocasa_runtime_pb2.EndTrialResponse(ended=True)
 
@@ -252,6 +291,9 @@ class RoboCasaRuntimeService(robocasa_runtime_pb2_grpc.RoboCasaRuntimeServicer):
                     "policy_task": str(
                         getattr(trial.env, "task_description", "") or trial.spec.task
                     ),
+                    "cameras": _camera_calibration(trial, pixels),
+                    "task_progress": self.manager.get_task_progress(),
+                    "execution_diagnostics": self.manager.get_execution_diagnostics(),
                 }
             ),
         )
@@ -262,6 +304,43 @@ def _png(frame: Any) -> bytes:
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def _camera_calibration(trial: ActiveTrial, pixels: dict[str, Any]) -> dict[str, Any]:
+    """Expose per-camera intrinsics + cam2world extrinsics for agent localization.
+
+    The calibration is read live from the MuJoCo sim so it stays correct even
+    after the mobile base / arm moves (agentview and wrist cameras are mounted
+    on the robot). Rendering is NOT triggered; only the camera model state is
+    read, so this is cheap enough to attach to every observation.
+    """
+    raw_env = getattr(trial.env, "_env", None)
+    sim = getattr(getattr(raw_env, "env", None), "sim", None)
+    if sim is None:
+        return {}
+    try:
+        from robosuite.utils import camera_utils
+
+        out: dict[str, Any] = {}
+        for camera, frame in pixels.items():
+            h = int(np.asarray(frame).shape[0])
+            w = int(np.asarray(frame).shape[1])
+            intrinsic = np.asarray(
+                camera_utils.get_camera_intrinsic_matrix(sim, camera, h, w),
+                dtype=np.float64,
+            )
+            extrinsic = np.asarray(
+                camera_utils.get_camera_extrinsic_matrix(sim, camera), dtype=np.float64
+            )
+            out[camera] = {
+                "intrinsic": intrinsic.tolist(),  # 3x3
+                "extrinsic_cam2world": extrinsic.tolist(),  # 4x4
+                "height": h,
+                "width": w,
+            }
+        return out
+    except Exception as exc:  # calibration is best-effort; never fail an observation
+        return {"error": f"{type(exc).__name__}: {exc}"}
 
 
 def _validate_observation(observation: dict[str, Any]) -> None:

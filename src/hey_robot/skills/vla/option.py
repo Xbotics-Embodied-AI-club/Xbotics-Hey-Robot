@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
+import numpy as np
+
 from hey_robot.skills.context import SkillContext
 from hey_robot.skills.models import SkillResult
 from hey_robot.skills.vla.termination import (
@@ -78,6 +80,50 @@ class VLAOptionResult:
 class VLAOptionRunner:
     def __init__(self, termination: TerminationPolicy | None = None) -> None:
         self._termination = termination or CompositeTermination()
+        # Settle (idle) detection stops a policy call when the
+        # eef+gripper stop changing for `settle_patience` chunks — the policy is
+        # finished and burning more budget only wastes time. Track per-run
+        # proprioception deltas here (fresh per run() call).
+        self._settle_eps = 0.012
+        self._settle_grip_eps = 0.003
+        # A large default patience (~never settles) lets the
+        # VLA keeps executing until environment_done or the max_steps budget;
+        # an aggressive settle window cut the VLA off mid-grasp (observed:
+        # "robot holds broccoli but placement not finished"). Keep the
+        # detection available but effectively disabled by default.
+        self._settle_patience = 999  # consecutive near-zero-delta steps
+        self._settle_streak = 0
+        self._prev_eef: np.ndarray | None = None
+        self._prev_base: np.ndarray | None = None
+        self._prev_grip: float | None = None
+
+    def _settle_signal(self, observation: Any) -> bool:
+        """Return True when the robot has idled (eef+base+gripper frozen)."""
+        p = np.asarray(
+            getattr(observation, "proprioception", None) or [], dtype=np.float64
+        )
+        if p.shape != (16,):
+            return False
+        eef = p[0:3]  # eef position relative to base
+        base = p[7:10]  # base world position
+        grip = float(p[14])
+        if (
+            self._prev_eef is not None
+            and self._prev_base is not None
+            and self._prev_grip is not None
+        ):
+            moved = float(np.linalg.norm(eef - self._prev_eef)) + float(
+                np.linalg.norm(base - self._prev_base)
+            )
+            grip_delta = abs(grip - self._prev_grip)
+            if moved < self._settle_eps and grip_delta < self._settle_grip_eps:
+                self._settle_streak += 1
+            else:
+                self._settle_streak = 0
+        self._prev_eef = eef
+        self._prev_base = base
+        self._prev_grip = grip
+        return self._settle_streak >= self._settle_patience
 
     async def run(
         self, context: SkillContext, request: VLAOptionRequest
@@ -114,17 +160,26 @@ class VLAOptionRunner:
             )
 
         before_frame_id = observation.frame_id
+        before_diagnostics = _execution_diagnostics(observation)
         after_frame_id: int | None = None
         executed_actions: list[dict[str, Any]] = []
         model_outputs: list[dict[str, Any]] = []
+        # RLDX conditions its next action chunk on frames from every simulator
+        # action, not solely the last frame of the preceding chunk.
+        pending_video_history: list[dict[str, Any]] = []
 
-        for step_index in range(request.max_steps):
+        steps_used = 0
+        while steps_used < request.max_steps:
+            # A model response may contain a full RLDX action chunk.  The
+            # budget remains simulator actions, not model invocations.
+            step_index = steps_used
             context.raise_if_cancelled()
             result = await context.models.infer(
                 "manipulate",
                 {
                     "task_prompt": request.task_prompt,
                     "observation": _observation_payload(observation),
+                    "observation_history": list(pending_video_history),
                     "policy_session_id": context.run_id,
                     "step_index": step_index,
                     "max_steps": request.max_steps,
@@ -150,7 +205,10 @@ class VLAOptionRunner:
 
             model_data = dict(result.data)
             model_outputs.append(model_data)
-            actions = _actions_from_model_data(model_data)
+            pending_video_history.clear()
+            actions = _actions_from_model_data(model_data)[
+                : request.max_steps - steps_used
+            ]
             decision = self._termination.evaluate(
                 VLAOptionState(
                     "after_model",
@@ -170,10 +228,13 @@ class VLAOptionRunner:
                     after_frame_id,
                     model_outputs,
                     executed_actions,
+                    before_diagnostics=before_diagnostics,
+                    after_diagnostics=_execution_diagnostics(observation),
                 )
 
             environment_data: dict[str, Any] = {}
-            for action in actions:
+            action_batches = _coalesce_native_action_chunk(actions)
+            for action, applied_count in action_batches:
                 context.raise_if_cancelled()
                 action_result = await context.robot.execute(
                     context.robot_id,
@@ -208,10 +269,19 @@ class VLAOptionRunner:
                         subgoal_succeeded=False,
                     )
                 after_frame_id = action_result.frame_id
+                steps_used += applied_count
+                if action_result.observation is not None:
+                    # Subsequent actions in this chunk must use the frame
+                    # produced by the preceding action, not the stale chunk
+                    # input frame.
+                    observation = action_result.observation
+                    pending_video_history.append(
+                        _observation_payload(action_result.observation)
+                    )
                 decision = self._termination.evaluate(
                     VLAOptionState(
                         "after_actions",
-                        step_index,
+                        steps_used - 1,
                         request.max_steps,
                         model_data,
                         environment_data,
@@ -227,16 +297,20 @@ class VLAOptionRunner:
                         after_frame_id,
                         model_outputs,
                         executed_actions,
+                        before_diagnostics=before_diagnostics,
+                        after_diagnostics=_execution_diagnostics(
+                            action_result.observation
+                        ),
                     )
 
             await context.progress(
-                (step_index + 1) / request.max_steps,
-                f"VLA 已完成 bounded step {step_index + 1}/{request.max_steps}",
+                steps_used / request.max_steps,
+                f"VLA 已完成 bounded step {steps_used}/{request.max_steps}",
             )
             decision = self._termination.evaluate(
                 VLAOptionState(
                     "after_actions",
-                    step_index,
+                    steps_used - 1,
                     request.max_steps,
                     model_data,
                     environment_data,
@@ -252,11 +326,13 @@ class VLAOptionRunner:
                     after_frame_id,
                     model_outputs,
                     executed_actions,
+                    before_diagnostics=before_diagnostics,
+                    after_diagnostics=_execution_diagnostics(observation),
                 )
             decision = self._termination.evaluate(
                 VLAOptionState(
                     "budget",
-                    step_index,
+                    steps_used - 1,
                     request.max_steps,
                     model_data,
                     environment_data,
@@ -275,24 +351,49 @@ class VLAOptionRunner:
                     after_frame_id,
                     model_outputs,
                     executed_actions,
+                    before_diagnostics=before_diagnostics,
+                    after_diagnostics=_execution_diagnostics(observation),
                 )
 
-            try:
-                observation = await context.observe(
-                    after_frame_id=observation.frame_id,
-                    timeout_sec=request.fresh_observation_timeout_sec,
-                )
-            except TimeoutError:
+            # RoboCasa Step returns the resulting observation with each action,
+            # so the next model call can begin immediately.  Keep the generic
+            # freshness fallback for robots that do not return one.
+            if after_frame_id is None or observation.frame_id != after_frame_id:
+                try:
+                    observation = await context.observe(
+                        after_frame_id=observation.frame_id,
+                        timeout_sec=request.fresh_observation_timeout_sec,
+                    )
+                except TimeoutError:
+                    return self._terminal(
+                        success=False,
+                        summary="VLA action 后未获得 fresh observation。",
+                        request=request,
+                        termination_reason="observation_stale",
+                        before_frame_id=before_frame_id,
+                        after_frame_id=after_frame_id,
+                        model_outputs=model_outputs,
+                        executed_actions=executed_actions,
+                        failure_mode="observation_stale",
+                    )
+
+            # If the robot has idled for
+            # `settle_patience` consecutive steps, the VLA is done moving —
+            # return control to the agent instead of burning the budget.
+            if self._settle_signal(observation):
                 return self._terminal(
-                    success=False,
-                    summary="VLA action 后未获得 fresh observation。",
+                    success=True,
+                    summary=(
+                        f"VLA execution idled after {step_index + 1} steps "
+                        "(eef/base/gripper frozen); subgoal completion is unverified."
+                    ),
                     request=request,
-                    termination_reason="observation_stale",
+                    termination_reason="settled",
                     before_frame_id=before_frame_id,
                     after_frame_id=after_frame_id,
                     model_outputs=model_outputs,
                     executed_actions=executed_actions,
-                    failure_mode="observation_stale",
+                    subgoal_succeeded=None,
                 )
 
         raise RuntimeError("VLA option loop exhausted without a termination decision")
@@ -306,8 +407,11 @@ class VLAOptionRunner:
         after_frame_id: int | None,
         model_outputs: list[dict[str, Any]],
         executed_actions: list[dict[str, Any]],
+        *,
+        before_diagnostics: dict[str, Any] | None = None,
+        after_diagnostics: dict[str, Any] | None = None,
     ) -> VLAOptionResult:
-        return self._terminal(
+        result = self._terminal(
             success=True,
             summary=summary,
             request=request,
@@ -318,6 +422,7 @@ class VLAOptionRunner:
             executed_actions=executed_actions,
             subgoal_succeeded=decision.subgoal_succeeded,
         )
+        return _with_diagnostics(result, before_diagnostics, after_diagnostics)
 
     @staticmethod
     def _terminal(
@@ -386,6 +491,39 @@ def _normalize_action(candidate: Any) -> dict[str, Any] | None:
     return None
 
 
+def _coalesce_native_action_chunk(
+    actions: list[dict[str, Any]],
+) -> list[tuple[dict[str, Any], int]]:
+    """Send one RLDX native action chunk through the existing Step RPC.
+
+    Other robot primitives retain their one-action semantics.  The remote
+    RoboCasa driver recognizes nested ``values`` and advances the block under
+    a single runtime lock/RPC.
+    """
+    if len(actions) <= 1 or any(
+        action.get("name") != "embodiment_native_action" for action in actions
+    ):
+        return [(action, 1) for action in actions]
+    arguments = [dict(action.get("arguments") or {}) for action in actions]
+    values = [item.get("values") for item in arguments]
+    raw_values = [item.get("raw_values") or item.get("values") for item in arguments]
+    if not all(isinstance(item, list) and len(item) == 12 for item in values):
+        return [(action, 1) for action in actions]
+    return [
+        (
+            {
+                "name": "embodiment_native_action",
+                "arguments": {
+                    **arguments[0],
+                    "values": values,
+                    "raw_values": raw_values,
+                },
+            },
+            len(actions),
+        )
+    ]
+
+
 def _observation_payload(observation: Any) -> dict[str, Any]:
     return {
         "frame_id": observation.frame_id,
@@ -394,3 +532,29 @@ def _observation_payload(observation: Any) -> dict[str, Any]:
         "proprioception": list(observation.proprioception),
         "raw": dict(observation.raw),
     }
+
+
+def _execution_diagnostics(observation: Any | None) -> dict[str, Any]:
+    """Extract backend-provided physical diagnostics without guessing values."""
+    if observation is None:
+        return {}
+    raw = getattr(observation, "raw", None)
+    if not isinstance(raw, dict):
+        return {}
+    diagnostics = raw.get("execution_diagnostics")
+    return dict(diagnostics) if isinstance(diagnostics, dict) else {}
+
+
+def _with_diagnostics(
+    result: VLAOptionResult,
+    before: dict[str, Any] | None,
+    after: dict[str, Any] | None,
+) -> VLAOptionResult:
+    """Attach attempt evidence while preserving the immutable result contract."""
+    if not before and not after:
+        return result
+    outputs = list(result.model_outputs)
+    outputs.append(
+        {"harness_diagnostics": {"before": before or {}, "after": after or {}}}
+    )
+    return VLAOptionResult(**{**result.__dict__, "model_outputs": tuple(outputs)})

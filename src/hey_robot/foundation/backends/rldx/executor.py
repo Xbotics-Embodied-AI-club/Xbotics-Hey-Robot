@@ -81,6 +81,11 @@ class RLDXPolicyExecutor:
             raise ValueError(
                 "RLDX prompt_mode must be environment_root or agent_subgoal"
             )
+        # base_clip > 0 clamps the VLA's base_motion (indices 7:11 of the 12D
+        # action) to [-clip, clip], forcing the arm to do precise contact work
+        # 0 = full base motion; a positive value limits base motion during
+        # close-range manipulation.
+        self.base_clip = float(self.settings.get("base_clip") or 0.0)
         self.host = str(self.settings.get("server_host") or "127.0.0.1")
         self.port = int(self.settings.get("server_port") or 5555)
         self.video_delta_indices = tuple(
@@ -143,6 +148,18 @@ class RLDXPolicyExecutor:
             },
         }
 
+    def create_chunk_policy(self, observation_encoder):
+        """Create the foundation-owned local policy after starting RLDX once."""
+        self.load()
+        assert self._client is not None
+        from hey_robot.foundation.backends.rldx.option_policy import RLDXChunkPolicy
+
+        return RLDXChunkPolicy(
+            self._client,
+            settings=self.settings,
+            observation_encoder=observation_encoder,
+        )
+
     def load(self) -> None:
         with self._lock:
             if self._loaded:
@@ -151,6 +168,16 @@ class RLDXPolicyExecutor:
                 self._client = self._client_factory(
                     self.host, self.port, self._timeout_ms
                 )
+            # A policy process may be deployed independently from the harness.
+            # Reuse a healthy endpoint instead of spawning a second process on
+            # the same address (and, typically, a second full model on one GPU).
+            try:
+                if self._client.ping():
+                    self._loaded = True
+                    self._last_error = None
+                    return
+            except Exception as exc:
+                self._last_error = f"{type(exc).__name__}: {exc}"
             self._start_server()
             timeout = float(self.settings.get("server_startup_timeout_sec") or 1200)
             deadline = time.monotonic() + timeout
@@ -197,11 +224,15 @@ class RLDXPolicyExecutor:
                 if self._cancel_event.is_set():
                     self._cancel_event.clear()
                     return _cancelled_result()
-                if request[3] != self._last_video_frame_id:
-                    self._video_history.append(
-                        _rldx_video_frame(request[2], settings=self.settings)
-                    )
-                    self._last_video_frame_id = request[3]
+                # The option runner executes a whole policy chunk before the
+                # next inference.  It returns the intermediate observations so
+                # the server can retain the same per-simulator-step video
+                # cadence as the policy's per-simulator-step rollout.
+                for history_frame, history_observation in _history_observations(
+                    payload
+                ):
+                    self._append_video_frame(history_frame, history_observation)
+                self._append_video_frame(request[3], request[2])
                 inference_performed = False
                 if not self._action_queue:
                     observation = _rldx_observation(
@@ -226,31 +257,47 @@ class RLDXPolicyExecutor:
                             action_keys=self._ACTION_KEYS,
                             dimensions=self.action_dimensions,
                             execution_horizon=self.execution_horizon,
+                            base_clip=self.base_clip,
                         )
                     )
                     inference_performed = True
-                raw_action = self._action_queue.popleft()
-            action = _clip_action(raw_action, self.settings)
-            clipped = not np.array_equal(action, raw_action)
+                # RLDX predicts an action chunk.  Return the complete chunk to
+                # the option runner so it can execute its actions consecutively,
+                # preserving ``predict -> 8 env.step`` cadence. Returning
+                # one queued action here made Hey perform a model/RPC round-trip
+                # for every simulator step.
+                raw_actions = [
+                    self._action_queue.popleft() for _ in range(len(self._action_queue))
+                ]
+            actions = [
+                _clip_action(raw_action, self.settings) for raw_action in raw_actions
+            ]
+            clipped = any(
+                not np.array_equal(action, raw_action)
+                for action, raw_action in zip(actions, raw_actions, strict=True)
+            )
             if self._cancel_event.is_set():
                 self._cancel_event.clear()
                 return _cancelled_result()
-            primitive = {
-                "name": "embodiment_native_action",
-                "arguments": {
-                    "values": [float(value) for value in action.tolist()],
-                    "raw_values": [float(value) for value in raw_action.tolist()],
-                    "action_space": self.action_space,
-                    "embodiment": self.embodiment,
-                },
-            }
+            primitives = [
+                {
+                    "name": "embodiment_native_action",
+                    "arguments": {
+                        "values": [float(value) for value in action.tolist()],
+                        "raw_values": [float(value) for value in raw_action.tolist()],
+                        "action_space": self.action_space,
+                        "embodiment": self.embodiment,
+                    },
+                }
+                for action, raw_action in zip(actions, raw_actions, strict=True)
+            ]
             policy_result = PolicyStepResult(
                 kind="action_chunk",
                 action_space=self.action_space,
                 embodiment=self.embodiment,
-                horizon=1,
+                horizon=len(primitives),
                 dt=1.0 / max(float(self.settings.get("control_hz") or 20.0), 0.1),
-                actions=[primitive],
+                actions=primitives,
                 done=False,
                 raw={
                     "policy_type": "rldx-1",
@@ -358,6 +405,11 @@ class RLDXPolicyExecutor:
         ]
         environment = dict(os.environ)
         environment.setdefault("PYTHONUNBUFFERED", "1")
+        # Evaluation inputs must already be provisioned.  RLDX constructs its
+        # VLM through several HuggingFace entry points, not only
+        # AutoProcessor, so enforce offline resolution for the whole worker.
+        environment["HF_HUB_OFFLINE"] = "1"
+        environment["TRANSFORMERS_OFFLINE"] = "1"
         cache_dir = str(self.settings.get("hf_home") or "").strip()
         if cache_dir:
             environment["HF_HOME"] = cache_dir
@@ -401,6 +453,11 @@ class RLDXPolicyExecutor:
             else agent_subgoal
         )
         if not task:
+            # Safety net: if the agent produced no usable task text, fall back
+            # to the environment's official task language (policy_task), which
+            # the VLA was trained on.
+            task = environment_root
+        if not task:
             raise PolicyExecutionError("invalid_task", "policy task is required")
         return (
             str(
@@ -412,6 +469,33 @@ class RLDXPolicyExecutor:
             observation,
             int(observation.get("frame_id") or 0),
         )
+
+    def _append_video_frame(self, frame_id: int, observation: dict[str, Any]) -> None:
+        if frame_id == self._last_video_frame_id:
+            return
+        self._video_history.append(
+            _rldx_video_frame(observation, settings=self.settings)
+        )
+        self._last_video_frame_id = frame_id
+
+
+def _history_observations(payload: dict[str, Any]) -> list[tuple[int, dict[str, Any]]]:
+    """Read optional per-action observations supplied by the VLA chunk runner."""
+    arguments = dict(payload.get("arguments", {}) or {})
+    values = arguments.get("observation_history")
+    if not isinstance(values, list):
+        return []
+    history: list[tuple[int, dict[str, Any]]] = []
+    for value in values:
+        if not isinstance(value, dict):
+            continue
+        try:
+            frame_id = int(value.get("frame_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if frame_id >= 0:
+            history.append((frame_id, value))
+    return history
 
 
 class _RLDXWireClient:
@@ -590,6 +674,7 @@ def _action_chunk(
     action_keys: tuple[str, ...],
     dimensions: int,
     execution_horizon: int,
+    base_clip: float = 0.0,
 ) -> list[np.ndarray]:
     action = response[0] if isinstance(response, list | tuple) else response
     if not isinstance(action, dict):
@@ -631,6 +716,9 @@ def _action_chunk(
         raise PolicyExecutionError(
             "action_schema_mismatch", "RLDX action contains non-finite values"
         )
+    if base_clip > 0.0 and merged.shape[1] >= 11:
+        # Clamp base_motion (4 dims at [7:11]) so the arm does the precise work.
+        merged[:, 7:11] = np.clip(merged[:, 7:11], -base_clip, base_clip)
     return [row.astype(np.float32, copy=False) for row in merged[:execution_horizon]]
 
 

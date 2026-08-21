@@ -57,6 +57,7 @@ class Agent:
         context: AgentContextBuilder,
         tasks: AgentTaskStore,
         conversations: ConversationStore,
+        hard_max_wall_time_sec: float = 3600.0,
     ) -> None:
         self.session_key = session_key
         self._runner = runner
@@ -65,6 +66,7 @@ class Agent:
         self._context = context
         self._tasks = tasks
         self._conversations = conversations
+        self._hard_max_wall_time_sec = hard_max_wall_time_sec
         self._state_lock = asyncio.Lock()
         self._run_task: asyncio.Task[AgentRunResult] | None = None
 
@@ -158,7 +160,20 @@ class Agent:
             with suppress(asyncio.CancelledError):
                 await previous
         active_task = self._tasks.active_task(command.session_key)
-        if active_task is not None:
+        if active_task is None:
+            # Task identity is a runtime concern, not something contingent on
+            # the first model response.  Creating it before inference makes a
+            # slow or temporarily unavailable foundation model observable and
+            # controllable by every channel, evaluator, and real-robot UI.
+            self._tasks.create_task(
+                session_key=command.session_key,
+                envelope=command.envelope,
+                interaction_id=command.interaction_id,
+                objective=command.text,
+                ui_summary=command.text,
+                deadline_at=time.time() + self._hard_max_wall_time_sec,
+            )
+        else:
             self._tasks.update_route(
                 active_task.task_id,
                 envelope=command.envelope,
@@ -239,6 +254,19 @@ class Agent:
                 return AgentRunResult("blocked", text)
             deadline = _next_decision_deadline(active_task)
 
+            # Bounded context policy: keep the system+user prompts and the
+            # most recent turns, drop old tool history so the reasoning model
+            # does not stall on a bloated context over long composite tasks.
+            # gpt-5.6-terra slows to 10+ min per decision once the transcript
+            # grows past ~6 turns, so prune aggressively to the last 3 turns.
+            if len(messages) > 8:
+                messages = messages[:2] + messages[-6:]
+            # Observation images attached to tool results are the planner's
+            # eyes; keep only the most recent two turns' images so the context
+            # does not balloon to dozens of PNGs (which stalls the model).
+            if _drop_stale_images(messages):
+                messages = list(messages)
+
             decision = await self._runner.run(
                 AgentTurnRequest(
                     tuple(messages), self._tools.names, deadline, interaction_id
@@ -249,8 +277,10 @@ class Agent:
                 detail = (
                     decision.failure.message if decision.failure else "模型决策失败"
                 )
+                _block_active_task(self, active_task, f"模型决策失败：{detail}")
                 return AgentRunResult("failed", f"这次请求没有完成：{detail}")
             if decision.status == "returned":
+                _block_active_task(self, active_task, "模型未使用工具而直接返回文本")
                 return AgentRunResult(
                     "failed",
                     (
@@ -260,6 +290,7 @@ class Agent:
                 )
             proposal = decision.proposal
             if proposal is None or not decision.tool_calls:
+                _block_active_task(self, active_task, "工具没有产生有效调用")
                 return AgentRunResult("failed", "工具没有产生有效调用。")
             call = decision.tool_calls[0]
             execution = await self._executor.execute(
@@ -299,7 +330,7 @@ class Agent:
                 task = execution.task
                 result_status: Literal[
                     "completed", "blocked", "cancelled", "failed"
-                ] = "completed"
+                ] = "failed" if execution.outcome.status == "failed" else "completed"
                 if task is not None:
                     current = self._tasks.task(task.task_id)
                     if current is not None:
@@ -309,8 +340,6 @@ class Agent:
                             result_status = "cancelled"
                         elif current.status == "failed":
                             result_status = "failed"
-                elif execution.outcome.status == "failed":
-                    result_status = "failed"
                 return AgentRunResult(
                     result_status,
                     execution.final_text
@@ -325,3 +354,33 @@ def _next_decision_deadline(task: AgentTask | None) -> float:
     if task is not None and task.deadline_at is not None:
         timeout_sec = min(timeout_sec, max(0.001, task.deadline_at - time.time()))
     return time.monotonic() + timeout_sec
+
+
+def _block_active_task(
+    agent: Agent, active_task: AgentTask | None, reason: str
+) -> None:
+    """Terminate the active task when the agent cannot make progress, so the
+    evaluator's status-poll loop exits instead of waiting out the wall clock."""
+    if active_task is not None and active_task.status == "active":
+        agent._tasks.control_task(active_task.task_id, "blocked", reason)
+
+
+def _drop_stale_images(messages: list[ModelMessage]) -> bool:
+    """Strip images from all but the most recent two tool-result turns.
+
+    Each perception tool result can carry three 256x256 observation images;
+    over a long composite task the accumulated PNGs balloon the model context
+    and stall the reasoning model (observed: 20+ min per decision). Keeping
+    only the latest two turns of images preserves the planner's eyes while
+    bounding the payload. Returns True when any message was mutated.
+    """
+    from dataclasses import replace
+
+    keep_from = max(0, len(messages) - 4)  # last ~2 turns (assistant+tool pairs)
+    mutated = False
+    for index, message in enumerate(messages):
+        if index >= keep_from or not message.images:
+            continue
+        messages[index] = replace(message, images=[])
+        mutated = True
+    return mutated

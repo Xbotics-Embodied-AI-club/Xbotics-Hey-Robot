@@ -34,6 +34,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def main() -> int:
     errors: list[str] = []
     errors.extend(_check_ruff_per_file_ignores())
+    errors.extend(_check_ruff_explicit_excludes())
     errors.extend(_check_poe_task_refs())
     if errors:
         for e in errors:
@@ -55,6 +56,25 @@ def _check_ruff_per_file_ignores() -> list[str]:
                 f"ruff.toml per-file-ignore glob '{pattern}' "
                 f"matches no files (rules: {rules})"
             )
+    return errors
+
+
+def _check_ruff_explicit_excludes() -> list[str]:
+    """Reject explicit repository paths in Ruff's exclude list that no longer exist."""
+    ruff_toml = ROOT / "ruff.toml"
+    if not ruff_toml.exists():
+        return []
+
+    data = tomllib.loads(ruff_toml.read_text(encoding="utf-8"))
+    excludes: list[str] = data.get("exclude", [])
+    errors: list[str] = []
+    for path_str in excludes:
+        if not path_str.startswith(("src/", "tests/", "scripts/", "docs/")):
+            continue
+        if any(char in path_str for char in "*?["):
+            continue
+        if not (ROOT / path_str).exists():
+            errors.append(f"ruff.toml exclude path '{path_str}' does not exist")
     return errors
 
 

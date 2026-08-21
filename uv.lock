@@ -851,7 +851,15 @@ dependencies = [
 [package.optional-dependencies]
 agent = [
     { name = "httpx", extra = ["socks"] },
+    { name = "imageio" },
+    { name = "imageio-ffmpeg" },
     { name = "openai" },
+]
+foundation-backends = [
+    { name = "grpcio" },
+    { name = "msgpack" },
+    { name = "protobuf" },
+    { name = "pyzmq" },
 ]
 gateway = [
     { name = "fastapi" },
@@ -867,12 +875,6 @@ human-follow = [
     { name = "torch", version = "2.7.1", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine != 'x86_64' and extra == 'group-9-hey-robot-lerobot-policy') or (platform_machine != 'x86_64' and extra == 'group-9-hey-robot-robocasa365') or (platform_machine != 'x86_64' and extra != 'group-9-hey-robot-vln') or (sys_platform == 'win32' and extra == 'group-9-hey-robot-lerobot-policy') or (sys_platform == 'win32' and extra == 'group-9-hey-robot-robocasa365') or (sys_platform == 'win32' and extra != 'group-9-hey-robot-vln') or (extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-robocasa365') or (extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-vln') or (extra == 'group-9-hey-robot-robocasa365' and extra == 'group-9-hey-robot-vln')" },
     { name = "torch", version = "2.7.1+cu126", source = { registry = "https://download.pytorch.org/whl/cu126" }, marker = "(platform_machine == 'x86_64' and sys_platform != 'win32' and extra == 'group-9-hey-robot-lerobot-policy') or (platform_machine == 'x86_64' and sys_platform != 'win32' and extra == 'group-9-hey-robot-robocasa365') or (platform_machine == 'x86_64' and sys_platform != 'win32' and extra != 'group-9-hey-robot-vln') or (platform_machine != 'x86_64' and extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-robocasa365') or (platform_machine != 'x86_64' and extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-vln') or (platform_machine != 'x86_64' and extra == 'group-9-hey-robot-robocasa365' and extra == 'group-9-hey-robot-vln') or (sys_platform == 'win32' and extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-robocasa365') or (sys_platform == 'win32' and extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-vln') or (sys_platform == 'win32' and extra == 'group-9-hey-robot-robocasa365' and extra == 'group-9-hey-robot-vln')" },
     { name = "ultralytics" },
-]
-model-service = [
-    { name = "grpcio" },
-    { name = "msgpack" },
-    { name = "protobuf" },
-    { name = "pyzmq" },
 ]
 robot = [
     { name = "feetech-servo-sdk" },
@@ -935,6 +937,7 @@ robocasa365 = [
     { name = "jsonlines" },
     { name = "lerobot", version = "0.6.1", source = { git = "https://github.com/huggingface/lerobot.git?rev=cb73cf3ffa1cec60640a06b924c2174548ae2b1b#cb73cf3ffa1cec60640a06b924c2174548ae2b1b" } },
     { name = "lxml" },
+    { name = "msgpack" },
     { name = "mujoco", version = "3.3.1", source = { registry = "https://pypi.org/simple" } },
     { name = "numba" },
     { name = "numpy", version = "2.2.5", source = { registry = "https://pypi.org/simple" } },
@@ -948,6 +951,7 @@ robocasa365 = [
     { name = "pynput" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
+    { name = "pyzmq" },
     { name = "qpsolvers", extra = ["quadprog"], marker = "extra == 'group-9-hey-robot-robocasa365' or (extra == 'group-9-hey-robot-lerobot-policy' and extra == 'group-9-hey-robot-vln') or (extra != 'group-9-hey-robot-lerobot-policy' and extra != 'group-9-hey-robot-vln')" },
     { name = "requests" },
     { name = "robocasa" },
@@ -1011,27 +1015,29 @@ vln = [
 requires-dist = [
     { name = "fastapi", marker = "extra == 'gateway'", specifier = ">=0.115.0" },
     { name = "feetech-servo-sdk", marker = "extra == 'robot'", specifier = "==1.0.0" },
-    { name = "grpcio", marker = "extra == 'model-service'", specifier = "==1.73.1" },
+    { name = "grpcio", marker = "extra == 'foundation-backends'", specifier = "==1.73.1" },
     { name = "grpcio", marker = "extra == 'robot'", specifier = "==1.73.1" },
     { name = "httpx", extras = ["socks"], marker = "extra == 'agent'", specifier = ">=0.28.1" },
     { name = "httpx", extras = ["socks"], marker = "extra == 'human-follow'", specifier = ">=0.28.1" },
     { name = "httpx", extras = ["socks"], marker = "extra == 'voice'", specifier = ">=0.28.1" },
+    { name = "imageio", marker = "extra == 'agent'", specifier = ">=2.37.2" },
     { name = "imageio", marker = "extra == 'robot'", specifier = ">=2.37.2" },
+    { name = "imageio-ffmpeg", marker = "extra == 'agent'", specifier = ">=0.6.0" },
     { name = "imageio-ffmpeg", marker = "extra == 'robot'", specifier = ">=0.6.0" },
     { name = "jinja2", specifier = ">=3.1.0" },
     { name = "lark-oapi", marker = "extra == 'gateway'", specifier = ">=1.5.0,<2.0.0" },
-    { name = "msgpack", marker = "extra == 'model-service'", specifier = ">=1.1.0,<2.0.0" },
+    { name = "msgpack", marker = "extra == 'foundation-backends'", specifier = ">=1.1.0,<2.0.0" },
     { name = "nats-py", specifier = ">=2.8.0" },
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "openai", marker = "extra == 'agent'", specifier = ">=1.90.0" },
     { name = "opencv-python", marker = "extra == 'robot'", specifier = "==4.10.0.84" },
     { name = "pillow", specifier = ">=10.0.0" },
-    { name = "protobuf", marker = "extra == 'model-service'", specifier = ">=6.31.0,<7" },
+    { name = "protobuf", marker = "extra == 'foundation-backends'", specifier = ">=6.31.0,<7" },
     { name = "protobuf", marker = "extra == 'robot'", specifier = ">=6.31.0,<7" },
     { name = "pyserial", marker = "extra == 'robot'", specifier = ">=3.5" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "pyzmq", marker = "extra == 'model-service'", specifier = ">=27.0.0,<28.0.0" },
+    { name = "pyzmq", marker = "extra == 'foundation-backends'", specifier = ">=27.0.0,<28.0.0" },
     { name = "sherpa-onnx", marker = "extra == 'voice'", specifier = ">=1.12.0" },
     { name = "sherpa-onnx-core", marker = "extra == 'voice'", specifier = ">=1.12.0" },
     { name = "sounddevice", marker = "extra == 'voice'", specifier = ">=0.4.6" },
@@ -1043,7 +1049,7 @@ requires-dist = [
     { name = "websockets", marker = "extra == 'gateway'", specifier = ">=12.0" },
     { name = "websockets", marker = "extra == 'voice'", specifier = ">=12.0" },
 ]
-provides-extras = ["gateway", "agent", "robot", "voice", "human-follow", "model-service"]
+provides-extras = ["gateway", "agent", "robot", "voice", "human-follow", "foundation-backends"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1088,6 +1094,7 @@ robocasa365 = [
     { name = "jsonlines", specifier = ">=4.0.0,<5.0.0" },
     { name = "lerobot", git = "https://github.com/huggingface/lerobot.git?rev=cb73cf3ffa1cec60640a06b924c2174548ae2b1b" },
     { name = "lxml", specifier = "==6.0.4" },
+    { name = "msgpack", specifier = ">=1.1.0,<2.0.0" },
     { name = "mujoco", specifier = "==3.3.1" },
     { name = "numba", specifier = "==0.61.2" },
     { name = "numpy", specifier = "==2.2.5" },
@@ -1101,6 +1108,7 @@ robocasa365 = [
     { name = "pynput", specifier = "==1.8.1" },
     { name = "python-dotenv", specifier = ">=1.2.2,<2" },
     { name = "pyyaml", specifier = "==6.0.3" },
+    { name = "pyzmq", specifier = ">=27.0.0,<28.0.0" },
     { name = "qpsolvers", extras = ["quadprog"], specifier = ">=4.3.1" },
     { name = "requests", specifier = ">=2.32.0,<3.0.0" },
     { name = "robocasa", git = "https://github.com/robocasa/robocasa.git?rev=56e355ccc64389dfc1b8a61a33b9127b975ba681" },

@@ -111,6 +111,33 @@ async def test_robot_runtime_routes_motion_through_control_plane(tmp_path) -> No
     assert runtime.control_plane.action_buffer[-1].action_type == "skill"
 
 
+async def test_runtime_marks_model_context_only_after_physical_intervention(
+    tmp_path,
+) -> None:
+    driver = _CountingCameraDriver("mock0")
+    runtime = RobotRuntime(driver, LocalMediaStore(tmp_path / "media"))
+    await runtime.start()
+
+    move = RobotSkillAction("move_base", {"distance_cm": 10}).to_robot_action(
+        _intent("move1", "move_base", "move")
+    )
+    rollout = RobotSkillAction("policy_rollout", {}).to_robot_action(
+        _intent("policy1", "policy_rollout", "rollout")
+    )
+    rollout.metadata["model_session_action"] = True
+
+    await runtime.apply_action(move)
+    await runtime.apply_action(rollout)
+    await runtime.apply_action(rollout)
+
+    first_rollout = driver.applied_actions[-2]
+    second_rollout = driver.applied_actions[-1]
+    assert first_rollout.metadata["model_session_epoch"] == 1
+    assert first_rollout.metadata["reset_model_session"] is True
+    assert second_rollout.metadata["model_session_epoch"] == 1
+    assert second_rollout.metadata["reset_model_session"] is False
+
+
 async def test_robot_runtime_observe_always_refreshes_from_driver(
     tmp_path,
 ) -> None:
@@ -321,6 +348,7 @@ class _CountingCameraDriver:
         self.robot_id = robot_id
         self.observe_count = 0
         self.applied_skills: list[tuple[str, dict]] = []
+        self.applied_actions = []
 
     async def start(self) -> None:
         return None
@@ -358,6 +386,7 @@ class _CountingCameraDriver:
         )
 
     async def apply_action(self, _action) -> RobotStatus:
+        self.applied_actions.append(_action)
         skill = RobotSkillAction.from_robot_action(_action)
         self.applied_skills.append((skill.name, dict(skill.arguments)))
         return await self.status()

@@ -92,6 +92,9 @@ class AgentRunner:
                 "MODEL_REQUEST", "MODEL_TIMEOUT", "model request timed out"
             )
         except Exception as exc:
+            import traceback
+
+            traceback.print_exc()
             return self._failure("MODEL_REQUEST", "MODEL_ERROR", str(exc))
 
         if response.finish_reason == "error":
@@ -116,6 +119,9 @@ class AgentRunner:
             try:
                 proposal = self._tools.prepare(call.name, dict(call.arguments))
             except (KeyError, TypeError, ValueError) as exc:
+                import traceback
+
+                traceback.print_exc()
                 return self._failure(
                     "TOOL_VALIDATION", "INVALID_TOOL_ARGUMENTS", str(exc), (record,)
                 )

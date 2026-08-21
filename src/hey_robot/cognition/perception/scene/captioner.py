@@ -135,9 +135,22 @@ class ModelSceneCaptioner:
                 risks=[*fallback.risks, response.content or "scene captioning failed"],
                 next_observation_hint=fallback.next_observation_hint,
                 confidence=fallback.confidence,
-                metadata={"model": "client", "error": response.content},
+                metadata={
+                    "model": "client",
+                    "diagnostic": "request_error",
+                    "error": response.content,
+                },
             )
-        return _parse_scene_understanding(response.content or "")
+        parsed = _parse_scene_understanding(response.content or "")
+        if not parsed.summary or parsed.confidence <= 0.0:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "scene caption unparseable: model=%s raw=%r",
+                getattr(self.model, "model", "?"),
+                (response.content or "")[:400],
+            )
+        return parsed
 
     def _images(self, observation: RobotObservation) -> list[ModelImage]:
         if self.image_resolver is None:
@@ -209,5 +222,7 @@ def _parse_scene_understanding(text: str) -> SceneUnderstanding:
     return SceneUnderstanding(
         summary=raw or "scene caption unavailable",
         confidence=0.0,
-        metadata={"raw": raw},
+        # Keep the reason structured and bounded.  Raw model output is useful
+        # for local debugging but must not be propagated into robot events.
+        metadata={"diagnostic": "unparseable" if raw else "empty_response"},
     )

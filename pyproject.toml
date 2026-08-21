@@ -14,8 +14,8 @@ license = { text = "MIT" }
 #   uv sync --extra robot    → robot driver + native SkillWorker
 #   uv sync --extra human-follow → optional local YOLO/Torch perception
 #   uv sync --extra voice    → optional local voice channel
-#   uv sync --extra model-service --group lerobot-policy → LeRobot policy service
-#   uv sync --extra model-service --group vln → VLN model service
+#   uv sync --extra foundation-backends --group lerobot-policy → LeRobot policy runtime
+#   uv sync --extra foundation-backends --group vln → VLN model runtime
 #   uv sync --only-group robocasa365 → isolated RoboCasa365 backend
 #   uv sync --group dev      → lint / type-check / test tooling
 #
@@ -40,6 +40,8 @@ gateway = [
 ]
 agent = [
     "httpx[socks]>=0.28.1",
+    "imageio>=2.37.2",
+    "imageio-ffmpeg>=0.6.0",
     "openai>=1.90.0",
 ]
 robot = [
@@ -63,7 +65,7 @@ human-follow = [
     "torch>=2.0.0",
     "ultralytics>=8.4.67",
 ]
-model-service = [
+foundation-backends = [
     "grpcio==1.73.1",
     "protobuf>=6.31.0,<7",
     "msgpack>=1.1.0,<2.0.0",
@@ -181,6 +183,9 @@ robocasa365 = [
     "safetensors>=0.4.3,<1.0.0",
     "grpcio==1.73.1",
     "protobuf>=6.31.0,<7",
+    # RLDX is a Hey foundation backend executed beside the embodiment loop.
+    "msgpack>=1.1.0,<2.0.0",
+    "pyzmq>=27.0.0,<28.0.0",
     "python-dotenv>=1.2.2,<2",
     # PI052 imports LeRobot's dataset processors at policy-load time. These
     # are the versions declared by the pinned lerobot[dataset] extra.

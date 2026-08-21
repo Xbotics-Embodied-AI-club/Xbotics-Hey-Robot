@@ -27,9 +27,13 @@ class RemoteObservation:
 @dataclass(frozen=True)
 class RemoteStep:
     observation: RemoteObservation
-    reward: float
     done: bool
-    metrics: dict[str, Any] = field(default_factory=dict)
+    status: str
+    actions_executed: int
+    chunks_executed: int
+    progress: dict[str, Any] = field(default_factory=dict)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
 
 
 class RemoteEpisodeClient(Protocol):
@@ -43,17 +47,22 @@ class RemoteEpisodeClient(Protocol):
         seed: int,
         split: str = "target",
         registries: tuple[str, ...] = ("lightwheel",),
+        execution_artifact_dir: str | None = None,
     ) -> RemoteObservation: ...
 
     async def observe(self) -> RemoteObservation: ...
 
-    async def step(
+    async def run_option(
         self,
         *,
-        action: list[float],
-        expected_frame_id: int,
-        raw_action: list[float] | None = None,
-        action_clipped: bool = False,
+        session_id: str,
+        instruction: str,
+        max_actions: int,
+        reset_session: bool = False,
+    ) -> RemoteStep: ...
+
+    async def step_native(
+        self, *, action: list[float], expected_frame_id: int
     ) -> RemoteStep: ...
 
     async def read_truth(self) -> dict[str, Any]: ...

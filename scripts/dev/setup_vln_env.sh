@@ -17,7 +17,7 @@ if [[ ! -f "third_party/InternNav/internnav/__init__.py" ]]; then
 fi
 
 UV_PROJECT_ENVIRONMENT="$vln_env" \
-  uv sync --frozen --no-default-groups --extra model-service --group vln
+  uv sync --frozen --no-default-groups --extra foundation-backends --group vln
 
 "$vln_env/bin/python" - <<'PY'
 from __future__ import annotations

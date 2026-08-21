@@ -10,12 +10,22 @@ suites:
     - TurnOnMicrowave
     - TurnOnSinkFaucet
   composite_seen:
+    - DeliverStraw
+    - GetToastedBread
     - KettleBoiling
-    - PrepareCoffee
     - LoadDishwasher
+    - PackIdenticalLunches
+    - PreSoakPan
+    - PrepareCoffee
+    - RinseSinkBasin
+    - ScrubCuttingBoard
+    - SearingMeat
     - SetUpCuttingStation
     - StackBowlsCabinet
     - SteamInMicrowave
+    - StirVegetables
+    - WashLettuce
+    - StoreLeftoversInBowl
   composite_unseen:
     - ArrangeTea
     - CategorizeCondiments

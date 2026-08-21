@@ -32,7 +32,7 @@ from hey_robot.skills.resources import ResourceManager
 class _EpisodeClient:
     def __init__(self) -> None:
         self.frame_id = 0
-        self.steps: list[dict[str, object]] = []
+        self.option_calls: list[dict[str, object]] = []
 
     async def health(self):
         return {"online": True, "loaded": True}
@@ -40,14 +40,15 @@ class _EpisodeClient:
     async def observe(self):
         return self._observation()
 
-    async def step(self, **kwargs):
-        self.steps.append(kwargs)
+    async def run_option(self, **kwargs):
+        self.option_calls.append(kwargs)
         self.frame_id += 1
         return RemoteStep(
             observation=self._observation(),
-            reward=0.0,
             done=False,
-            metrics={},
+            status="completed",
+            actions_executed=int(kwargs["max_actions"]),
+            chunks_executed=1,
         )
 
     async def close(self):
@@ -156,10 +157,14 @@ async def test_vla_action_reaches_real_robocasa_runtime_gate(tmp_path) -> None:
         await runtime.close()
 
     assert result.success is True
-    assert result.data["termination_reason"] == "model_done"
-    assert len(episode_client.steps) == 1
-    assert episode_client.steps[0]["action"] == [0.0] * 12
-    assert episode_client.steps[0]["expected_frame_id"] == 0
+    assert result.data["termination_reason"] == "completed"
+    assert len(episode_client.option_calls) == 1
+    assert episode_client.option_calls[0] == {
+        "session_id": "task-1",
+        "instruction": "Close the fridge.",
+        "max_actions": 1,
+        "reset_session": False,
+    }
 
 
 def _jpeg(value: int) -> bytes:

@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image
 
 from hey_robot.config import DeploymentConfig
-from hey_robot.protocol import Envelope, RobotAction
+from hey_robot.protocol import Envelope, RobotSkillAction, SkillIntent
 from hey_robot.robot_backends.robocasa_remote.driver import RoboCasaRemoteDriver
 from hey_robot.robot_backends.robocasa_remote.protocol import (
     RemoteImage,
@@ -21,7 +21,7 @@ class _Client:
     def __init__(self) -> None:
         self.observe_calls = 0
         self.closed = False
-        self.step_calls = []
+        self.option_calls = []
         self.begin_calls = []
         self.end_calls = []
 
@@ -41,8 +41,8 @@ class _Client:
             task="KettleBoiling",
         )
 
-    async def step(self, **kwargs):
-        self.step_calls.append(kwargs)
+    async def run_option(self, **kwargs):
+        self.option_calls.append(kwargs)
         return RemoteStep(
             observation=RemoteObservation(
                 episode_id="trial-1",
@@ -54,9 +54,10 @@ class _Client:
                 ],
                 task="KettleBoiling",
             ),
-            reward=0.5,
             done=False,
-            metrics={"truncated": False},
+            status="budget",
+            actions_executed=8,
+            chunks_executed=1,
         )
 
     async def begin_trial(self, **kwargs):
@@ -187,7 +188,7 @@ def test_robot_manager_builds_remote_robocasa_driver() -> None:
     assert isinstance(RobotManager(config).require("robocasa0"), RoboCasaRemoteDriver)
 
 
-def test_driver_routes_native_action_and_reset_through_runtime() -> None:
+def test_driver_routes_policy_option_and_reset_through_runtime() -> None:
     async def run() -> None:
         driver, client = _driver(with_control=True)
         await driver.start()
@@ -197,24 +198,28 @@ def test_driver_routes_native_action_and_reset_through_runtime() -> None:
         assert (await driver.health()).online is True
 
         status = await driver.apply_action(
-            RobotAction(
-                envelope=Envelope(robot_id="robocasa0"),
-                values=[0.0] * 12,
-                skill_id="skill-1",
-                metadata={
-                    "action_type": "embodiment_native",
-                    "action_space": "robocasa_12d",
-                    "embodiment": "robocasa",
-                    "expected_frame_id": 8,
-                    "raw_action": [1.25] + [0.0] * 11,
-                    "action_clipped": True,
+            RobotSkillAction(
+                "run_policy_option",
+                {
+                    "session_id": "trial-1",
+                    "instruction": "Boil the kettle",
+                    "max_actions": 8,
                 },
+            ).to_robot_action(
+                SkillIntent(
+                    envelope=Envelope(robot_id="robocasa0"),
+                    skill_id="skill-1",
+                    task_id="trial-1",
+                    intent_kind="skill",
+                    name="run_policy_option",
+                    arguments={},
+                    objective="run option",
+                )
             )
         )
         assert status.success is True
         assert status.frame_id == 9
-        assert client.step_calls[0]["expected_frame_id"] == 8
-        assert client.step_calls[0]["action_clipped"] is True
+        assert client.option_calls[0]["instruction"] == "Boil the kettle"
 
         reset = await driver.reset()
         assert reset.state == "idle"
@@ -225,26 +230,26 @@ def test_driver_routes_native_action_and_reset_through_runtime() -> None:
     asyncio.run(run())
 
 
-def test_driver_returns_structured_error_for_stale_or_invalid_action() -> None:
+def test_driver_rejects_non_option_actions() -> None:
     async def run() -> None:
         driver, _client = _driver()
         await driver.start()
         await driver.observe()
         result = await driver.apply_action(
-            RobotAction(
-                envelope=Envelope(robot_id="robocasa0"),
-                values=[0.0] * 12,
-                skill_id="bad",
-                metadata={
-                    "action_type": "embodiment_native",
-                    "action_space": "robocasa_12d",
-                    "embodiment": "robocasa",
-                    "expected_frame_id": 7,
-                },
+            RobotSkillAction("move_to", {}).to_robot_action(
+                SkillIntent(
+                    envelope=Envelope(robot_id="robocasa0"),
+                    skill_id="bad",
+                    task_id="bad",
+                    intent_kind="skill",
+                    name="move_to",
+                    arguments={},
+                    objective="move",
+                )
             )
         )
         assert result.success is False
-        assert "stale action" in str(result.error)
+        assert "unsupported RoboCasa skill" in str(result.error)
         assert (await driver.status()).state == "error"
 
         reset = await driver.reset()

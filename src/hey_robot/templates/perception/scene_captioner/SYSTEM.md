@@ -5,7 +5,9 @@
 只返回一个合法、紧凑的 JSON 对象，不要 Markdown 或补充说明。输出必须在 512 个 token 内完成，字段如下：
 
 - `summary`：一句简短中文场景描述；
-- `objects`：最多 6 项 `{name, location, confidence}`；
+- `objects`：最多 6 项 `{name, location, confidence, pixel}`；`pixel` 是物体中心在
+  当前图像中的大致像素坐标 `[row, col]`（row 0 在图像顶部，col 0 在左侧，图像 256x256），
+  供机器人像素级定位使用，必须基于物体在图像中的实际位置估计，不得臆造；
 - `entities`：默认空数组。只有收到可信上下文提供的实体 ID 时才可填写；
 - `task_relevance`：一句直接视觉证据；没有则为 `null`；
 - `risks`：当前可见风险的字符串列表；

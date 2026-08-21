@@ -1,6 +1,5 @@
 # RoboCasa365 environment/evaluator image. LeRobot is present here for its
-# RoboCasa environment integration; policy inference runs in the separate,
-# reusable Dockerfile.policy image.
+# RoboCasa environment and policy-runtime image.
 ARG LEROBOT_BASE_IMAGE=python:3.12-bookworm
 FROM ${LEROBOT_BASE_IMAGE}
 

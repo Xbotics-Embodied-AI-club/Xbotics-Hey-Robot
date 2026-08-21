@@ -12,10 +12,15 @@ from PIL import Image
 
 from hey_robot.config import ModelServiceSpec
 from hey_robot.foundation.backends.rldx.executor import (
+    PolicyExecutionError,
     RLDXPolicyExecutor,
     _action_chunk,
     _decode_wire_value,
     _encode_wire_value,
+    _history_observations,
+    _image_bytes,
+    _rldx_observation,
+    _RLDXWireClient,
 )
 from hey_robot.foundation.backends.rldx.server import _parser, main
 
@@ -71,9 +76,10 @@ class _Client:
     def __init__(self) -> None:
         self.calls: list[tuple[dict[str, Any], dict[str, Any]]] = []
         self.closed = False
+        self.available = True
 
     def ping(self) -> bool:
-        return True
+        return self.available
 
     def get_action(self, observation, options):
         self.calls.append((observation, options))
@@ -119,7 +125,7 @@ def _loaded_executor(client: _Client, **settings: Any) -> RLDXPolicyExecutor:
     return executor
 
 
-def test_rldx_executor_maps_observation_and_caches_official_eight_step_chunk() -> None:
+def test_rldx_executor_returns_the_official_eight_step_chunk() -> None:
     client = _Client()
     executor = _loaded_executor(client, action_low=-10, action_high=10)
 
@@ -128,7 +134,7 @@ def test_rldx_executor_maps_observation_and_caches_official_eight_step_chunk() -
 
     assert first["success"] is True
     assert second["success"] is True
-    assert len(client.calls) == 1
+    assert len(client.calls) == 2
     observation, options = client.calls[0]
     assert observation["video.robot0_agentview_left"].shape == (1, 4, 3, 4, 3)
     assert observation["video.robot0_agentview_left"].dtype == np.uint8
@@ -141,11 +147,13 @@ def test_rldx_executor_maps_observation_and_caches_official_eight_step_chunk() -
     assert observation["state.gripper_qpos"].tolist() == [[[14.0, 15.0]]]
     assert observation["annotation.human.task_description"] == ["agent subgoal"]
     assert options == {"session_ids": ["episode-1"], "reset_memory": [True]}
-    values = first["metrics"]["policy_result"]["actions"][0]["arguments"]["values"]
+    actions = first["metrics"]["policy_result"]["actions"]
+    assert len(actions) == 8
+    values = actions[0]["arguments"]["values"]
     assert values == [1.0] * 3 + [2.0] * 3 + [3.0] + [4.0] * 4 + [5.0]
     assert first["metrics"]["inference_performed"] is True
-    assert second["metrics"]["inference_performed"] is False
-    assert executor.health()["metrics"]["queued_actions"] == 6
+    assert second["metrics"]["inference_performed"] is True
+    assert executor.health()["metrics"]["queued_actions"] == 0
 
 
 def test_rldx_executor_resets_memory_for_a_new_episode() -> None:
@@ -181,11 +189,13 @@ def test_rldx_executor_manages_official_server_process(tmp_path) -> None:
     python = tmp_path / "python"
     python.touch()
     client = _Client()
+    client.available = False
     process = _Process()
     spawns: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
     def spawn(*args: Any, **kwargs: Any) -> _Process:
         spawns.append((args, kwargs))
+        client.available = True
         return process
 
     executor = RLDXPolicyExecutor(
@@ -218,9 +228,28 @@ def test_rldx_executor_manages_official_server_process(tmp_path) -> None:
         "cpu",
     ]
     assert command[-2:] == ["--image-max-area", "65536"]
+    environment = spawns[0][1]["env"]
+    assert environment["HF_HUB_OFFLINE"] == "1"
+    assert environment["TRANSFORMERS_OFFLINE"] == "1"
     executor.close()
     assert client.closed is True
     assert process.terminated is True
+
+
+def test_rldx_executor_reuses_a_healthy_external_policy_process() -> None:
+    client = _Client()
+    spawns: list[object] = []
+    executor = RLDXPolicyExecutor(
+        "policy",
+        _spec(),
+        client_factory=lambda *_: client,
+        process_factory=lambda *_args, **_kwargs: spawns.append(object()),
+    )
+
+    executor.load()
+
+    assert executor.health()["loaded"] is True
+    assert spawns == []
 
 
 def test_rldx_server_parser_and_main_configure_official_server(monkeypatch) -> None:
@@ -277,7 +306,10 @@ def test_rldx_server_parser_and_main_configure_official_server(monkeypatch) -> N
             "strict": True,
         },
     )
-    assert calls[1] == ("checkpoint", {"image_max_area": 65536})
+    assert calls[1] == (
+        "checkpoint",
+        {"local_files_only": True, "image_max_area": 65536},
+    )
     assert calls[-1] == ("run", True)
 
 
@@ -345,3 +377,142 @@ def test_rldx_wire_helpers_leave_plain_values_unchanged() -> None:
 
     assert _encode_wire_value(value) is value
     assert _decode_wire_value(value) is value
+
+
+def test_rldx_wire_and_history_helpers_preserve_only_valid_frames() -> None:
+    array = np.arange(3, dtype=np.float32)
+    encoded = _encode_wire_value(array)
+
+    assert np.array_equal(_decode_wire_value(encoded), array)
+    assert _history_observations(
+        {
+            "arguments": {
+                "observation_history": [
+                    {"frame_id": "2"},
+                    {"frame_id": -1},
+                    {"frame_id": "bad"},
+                    "not-a-frame",
+                ]
+            }
+        }
+    ) == [(2, {"frame_id": "2"})]
+    assert _history_observations({"arguments": {"observation_history": "bad"}}) == []
+
+
+def test_rldx_observation_validation_and_base_clipping() -> None:
+    payload = _payload()["arguments"]["observation"]
+    settings = _spec(base_clip=0.25).settings
+    observation = _rldx_observation(payload, "boil kettle", settings=settings)
+
+    assert observation["annotation.human.task_description"] == ["boil kettle"]
+    with pytest.raises(PolicyExecutionError, match="shape"):
+        _rldx_observation({"proprioception": [1.0]}, "task", settings=settings)
+    with pytest.raises(PolicyExecutionError, match="exactly three"):
+        _rldx_observation(
+            payload, "task", settings={**settings, "camera_names": ["one"]}
+        )
+
+    valid = {
+        "action.end_effector_position": np.zeros((1, 8, 3), np.float32),
+        "action.end_effector_rotation": np.zeros((1, 8, 3), np.float32),
+        "action.gripper_close": np.zeros((1, 8, 1), np.float32),
+        "action.base_motion": np.full((1, 8, 4), 2.0, np.float32),
+        "action.control_mode": np.zeros((1, 8, 1), np.float32),
+    }
+    actions = _action_chunk(
+        valid,
+        action_keys=(
+            "end_effector_position",
+            "end_effector_rotation",
+            "gripper_close",
+            "base_motion",
+            "control_mode",
+        ),
+        dimensions=12,
+        execution_horizon=8,
+        base_clip=0.25,
+    )
+    assert len(actions) == 8
+    assert actions[0][7:11].tolist() == [0.25] * 4
+
+
+def test_rldx_reads_a_safe_local_media_file_and_rejects_unsafe_uris(tmp_path) -> None:
+    image_path = tmp_path / "frame.png"
+    image_path.write_bytes(b"frame")
+    settings = {"media_root": str(tmp_path)}
+
+    assert _image_bytes({"uri": "media://local/frame.png"}, settings) == b"frame"
+    with pytest.raises(ValueError, match="unsafe"):
+        _image_bytes({"uri": "media://local/../secret.png"}, settings)
+    with pytest.raises(ValueError, match="base64"):
+        _image_bytes({}, settings)
+
+
+def test_rldx_execute_reports_invalid_task_and_cancelled_state() -> None:
+    executor = _loaded_executor(_Client())
+
+    invalid = executor.execute({"skill_name": "other", "arguments": {}})
+    executor.cancel()
+    cancelled = executor.execute(_payload())
+
+    assert invalid["failure_mode"] == "invalid_task"
+    assert cancelled["failure_mode"] == "cancelled"
+
+
+def test_wire_client_handles_success_server_errors_and_connection_failures() -> None:
+    class ZmqError(Exception):
+        pass
+
+    class Socket:
+        def __init__(self, response: bytes = b"ok", fail: bool = False) -> None:
+            self.response = response
+            self.fail = fail
+            self.sent: bytes | None = None
+            self.closed = False
+
+        def send(self, value: bytes) -> None:
+            if self.fail:
+                raise ZmqError("offline")
+            self.sent = value
+
+        def recv(self) -> bytes:
+            return self.response
+
+        def close(self, **_kwargs: Any) -> None:
+            self.closed = True
+
+    def pack(value: Any, **_kwargs: Any) -> bytes:
+        return repr(value).encode()
+
+    def ok_response(*_args: Any, **_kwargs: Any) -> dict[str, str]:
+        return {"status": "ok"}
+
+    def error_response(*_args: Any, **_kwargs: Any) -> dict[str, str]:
+        return {"error": "bad request"}
+
+    client = object.__new__(_RLDXWireClient)
+    socket = Socket()
+    client._socket = socket
+    client._zmq = types.SimpleNamespace(ZMQError=ZmqError)
+    client._msgpack = types.SimpleNamespace(
+        packb=pack,
+        unpackb=ok_response,
+    )
+    client._context = types.SimpleNamespace(term=lambda: None)
+    client._host = "host"
+    client._port = 1
+    client._timeout_ms = 1
+
+    assert client.ping()
+    assert client.get_action({"frame": 1}, {"reset": True}) == {"status": "ok"}
+    client._msgpack.unpackb = error_response
+    with pytest.raises(RuntimeError, match="bad request"):
+        client.get_action({}, {})
+
+    reconnects: list[None] = []
+    client._connect = lambda: reconnects.append(None)
+    client._socket = Socket(fail=True)
+    with pytest.raises(ZmqError):
+        client._call("get_action", {})
+    assert reconnects == [None]
+    client.close()

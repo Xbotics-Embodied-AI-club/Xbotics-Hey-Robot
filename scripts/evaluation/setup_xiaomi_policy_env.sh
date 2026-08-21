@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prepare the isolated Xiaomi-Robotics-1 model-service environment.
+# Prepare the isolated Xiaomi-Robotics-1 foundation-model environment.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -34,7 +34,7 @@ fi
   torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 \
   --index-url https://download.pytorch.org/whl/cu128
 "$venv_path/bin/pip" install \
-  -e "$repo_root[model-service]" \
+  -e "$repo_root[foundation-backends]" \
   transformers==4.57.1 ninja
 "$venv_path/bin/pip" install \
   https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp312-cp312-linux_x86_64.whl

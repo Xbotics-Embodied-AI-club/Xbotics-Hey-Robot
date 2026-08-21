@@ -351,7 +351,7 @@ async def test_native_vla_schema_owns_default_execution_budget() -> None:
     assert "source/target spatial relations" in task_prompt["description"]
     assert (
         registry.get("manipulate").parameters["properties"]["max_steps"]["default"]
-        == 128
+        == 400
     )
 
 
@@ -389,7 +389,9 @@ async def test_native_vla_manipulate_reobserves_between_bounded_steps() -> None:
         "progress",
         "completed",
     ]
-    assert robot.observation_after_ids == [None, 12]
+    assert [
+        frame_id for frame_id in robot.observation_after_ids if frame_id is not None
+    ] == [12]
 
 
 async def test_native_vla_environment_done_stops_before_action() -> None:

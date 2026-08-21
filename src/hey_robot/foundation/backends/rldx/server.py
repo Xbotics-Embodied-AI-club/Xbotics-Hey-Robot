@@ -28,6 +28,10 @@ def main() -> None:
     original = AutoProcessor.from_pretrained
 
     def from_pretrained(path: Any, *values: Any, **kwargs: Any) -> Any:
+        # RLDX passes the VLM's source Hub id here.  Resolve it from the local
+        # HuggingFace cache only: the model assets are provisioned before an
+        # evaluation and loading must not depend on network availability.
+        kwargs.setdefault("local_files_only", True)
         # RLDX-1-FT-RC365 currently publishes image_max_area=null even though
         # its training/evaluation contract uses the 256x256 default (65536).
         kwargs.setdefault("image_max_area", args.image_max_area)

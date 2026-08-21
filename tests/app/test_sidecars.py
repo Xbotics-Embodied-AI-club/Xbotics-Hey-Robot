@@ -7,7 +7,6 @@ import pytest
 
 from hey_robot.app.sidecars import ManagedRoboCasaBackend, managed_robocasa_backend
 from hey_robot.config import DeploymentConfig
-from hey_robot.foundation.clients.models import ServiceHealth
 
 
 def _config(tmp_path) -> DeploymentConfig:
@@ -68,7 +67,7 @@ async def test_managed_backend_owns_credentials_process_and_cleanup(
     tmp_path, monkeypatch
 ) -> None:
     sidecar = ManagedRoboCasaBackend(_config(tmp_path), config_path="deployment.yaml")
-    processes = [_Process(), _Process()]
+    processes = [_Process()]
     spawns: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
     async def create(*args: object, **kwargs: object):
@@ -90,12 +89,7 @@ async def test_managed_backend_owns_credentials_process_and_cleanup(
         "-m",
         "hey_robot.app.robocasa_backend",
     )
-    assert spawns[1][0][:4] == (
-        "model-python",
-        "-m",
-        "hey_robot.cli.main",
-        "model-service",
-    )
+    assert len(spawns) == 1
 
     await sidecar.stop()
     assert all(process.terminated for process in processes)
@@ -124,48 +118,18 @@ def test_managed_backend_accepts_xiaomi_policy(tmp_path) -> None:
 async def test_unexpected_backend_exit_is_propagated(tmp_path) -> None:
     sidecar = ManagedRoboCasaBackend(_config(tmp_path), config_path="deployment.yaml")
     runtime_process = _Process()
-    model_process = _Process()
     runtime_process.returncode = 17
-    model_process.returncode = 17
     sidecar.runtime_process = runtime_process
-    sidecar.model_process = model_process
     with pytest.raises(RuntimeError, match="unexpectedly with 17"):
         await sidecar.wait()
 
 
 @pytest.mark.asyncio
-async def test_model_spawn_failure_cleans_up_runtime_process(
-    tmp_path, monkeypatch
-) -> None:
-    sidecar = ManagedRoboCasaBackend(_config(tmp_path), config_path="deployment.yaml")
-    runtime_process = _Process()
-    calls = 0
-
-    async def create(*_args: object, **_kwargs: object):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            return runtime_process
-        raise OSError("model spawn failed")
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", create)
-
-    with pytest.raises(OSError, match="model spawn failed"):
-        await sidecar.start()
-
-    assert runtime_process.terminated is True
-    assert not sidecar.credentials_path.exists()
-
-
 @pytest.mark.asyncio
-async def test_backend_health_gate_checks_both_standard_planes(
-    tmp_path, monkeypatch
-) -> None:
+async def test_backend_health_gate_checks_runtime_plane(tmp_path, monkeypatch) -> None:
     sidecar = ManagedRoboCasaBackend(_config(tmp_path), config_path="deployment.yaml")
     runtime_process = _Process()
-    model_process = _Process()
     sidecar.runtime_process = runtime_process
-    sidecar.model_process = model_process
 
     class RuntimeClient:
         def __init__(self, *args: object, **kwargs: object) -> None:
@@ -177,24 +141,11 @@ async def test_backend_health_gate_checks_both_standard_planes(
         async def close(self):
             pass
 
-    class ModelClient:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            pass
-
-        async def health(self):
-            return ServiceHealth(name="m", online=True, loaded=True)
-
-        async def close(self):
-            pass
-
     monkeypatch.setattr(
         "hey_robot.app.sidecars.GrpcRoboCasaRuntimeClient", RuntimeClient
     )
-    monkeypatch.setattr("hey_robot.app.sidecars.GrpcModelServiceClient", ModelClient)
-
     await sidecar._wait_ready("grpc://127.0.0.1:9092")
     assert runtime_process.returncode is None
-    assert model_process.returncode is None
 
 
 def test_managed_backend_factory_has_one_deployment_entry(tmp_path) -> None:

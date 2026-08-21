@@ -9,7 +9,6 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from hey_robot.config import DeploymentConfig
-from hey_robot.foundation.transport.grpc.client import GrpcModelServiceClient
 from hey_robot.robot_backends.robocasa_remote.client import (
     GrpcRoboCasaRuntimeClient,
 )
@@ -48,7 +47,6 @@ class ManagedRoboCasaBackend:
             )
         self.service_id, self.model_spec = models[0]
         self.runtime_process: asyncio.subprocess.Process | None = None
-        self.model_process: asyncio.subprocess.Process | None = None
         self._stopping = False
         self.evaluator_token = os.environ.setdefault(
             "ROBOCASA_EVALUATOR_TOKEN", secrets.token_hex(32)
@@ -64,13 +62,7 @@ class ManagedRoboCasaBackend:
         runtime_target = str(
             self.robot_spec.settings.get("target") or "grpc://127.0.0.1:9092"
         )
-        model_target = str(self.model_spec.target or "grpc://127.0.0.1:9091")
         runtime_host, runtime_port = _loopback_endpoint(runtime_target, 9092)
-        model_host, model_port = _loopback_endpoint(model_target, 9091)
-        if (runtime_host, runtime_port) == (model_host, model_port):
-            raise RuntimeError(
-                "managed RoboCasa runtime and model service must use distinct targets"
-            )
         self.credentials_path.parent.mkdir(parents=True, exist_ok=True)
         self.credentials_path.write_text(
             json.dumps(
@@ -87,22 +79,7 @@ class ManagedRoboCasaBackend:
             or self.robot_spec.settings.get("backend_python")
             or sys.executable
         )
-        model_python = str(
-            os.environ.get("HEY_ROBOT_MODEL_SERVICE_PYTHON")
-            or self.model_spec.settings.get("service_python")
-            or sys.executable
-        )
         runtime_environment = _service_environment()
-        model_environment = _service_environment()
-        model_environment["ROBOCASA_DATA_TOKEN"] = self.data_token
-        if bool(self.model_spec.settings.get("offline", False)):
-            model_environment.update(
-                {
-                    "ROBOCASA_OFFLINE": "1",
-                    "HF_HUB_OFFLINE": "1",
-                    "TRANSFORMERS_OFFLINE": "1",
-                }
-            )
         self.runtime_process = await asyncio.create_subprocess_exec(
             backend_python,
             "-m",
@@ -120,41 +97,15 @@ class ManagedRoboCasaBackend:
             env=runtime_environment,
         )
         try:
-            self.model_process = await asyncio.create_subprocess_exec(
-                model_python,
-                "-m",
-                "hey_robot.cli.main",
-                "model-service",
-                "--config",
-                self.config_path,
-                "--service-id",
-                self.service_id,
-                "--host",
-                model_host,
-                "--port",
-                str(model_port),
-                env=model_environment,
-            )
             await self._wait_ready(runtime_target)
         except BaseException:
             await self.stop()
             raise
 
     async def wait(self) -> None:
-        processes = [self.runtime_process, self.model_process]
-        if any(process is None for process in processes):
+        if self.runtime_process is None:
             raise RuntimeError("RoboCasa backend was not started")
-        tasks = [
-            asyncio.create_task(process.wait())
-            for process in processes
-            if process is not None
-        ]
-        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-        for task in pending:
-            task.cancel()
-        if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
-        returncode = next(iter(done)).result()
+        returncode = await self.runtime_process.wait()
         if not self._stopping:
             raise RuntimeError(
                 f"managed RoboCasa service exited unexpectedly with {returncode}"
@@ -162,13 +113,9 @@ class ManagedRoboCasaBackend:
 
     async def stop(self) -> None:
         self._stopping = True
-        processes = [self.model_process, self.runtime_process]
-        for process in processes:
-            if process is not None and process.returncode is None:
-                process.terminate()
-        for process in processes:
-            if process is None or process.returncode is not None:
-                continue
+        process = self.runtime_process
+        if process is not None and process.returncode is None:
+            process.terminate()
             try:
                 await asyncio.wait_for(process.wait(), timeout=10.0)
             except TimeoutError:
@@ -180,7 +127,6 @@ class ManagedRoboCasaBackend:
         runtime = GrpcRoboCasaRuntimeClient(
             runtime_target, timeout_sec=5.0, role="data"
         )
-        model = GrpcModelServiceClient(self.service_id, self.model_spec)
         timeout = float(
             self.robot_spec.settings.get("backend_startup_timeout_sec", 60.0)
         )
@@ -188,29 +134,22 @@ class ManagedRoboCasaBackend:
         try:
             async with asyncio.timeout(timeout):
                 while True:
-                    for name, process in (
-                        ("runtime", self.runtime_process),
-                        ("model", self.model_process),
+                    if (
+                        self.runtime_process is not None
+                        and self.runtime_process.returncode is not None
                     ):
-                        if process is not None and process.returncode is not None:
-                            raise RuntimeError(
-                                f"managed RoboCasa {name} service exited during "
-                                f"health gate with {process.returncode}"
-                            )
-                    try:
-                        runtime_health, model_health = await asyncio.gather(
-                            runtime.health(), model.health()
+                        raise RuntimeError(
+                            "managed RoboCasa backend exited during health gate with "
+                            f"{self.runtime_process.returncode}"
                         )
-                        if (
-                            runtime_health.get("online")
-                            and runtime_health.get("loaded")
-                            and model_health.online
-                            and model_health.loaded
+                    try:
+                        runtime_health = await runtime.health()
+                        if runtime_health.get("online") and runtime_health.get(
+                            "loaded"
                         ):
                             return
                         last_error = str(
                             runtime_health.get("error")
-                            or model_health.error
                             or "backend dependencies are not loaded"
                         )
                     except Exception as exc:
@@ -222,7 +161,6 @@ class ManagedRoboCasaBackend:
             ) from exc
         finally:
             await runtime.close()
-            await model.close()
 
 
 def _loopback_endpoint(target: str, default_port: int) -> tuple[str, int]:

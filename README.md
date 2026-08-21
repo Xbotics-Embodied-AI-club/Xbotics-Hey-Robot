@@ -174,7 +174,7 @@ InternNav simulation requires an independent model environment and the InternNav
 [`docs/operations/xlerobot-sim.md`](docs/operations/xlerobot-sim.md).
 
 For the full RoboCasa365 evaluation path, see
-[`docs/evaluation/robocasa365/runbook.zh-CN.md`](docs/evaluation/robocasa365/runbook.zh-CN.md).
+[`evaluation/robocasa365/README.md`](evaluation/robocasa365/README.md).
 
 <h2 id="real-robot">XLeRobot Hardware</h2>
 
@@ -230,7 +230,7 @@ See [`docs/operations/xlerobot-real.md`](docs/operations/xlerobot-real.md) for t
 - [Configuration reference](docs/reference/configuration.md)
 - [XLeRobot simulation](docs/operations/xlerobot-sim.md)
 - [XLeRobot hardware](docs/operations/xlerobot-real.md)
-- [RoboCasa365 evaluation](docs/evaluation/robocasa365/runbook.zh-CN.md)
+- [RoboCasa365 evaluation](evaluation/robocasa365/README.md)
 - [Minimal Embodied Agent Harness guide](docs/development/minimal-embodied-agent-harness-guide.zh-CN.md)
 - [Paper draft](docs/references/paper-draft.md)
 

@@ -112,6 +112,9 @@ class ModelClient:
         if tools:
             body["tools"] = [_tool_payload(tool) for tool in tools]
             body["tool_choice"] = tool_choice or "auto"
+            # The skill executor is strictly single-tool per turn; keep the model
+            # from emitting parallel tool calls that the runner would reject.
+            body["parallel_tool_calls"] = False
         if self.extra_body:
             body["extra_body"] = self.extra_body
 

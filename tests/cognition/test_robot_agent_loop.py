@@ -354,6 +354,9 @@ async def test_agent_returns_waiting_after_physical_submit(tmp_path) -> None:
     assert result.status == "waiting"
     assert result.operation_id == "run-1"
     assert len(runner.requests) == 1
+    task = tasks.active_task("session-1")
+    assert task is not None
+    assert task.objective == "move"
     assert [message.role for message in conversations.recent("session-1")] == ["user"]
     conversations.close()
     tasks.close()
@@ -379,7 +382,9 @@ async def test_plain_text_after_tool_outcome_fails_without_retry_loop(tmp_path) 
     assert "function schema" in result.text
     assert len(runner.requests) == 2
     assert runner.requests[1].messages[-1].role == "tool"
-    assert tasks.active_task("session-1") is not None
+    assert tasks.current_task("session-1") is None
+    task = tasks.recent_tasks(1)[0]
+    assert task.status == "blocked"
     conversations.close()
     tasks.close()
 
@@ -488,7 +493,7 @@ async def test_plain_text_does_not_implicitly_complete_active_task(tmp_path) -> 
 
     assert result.status == "failed"
     assert len(runner.requests) == 1
-    assert tasks.task(task.task_id).status == "active"  # type: ignore[union-attr]
+    assert tasks.task(task.task_id).status == "blocked"  # type: ignore[union-attr]
     conversations.close()
     tasks.close()
 

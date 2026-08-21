@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from hey_robot.config import DeploymentConfig, ModelServiceSpec
-from hey_robot.foundation.clients.mock import MockModelServiceClient
 from hey_robot.foundation.clients.models import ModelServiceClient
 
 
@@ -34,7 +33,9 @@ class ModelServiceRegistry:
         self, service_id: str, spec: ModelServiceSpec
     ) -> ModelServiceClient:
         if spec.type == "mock":
-            return MockModelServiceClient(service_id, spec)
-        from hey_robot.foundation.transport.grpc.client import GrpcModelServiceClient
+            from hey_robot.foundation.clients.mock import MockModelServiceClient
 
-        return GrpcModelServiceClient(service_id, spec)
+            return MockModelServiceClient(service_id, spec)
+        from hey_robot.foundation.clients.local import LocalFoundationClient
+
+        return LocalFoundationClient(service_id, spec)

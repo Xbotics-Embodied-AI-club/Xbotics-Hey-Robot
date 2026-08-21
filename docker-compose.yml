@@ -44,38 +44,6 @@ services:
       retries: 12
     restart: unless-stopped
 
-  vln:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.vln
-      args:
-        PYTHON_VERSION: ${HEY_ROBOT_PYTHON_VERSION:-3.12}
-    image: ${HEY_ROBOT_VLN_IMAGE:-hey-robot-vln:latest}
-    environment:
-      <<: *common-env
-      NVIDIA_VISIBLE_DEVICES: ${HEY_ROBOT_VLN_GPU:-0}
-    volumes:
-      - ./configs:/app/configs:ro
-      - ./runtime:/app/runtime
-      - ./models:/app/models:ro
-    depends_on:
-      nats:
-        condition: service_healthy
-    ports:
-      - "${HEY_ROBOT_VLN_PORT:-9091}:9091"
-    command:
-      - --config
-      - ${HEY_ROBOT_VLN_CONFIG:-/app/configs/xlerobot.sim.vln.yaml}
-      - --service-id
-      - ${HEY_ROBOT_VLN_SERVICE_ID:-vln_nav}
-      - --host
-      - "0.0.0.0"
-    runtime: nvidia
-    restart: unless-stopped
-    profiles:
-      - gpu
-      - vln
-
   robocasa365:
     build:
       context: .
@@ -106,36 +74,6 @@ services:
     ports:
       - "${HEY_ROBOT_ROBOCASA_PORT:-9092}:9092"
     shm_size: "8gb"
-    runtime: nvidia
-    restart: unless-stopped
-    profiles:
-      - robocasa
-
-  robocasa-policy:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.policy
-      args:
-        PYTHON_VERSION: ${HEY_ROBOT_PYTHON_VERSION:-3.12}
-    image: ${HEY_ROBOT_POLICY_IMAGE:-hey-robot-policy:latest}
-    environment:
-      <<: *common-env
-      HF_HOME: /cache/huggingface
-      HF_TOKEN: ${HF_TOKEN:-}
-      NVIDIA_VISIBLE_DEVICES: ${HEY_ROBOT_ROBOCASA_POLICY_GPU:-0}
-    volumes:
-      - ./configs:/app/configs:ro
-      - ./models:/app/models:ro
-      - ${HF_CACHE_DIR:-./.cache/huggingface}:/cache/huggingface
-    ports:
-      - "${HEY_ROBOT_ROBOCASA_POLICY_PORT:-9091}:9091"
-    command:
-      - --config
-      - ${HEY_ROBOT_ROBOCASA_POLICY_CONFIG:-/app/configs/evaluation/robocasa365.yaml}
-      - --service-id
-      - ${HEY_ROBOT_ROBOCASA_POLICY_SERVICE_ID:-robocasa365}
-      - --host
-      - "0.0.0.0"
     runtime: nvidia
     restart: unless-stopped
     profiles:

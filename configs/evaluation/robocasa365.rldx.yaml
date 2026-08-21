@@ -40,7 +40,17 @@ skills:
   - hey_robot.skills.builtins
   tools:
   - inspect_scene
+  - read_execution_memory
   - manipulate
+  - localize
+  - read_progress
+  - move_to
+  - move_delta
+  - grip
+  - release
+  - scripted_grasp
+  - drive_to
+  - drive_base
   execution_mode: local
 robots:
   robocasa365:
@@ -54,7 +64,10 @@ robots:
       managed_backend: true
       backend_python: .venv-robocasa365/bin/python
       backend_startup_timeout_sec: 1800
-      timeout_sec: 60
+      # One RLDX option can execute 560 simulator actions; its data-plane RPC
+      # must outlive the policy request rather than applying the old action-step
+      # deadline.
+      timeout_sec: 660
       control_hz: 20
       supported_driver_primitives:
       - inspect_scene
@@ -81,7 +94,7 @@ model_services:
       service_python: .venv/bin/python
       health_timeout_sec: 10
       auth_token_env: ROBOCASA_DATA_TOKEN
-      policy_path: RLWRLD/RLDX-1-FT-RC365
+      policy_path: /home/liberow/models/robocasa365/rldx-1-ft-rc365
       policy_device: cuda:1
       embodiment: robocasa
       action_space: robocasa_12d
@@ -94,8 +107,13 @@ model_services:
       - camera2
       - camera3
       media_root: runtime/robocasa365.rldx/media
+      # The adaptive policy interface invokes RLDX for one contact-rich state transition at a
+      # time.  The executor must therefore consume the agent's concise,
+      # official-language subgoal; using environment_root here silently turns
+      # every retry back into a full-task VLA rollout.
       prompt_mode: agent_subgoal
       execution_horizon: 8
+      base_clip: 0.1
       video_delta_indices: [-6, -4, -2, 0]
       control_hz: 20
       request_timeout_sec: 600
@@ -104,7 +122,7 @@ model_services:
       rldx_repo: .deps/RLDX-1
       rldx_python: .venv-rldx/bin/python
       attention_impl: sdpa
-      hf_home: .cache/huggingface
+      hf_home: /home/liberow/.cache/huggingface
       hf_xet_high_performance: true
 policies:
   embodied_skills:
@@ -120,14 +138,24 @@ agents:
       mode: autonomous
       models:
         planner:
-          model_env: OPENAI_MODEL
+          # gpt-5.5: fast enough for repeated tool-loop decisions. gpt-5.6-terra
+          # stalls 5-10 min per decision once the transcript grows.
+          model: gpt-5.5
           api_key_env: OPENAI_API_KEY
           base_url_env: OPENAI_BASE_URL
           temperature: 0.0
           max_tokens: 2048
+          timeout_sec: 30
+          max_retries: 0
         scene_captioner:
+          # gpt-5.5: faster and more reliable than gpt-5.6-terra for the
+          # structured scene-caption JSON; gpt-5.6-terra stalls under repeated
+          # calls and returns unparseable output (confidence=0 discard).
+          enabled: true
           model_env: OPENAI_MODEL
           api_key_env: OPENAI_API_KEY
           base_url_env: OPENAI_BASE_URL
           temperature: 0.0
           max_tokens: 1024
+          timeout_sec: 30
+          max_retries: 0

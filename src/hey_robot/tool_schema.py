@@ -46,8 +46,19 @@ def _validate_value(name: str, value: Any, definition: dict[str, Any]) -> None:
         "object": isinstance(value, dict),
         "array": isinstance(value, list),
     }
-    if expected in valid and not valid[expected]:
-        raise ValueError(f"argument {name} must be a {expected}")
+    # ``type`` may be a union list (e.g. ["number", "string"]); accept when
+    # the value satisfies ANY member. Guard the membership test so a list
+    # `expected` never trips ``in`` on a dict (unhashable).
+    if isinstance(expected, str):
+        if expected in valid and not valid[expected]:
+            raise ValueError(f"argument {name} must be a {expected}")
+    elif isinstance(expected, list):
+        accepted = any(
+            isinstance(member, str) and member in valid and valid[member]
+            for member in expected
+        )
+        if not accepted:
+            raise ValueError(f"argument {name} must be one of {', '.join(expected)}")
     if "enum" in definition and value not in definition["enum"]:
         raise ValueError(f"argument {name} must be one of {definition['enum']}")
     min_length = definition.get("minLength")

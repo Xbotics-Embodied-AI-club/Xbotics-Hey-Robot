@@ -10,6 +10,7 @@ import hmac
 import io
 import json
 import mimetypes
+import os
 import shutil
 import time
 import uuid
@@ -52,6 +53,14 @@ class LocalMediaStore:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.max_items = max(1, int(max_items))
+        self._last_write_ns = max(
+            (
+                path.stat().st_mtime_ns
+                for path in self.root.rglob("*")
+                if path.is_file()
+            ),
+            default=0,
+        )
 
     def put_image(
         self,
@@ -79,6 +88,7 @@ class LocalMediaStore:
             pil.save(path, format="JPEG", quality=85)
         else:
             pil.save(path, format="PNG")
+        self._mark_written(path)
         stat = path.stat()
         digest = _sha256_file(path)
         self._enforce_limit("images")
@@ -323,6 +333,13 @@ class LocalMediaStore:
         except FileNotFoundError:
             self._write_parent(path)
             path.write_bytes(data)
+        self._mark_written(path)
+
+    def _mark_written(self, path: Path) -> None:
+        """Assign a monotonic write timestamp for deterministic retention."""
+        timestamp_ns = max(path.stat().st_mtime_ns, self._last_write_ns + 1)
+        os.utime(path, ns=(timestamp_ns, timestamp_ns))
+        self._last_write_ns = timestamp_ns
 
     def _enforce_limit(self, kind: str) -> None:
         root = self.root / kind
@@ -455,9 +472,9 @@ def _as_uint8_rgb(image: np.ndarray) -> np.ndarray:
     return arr
 
 
-def _path_mtime(path: Path) -> float | None:
+def _path_mtime(path: Path) -> int | None:
     with contextlib.suppress(OSError):
-        return path.stat().st_mtime
+        return path.stat().st_mtime_ns
     return None
 
 

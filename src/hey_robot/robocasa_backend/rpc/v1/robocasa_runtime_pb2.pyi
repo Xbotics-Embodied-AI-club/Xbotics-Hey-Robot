@@ -37,17 +37,26 @@ class HealthResponse(_message.Message):
     ) -> None: ...
 
 class BeginTrialRequest(_message.Message):
-    __slots__ = ("trial_id", "task", "seed", "split", "registries")
+    __slots__ = (
+        "trial_id",
+        "task",
+        "seed",
+        "split",
+        "registries",
+        "execution_artifact_dir",
+    )
     TRIAL_ID_FIELD_NUMBER: _ClassVar[int]
     TASK_FIELD_NUMBER: _ClassVar[int]
     SEED_FIELD_NUMBER: _ClassVar[int]
     SPLIT_FIELD_NUMBER: _ClassVar[int]
     REGISTRIES_FIELD_NUMBER: _ClassVar[int]
+    EXECUTION_ARTIFACT_DIR_FIELD_NUMBER: _ClassVar[int]
     trial_id: str
     task: str
     seed: int
     split: str
     registries: _containers.RepeatedScalarFieldContainer[str]
+    execution_artifact_dir: str
     def __init__(
         self,
         trial_id: _Optional[str] = ...,
@@ -55,6 +64,7 @@ class BeginTrialRequest(_message.Message):
         seed: _Optional[int] = ...,
         split: _Optional[str] = ...,
         registries: _Optional[_Iterable[str]] = ...,
+        execution_artifact_dir: _Optional[str] = ...,
     ) -> None: ...
 
 class ImageFrame(_message.Message):
@@ -106,39 +116,60 @@ class ObservationResponse(_message.Message):
     ) -> None: ...
 
 class StepRequest(_message.Message):
-    __slots__ = ("action", "expected_frame_id", "raw_action", "action_clipped")
-    ACTION_FIELD_NUMBER: _ClassVar[int]
-    EXPECTED_FRAME_ID_FIELD_NUMBER: _ClassVar[int]
-    RAW_ACTION_FIELD_NUMBER: _ClassVar[int]
-    ACTION_CLIPPED_FIELD_NUMBER: _ClassVar[int]
-    action: _containers.RepeatedScalarFieldContainer[float]
-    expected_frame_id: int
-    raw_action: _containers.RepeatedScalarFieldContainer[float]
-    action_clipped: bool
+    __slots__ = ("session_id", "instruction", "max_actions", "reset_session")
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    INSTRUCTION_FIELD_NUMBER: _ClassVar[int]
+    MAX_ACTIONS_FIELD_NUMBER: _ClassVar[int]
+    RESET_SESSION_FIELD_NUMBER: _ClassVar[int]
+    session_id: str
+    instruction: str
+    max_actions: int
+    reset_session: bool
     def __init__(
         self,
-        action: _Optional[_Iterable[float]] = ...,
-        expected_frame_id: _Optional[int] = ...,
-        raw_action: _Optional[_Iterable[float]] = ...,
-        action_clipped: bool = ...,
+        session_id: _Optional[str] = ...,
+        instruction: _Optional[str] = ...,
+        max_actions: _Optional[int] = ...,
+        reset_session: bool = ...,
     ) -> None: ...
 
 class StepResponse(_message.Message):
-    __slots__ = ("observation", "reward", "done", "metrics")
+    __slots__ = (
+        "observation",
+        "status",
+        "done",
+        "actions_executed",
+        "chunks_executed",
+        "progress",
+        "diagnostics",
+        "error_message",
+    )
     OBSERVATION_FIELD_NUMBER: _ClassVar[int]
-    REWARD_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
     DONE_FIELD_NUMBER: _ClassVar[int]
-    METRICS_FIELD_NUMBER: _ClassVar[int]
+    ACTIONS_EXECUTED_FIELD_NUMBER: _ClassVar[int]
+    CHUNKS_EXECUTED_FIELD_NUMBER: _ClassVar[int]
+    PROGRESS_FIELD_NUMBER: _ClassVar[int]
+    DIAGNOSTICS_FIELD_NUMBER: _ClassVar[int]
+    ERROR_MESSAGE_FIELD_NUMBER: _ClassVar[int]
     observation: ObservationResponse
-    reward: float
+    status: str
     done: bool
-    metrics: _struct_pb2.Struct
+    actions_executed: int
+    chunks_executed: int
+    progress: _struct_pb2.Struct
+    diagnostics: _struct_pb2.Struct
+    error_message: str
     def __init__(
         self,
         observation: _Optional[_Union[ObservationResponse, _Mapping]] = ...,
-        reward: _Optional[float] = ...,
+        status: _Optional[str] = ...,
         done: bool = ...,
-        metrics: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...,
+        actions_executed: _Optional[int] = ...,
+        chunks_executed: _Optional[int] = ...,
+        progress: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...,
+        diagnostics: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...,
+        error_message: _Optional[str] = ...,
     ) -> None: ...
 
 class TruthResponse(_message.Message):

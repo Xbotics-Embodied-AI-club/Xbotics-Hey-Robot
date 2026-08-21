@@ -1,5 +1,6 @@
 """基础模型服务客户端。"""
 
+from hey_robot.foundation.clients.local import LocalFoundationClient
 from hey_robot.foundation.clients.manager import ModelServiceRegistry
 from hey_robot.foundation.clients.mock import MockModelServiceClient
 from hey_robot.foundation.clients.models import (
@@ -15,6 +16,7 @@ from hey_robot.foundation.clients.models import (
 from hey_robot.foundation.clients.router import RegistryModelRouter
 
 __all__ = [
+    "LocalFoundationClient",
     "MockModelServiceClient",
     "ModelInferenceResult",
     "ModelRouter",

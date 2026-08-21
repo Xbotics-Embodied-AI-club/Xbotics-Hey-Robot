@@ -2,7 +2,7 @@
 
 The managed backend is started by ``hey-robot run``. This harness owns the
 evaluator trial lifecycle, while the user request itself is submitted to the
-HTTP conversation channel. Runtime and ModelService share one EpisodeManager.
+HTTP conversation channel. The runtime owns the co-located foundation policy.
 """
 
 from __future__ import annotations
@@ -26,7 +26,6 @@ import httpx
 
 from evaluation.robocasa365.conditions import condition_for
 from hey_robot.config import DeploymentConfig
-from hey_robot.foundation.transport.grpc.client import GrpcModelServiceClient
 from hey_robot.robocasa_backend.contract import (
     ALLOWED_TASKS,
     load_manifest,
@@ -35,9 +34,13 @@ from hey_robot.robot_backends.robocasa_remote.client import GrpcRoboCasaRuntimeC
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="RoboCasa365 full Hey Robot benchmark")
-    parser.add_argument("--task", required=True, choices=sorted(ALLOWED_TASKS))
-    parser.add_argument("--seed", type=int, default=1000)
+    parser = argparse.ArgumentParser(description="RoboCasa365 full-system benchmark")
+    parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument(
+        "--task", action="append", choices=sorted(ALLOWED_TASKS), default=[]
+    )
+    parser.add_argument("--suite", action="append", default=[])
+    parser.add_argument("--seeds", default="1000")
     parser.add_argument(
         "--objective",
         help=(
@@ -45,7 +48,12 @@ def _parser() -> argparse.ArgumentParser:
             "the canonical instruction returned by the live RoboCasa environment."
         ),
     )
-    parser.add_argument("--condition", choices=("b0", "b1", "b2", "b3"), default="b1")
+    parser.add_argument(
+        "--condition",
+        action="append",
+        choices=("b0", "b1"),
+        default=[],
+    )
     parser.add_argument(
         "--manifest",
         type=Path,
@@ -58,18 +66,26 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path("configs/evaluation/robocasa365.yaml"),
-        help="Canonical Hey Robot deployment configuration",
+        default=Path("configs/evaluation/robocasa365.rldx.yaml"),
+        help="RLDX policy deployment configuration",
     )
     parser.add_argument("--agent-url", default="http://127.0.0.1:8080/turn")
     parser.add_argument("--runtime-target", default="grpc://127.0.0.1:9092")
     parser.add_argument(
         "--credentials-file",
         type=Path,
-        default=Path("runtime/robocasa365.agent/robocasa.credentials.json"),
+        default=Path("runtime/robocasa365.rldx/robocasa.credentials.json"),
     )
-    parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--poll-sec", type=float, default=1.0)
+    parser.add_argument(
+        "--agent-task-startup-timeout-sec",
+        type=float,
+        default=180.0,
+        help=(
+            "Maximum time to wait for the asynchronously accepted agent turn "
+            "to create its task before reporting agent_no_task."
+        ),
+    )
     parser.add_argument("--timeout-sec", type=float, default=7200.0)
     return parser
 
@@ -108,33 +124,19 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
         role="data",
         token=str(credentials["data_token"]),
     )
-    model_service = GrpcModelServiceClient(
-        model_service_id,
-        model_spec,
-        auth_token=str(credentials["data_token"]),
-    )
     started = time.time()
     agent_trace: list[dict[str, object]] = []
     try:
         health = await runtime.health()
         if not health.get("online") or not health.get("loaded"):
             raise RuntimeError(f"RoboCasa runtime is not ready: {health.get('error')}")
-        model_health = await model_service.health()
-        if not model_health.online or not model_health.loaded:
-            raise RuntimeError(
-                f"RoboCasa model service is not ready: {model_health.error}"
-            )
         (args.output_dir / "runtime_metadata.json").write_text(
             json.dumps(
                 _runtime_metadata(
                     config_path=args.config,
                     model_service_id=model_service_id,
                     model_settings=dict(model_spec.settings),
-                    model_health={
-                        "name": model_health.name,
-                        "version": model_health.version,
-                        "metrics": dict(model_health.metrics),
-                    },
+                    model_health={"ownership": "co_located_in_robocasa_backend"},
                     runtime_health=health,
                 ),
                 indent=2,
@@ -149,6 +151,7 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
             seed=args.seed,
             split=str(args.split or manifest["split"]),
             registries=tuple(manifest["registries"]),
+            execution_artifact_dir=str(args.output_dir),
         )
         official_objective = str(
             initial.metadata.get("policy_task") or initial.task
@@ -219,7 +222,6 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
         )
         observation = initial
         observations = [{"frame_id": initial.frame_id, "done": initial.done}]
-        frames = [initial.images[0].data] if initial.images else []
         last_recorded_frame = initial.frame_id
         runtime_summary: dict[str, object] = {}
         agent_task: dict[str, object] | None = None
@@ -232,6 +234,40 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
                 termination_reason = "episode_done"
                 break
             await asyncio.sleep(max(0.05, args.poll_sec))
+            tasks = await asyncio.to_thread(_read_agent_tasks, args.agent_url)
+            runtime_summary = await asyncio.to_thread(
+                _read_runtime_summary, args.agent_url
+            )
+            agent_task = _find_trial_task(
+                tasks, objective=agent_objective, started=started
+            )
+            # A policy option owns the simulator exclusively. Do not send an
+            # Observe RPC while it is stepping: that would queue behind the
+            # option and turn the evaluator's short polling timeout into a
+            # false runtime failure. The completed option returns its final
+            # observation before the agent becomes observable again.
+            if agent_task is not None and agent_task.get("status") == "active":
+                # The evaluator may read only its own official truth. A very
+                # short deadline makes this non-intrusive while an option owns
+                # the simulator, yet catches environment termination as soon
+                # as the option releases it.
+                try:
+                    live_truth = await asyncio.wait_for(
+                        runtime.read_truth(), timeout=1.0
+                    )
+                except TimeoutError:
+                    live_truth = None
+                if live_truth and bool(live_truth["done"]):
+                    termination_reason = "episode_done"
+                    break
+                agent_trace.append(
+                    {
+                        "timestamp": time.time(),
+                        "frame_id": last_recorded_frame,
+                        "task": agent_task,
+                    }
+                )
+                continue
             try:
                 observation = await data_runtime.observe()
             except Exception as exc:
@@ -242,16 +278,7 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
                 observations.append(
                     {"frame_id": observation.frame_id, "done": observation.done}
                 )
-                if observation.images:
-                    frames.append(observation.images[0].data)
                 last_recorded_frame = observation.frame_id
-            tasks = await asyncio.to_thread(_read_agent_tasks, args.agent_url)
-            runtime_summary = await asyncio.to_thread(
-                _read_runtime_summary, args.agent_url
-            )
-            agent_task = _find_trial_task(
-                tasks, objective=agent_objective, started=started
-            )
             agent_trace.append(
                 {
                     "timestamp": time.time(),
@@ -259,7 +286,16 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
                     "task": agent_task,
                 }
             )
-            if agent_turn_task.done() and agent_task is None:
+            # /turn acknowledges durable message intake, not task creation.
+            # Initializing a local policy or model can briefly delay the agent
+            # consumer, so absence from /api/tasks immediately after that ACK
+            # is a race rather than an execution failure.
+            if (
+                agent_turn_task.done()
+                and agent_task is None
+                and time.time() - started
+                >= float(getattr(args, "agent_task_startup_timeout_sec", 180.0))
+            ):
                 termination_reason = "agent_no_task"
                 break
             if condition.manipulate_call_limit is not None:
@@ -365,7 +401,11 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
             encoding="utf-8",
         )
         _write_event_artifacts(args.output_dir, [runtime_summary], trial_id=trial_id)
-        _write_video(args.output_dir / "video.mp4", frames)
+        # The backend owns the simulator and closes the writer after the last
+        # environment step. The evaluator never samples frames for recording.
+        await asyncio.wait_for(
+            runtime.end_trial(reason="benchmark_artifacts_finalized"), timeout=30.0
+        )
         (args.output_dir / "evaluator_truth.json").write_text(
             json.dumps(truth, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
@@ -376,6 +416,7 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
             encoding="utf-8",
         )
         return result
+
     finally:
         turn_task = locals().get("agent_turn_task")
         if isinstance(turn_task, asyncio.Task) and not turn_task.done():
@@ -391,7 +432,80 @@ async def run_trial(args: argparse.Namespace) -> dict[str, object]:
             logging.getLogger(__name__).exception("failed to close RoboCasa trial")
         await runtime.close()
         await data_runtime.close()
-        await model_service.close()
+
+
+async def run_batch(args: argparse.Namespace) -> dict[str, object]:
+    """Run selected tasks sequentially; one task is simply batch size one."""
+    manifest = load_manifest(args.manifest)
+    tasks = list(getattr(args, "task", []))
+    if not tasks:
+        suites = args.suite or sorted(manifest["suites"])
+        invalid = sorted(set(suites) - set(manifest["suites"]))
+        if invalid:
+            raise ValueError(f"unknown manifest suites: {invalid}")
+        tasks = [task for suite in suites for task in manifest["suites"][suite]]
+    conditions = args.condition or ["b1"]
+    seeds = [int(value) for value in args.seeds.split(",") if value.strip()]
+    if not seeds:
+        raise ValueError("--seeds must contain at least one integer")
+    args.output_root.mkdir(parents=True, exist_ok=False)
+    results: list[dict[str, object]] = []
+    for task in tasks:
+        for seed in seeds:
+            for condition in conditions:
+                output_dir = args.output_root / "trials" / f"{condition}-{task}-{seed}"
+                trial_args = argparse.Namespace(
+                    task=task,
+                    seed=seed,
+                    objective=getattr(args, "objective", None),
+                    condition=condition,
+                    manifest=args.manifest,
+                    split=getattr(args, "split", None),
+                    config=args.config,
+                    agent_url=args.agent_url,
+                    runtime_target=args.runtime_target,
+                    credentials_file=args.credentials_file,
+                    output_dir=output_dir,
+                    poll_sec=args.poll_sec,
+                    agent_task_startup_timeout_sec=getattr(
+                        args, "agent_task_startup_timeout_sec", 180.0
+                    ),
+                    timeout_sec=args.timeout_sec,
+                )
+                try:
+                    result = await run_trial(trial_args)
+                except Exception as exc:
+                    result = {
+                        "task": task,
+                        "seed": seed,
+                        "condition": condition,
+                        "official_success": False,
+                        "false_completion": False,
+                        "failure_stage": "trial_exception",
+                        "termination_reason": "trial_exception",
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    }
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    (output_dir / "result.json").write_text(
+                        json.dumps(result, indent=2, sort_keys=True) + "\n",
+                        encoding="utf-8",
+                    )
+                results.append(result)
+    summary = {
+        "manifest": manifest,
+        "count": len(results),
+        "trials": results,
+        "official_successes": sum(bool(item["official_success"]) for item in results),
+        "false_completions": sum(bool(item["false_completion"]) for item in results),
+        "trial_errors": sum(
+            item.get("failure_stage") == "trial_exception" for item in results
+        ),
+    }
+    (args.output_root / "summary.json").write_text(
+        json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return summary
 
 
 async def _send_agent_turn(
@@ -441,24 +555,6 @@ def _read_runtime_summary(turn_url: str) -> dict[str, object]:
     with urllib.request.urlopen(summary_url, timeout=10) as response:  # noqa: S310
         payload = json.load(response)
     return payload if isinstance(payload, dict) else {}
-
-
-def _write_video(path: Path, frames: list[bytes]) -> None:
-    if not frames:
-        return
-    try:
-        import imageio.v2 as imageio
-    except ModuleNotFoundError:
-        return
-    writer = imageio.get_writer(path, fps=5)
-    try:
-        for encoded in frames:
-            try:
-                writer.append_data(imageio.imread(encoded))  # type: ignore[arg-type]
-            except Exception:  # noqa: S112
-                continue
-    finally:
-        writer.close()
 
 
 def _write_event_artifacts(
@@ -646,10 +742,9 @@ def _runtime_metadata_without_git(
 
 
 def main() -> None:
-    args = _parser().parse_args()
-    result = asyncio.run(run_trial(args))
-    sys.stdout.write(json.dumps(result, indent=2, sort_keys=True) + "\n")
-    raise SystemExit(0 if result["official_success"] else 2)
+    summary = asyncio.run(run_batch(_parser().parse_args()))
+    sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    raise SystemExit(0 if summary["official_successes"] == summary["count"] else 2)
 
 
 if __name__ == "__main__":

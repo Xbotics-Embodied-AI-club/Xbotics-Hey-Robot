@@ -167,33 +167,30 @@ class SkillWorker:
         if active or (latest is not None and _terminal(latest)):
             return latest
         command = self._run_store.submission(run_id)
-        if command is None and latest is None:
-            return None
         if command is None:
-            assert latest is not None
-            envelope = latest.envelope
-            name = latest.name
-        else:
-            envelope = command.envelope
-            name = command.name
-        event = SkillEvent(
-            envelope=envelope,
-            run_id=run_id,
-            sequence=(latest.sequence + 1 if latest is not None else 1),
-            name=name,
-            phase="failed",
-            timestamp=time.time(),
-            summary="skill execution ownership was lost during restart",
-            result=SkillResult(
-                False,
-                "skill execution ownership was lost during restart",
-                "failed",
-                failure_mode="execution_lost",
-                error="no active worker task owns this persisted non-terminal run",
-            ),
+            return latest
+        # This worker has no in-memory ownership of a durable, non-terminal run.
+        # It therefore cannot know whether a physical action was completed, and
+        # must never replay it after a process restart. Persist a terminal
+        # failure so the task coordinator can safely resume planning.
+        return self._run_store.append_event(
+            SkillEvent(
+                envelope=command.envelope,
+                run_id=run_id,
+                sequence=(latest.sequence if latest is not None else 0) + 1,
+                name=command.name,
+                phase="failed",
+                timestamp=time.time(),
+                summary="Skill execution was lost when its worker restarted.",
+                result=SkillResult(
+                    False,
+                    "Skill execution was lost when its worker restarted.",
+                    "failed",
+                    failure_mode="execution_lost",
+                    error="no active worker owns the submitted run",
+                ),
+            )
         )
-        await self._emit(event)
-        return event
 
     async def close(self) -> None:
         self._closed = True

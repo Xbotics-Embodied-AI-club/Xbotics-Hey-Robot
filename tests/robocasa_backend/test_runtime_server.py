@@ -8,6 +8,7 @@ import types
 import numpy as np
 import pytest
 
+from hey_robot.foundation.options import OptionResult, OptionStatus
 from hey_robot.robocasa_backend.episode_manager import EpisodeManager
 from hey_robot.robocasa_backend.rpc.v1 import (
     robocasa_runtime_pb2 as pb,
@@ -57,6 +58,27 @@ class _SlowEnv(_Env):
         return _observation(), 0.0, False, False, {}
 
 
+class _Runner:
+    def __init__(self, manager, *, sleep: float = 0.0) -> None:
+        self.manager = manager
+        self.sleep = sleep
+        self.requests = []
+
+    def run(self, request):
+        self.requests.append(request)
+        if self.sleep:
+            time.sleep(self.sleep)
+        outcome = self.manager.step_chunk([[0.0] * 12], expected_frame_id=0)[-1]
+        return OptionResult(
+            status=OptionStatus.SUCCESS if outcome.done else OptionStatus.BUDGET,
+            actions_executed=1,
+            chunks_executed=1,
+            environment_done=outcome.done,
+            progress=self.manager.get_task_progress(),
+            diagnostics=self.manager.get_execution_diagnostics(),
+        )
+
+
 class _Context:
     def __init__(self, token: str) -> None:
         self.token = token
@@ -75,12 +97,14 @@ async def test_runtime_service_covers_authenticated_trial_lifecycle() -> None:
         allowed_tasks=frozenset({"CloseFridge"}),
         env_factory=lambda _spec: (env, _observation()),
     )
-    prepared = []
+    runners = []
     service = RoboCasaRuntimeService(
         manager=manager,
         evaluator_token="eval",  # noqa: S106
         data_token="data",  # noqa: S106
-        prepare_trial=lambda: prepared.append(True),
+        create_option_runner=lambda active: (
+            runners.append(_Runner(active)) or runners[-1]
+        ),
     )
     evaluator = _Context("eval")
     data = _Context("data")
@@ -101,21 +125,23 @@ async def test_runtime_service_covers_authenticated_trial_lifecycle() -> None:
         "camera2",
         "camera3",
     ]
-    assert prepared == [True]
+    assert len(runners) == 1
     assert service.busy is True
 
     observed = await service.Observe(pb.EmptyRequest(), data)
     assert observed.task == "CloseFridge"
     step = await service.Step(
         pb.StepRequest(
-            action=[0.0] * 12,
-            raw_action=[0.0] * 12,
-            expected_frame_id=0,
+            session_id="trial-1",
+            instruction="Close the refrigerator door.",
+            max_actions=8,
         ),
         data,
     )
     assert step.done is True
     assert step.observation.frame_id == 1
+    assert step.actions_executed == 1
+    assert runners[0].requests[0].instruction == "Close the refrigerator door."
 
     truth = await service.ReadTruth(pb.EmptyRequest(), evaluator)
     assert truth.official_success is True
@@ -136,10 +162,8 @@ async def test_runtime_service_rejects_wrong_role_and_action_schema() -> None:
     )
     with pytest.raises(RuntimeError, match="credential is required"):
         await service._authorize(_Context("data"), role="evaluator")
-    with pytest.raises(ValueError, match="exactly 12 finite"):
-        await service.Step(
-            pb.StepRequest(action=[0.0], raw_action=[0.0]), _Context("data")
-        )
+    with pytest.raises(ValueError, match="session_id, instruction, and max_actions"):
+        await service.Step(pb.StepRequest(), _Context("data"))
 
 
 @pytest.mark.asyncio
@@ -148,7 +172,11 @@ async def test_runtime_service_times_out_a_stuck_environment_step() -> None:
         allowed_tasks=frozenset({"CloseFridge"}),
         env_factory=lambda _spec: (_SlowEnv(), _observation()),
     )
-    service = RoboCasaRuntimeService(manager=manager, step_timeout_sec=0.01)
+    service = RoboCasaRuntimeService(
+        manager=manager,
+        create_option_runner=lambda active: _Runner(active, sleep=0.05),
+        option_timeout_sec=0.01,
+    )
     context = _Context("")
     await service.BeginTrial(
         pb.BeginTrialRequest(trial_id="slow", task="CloseFridge", seed=1000),
@@ -157,9 +185,12 @@ async def test_runtime_service_times_out_a_stuck_environment_step() -> None:
 
     with pytest.raises(RuntimeError, match=r"exceeded 0\.0s"):
         await service.Step(
-            pb.StepRequest(action=[0.0] * 12, raw_action=[0.0] * 12), context
+            pb.StepRequest(
+                session_id="slow", instruction="Close the door", max_actions=8
+            ),
+            context,
         )
-    assert "environment step exceeded" in str(service._last_error)
+    assert "policy option exceeded" in str(service._last_error)
     await asyncio.sleep(0.06)
 
 
@@ -186,10 +217,31 @@ def test_runtime_helpers_validate_assets_observations_and_numpy(
         "x": [1],
         "y": [2.0],
     }
-
     fake = types.ModuleType("lerobot.envs.robocasa")
     fake.ACTION_DIM = 12
     fake.OBS_STATE_DIM = 16
     monkeypatch.setitem(sys.modules, "lerobot", types.ModuleType("lerobot"))
     monkeypatch.setitem(sys.modules, "lerobot.envs", types.ModuleType("lerobot.envs"))
     monkeypatch.setitem(sys.modules, "lerobot.envs.robocasa", fake)
+
+
+def test_episode_manager_records_execution_owned_video_and_trajectory(tmp_path) -> None:
+    manager = EpisodeManager(
+        allowed_tasks=frozenset({"CloseFridge"}),
+        env_factory=lambda _spec: (_Env(), _observation()),
+    )
+    trial = manager.begin_trial(
+        manager.new_spec(
+            task="CloseFridge",
+            seed=0,
+            execution_artifact_dir=str(tmp_path),
+        )
+    )
+    manager.step([0.0] * 12, expected_frame_id=trial.frame_id)
+    truth = manager.read_truth()
+    manager.end_trial()
+
+    artifacts = truth["execution_artifacts"]
+    assert artifacts["recorded_frames"] == 2
+    assert (tmp_path / "video.mp4").stat().st_size > 0
+    assert len((tmp_path / "trajectory.jsonl").read_text().splitlines()) == 2

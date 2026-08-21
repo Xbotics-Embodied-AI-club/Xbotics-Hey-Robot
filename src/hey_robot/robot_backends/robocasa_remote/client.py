@@ -50,7 +50,13 @@ class GrpcRoboCasaRuntimeClient:
         # RobotManager is constructed before its async lifecycle starts, while
         # grpc.aio requires a running event loop to allocate a channel.
         if self._stub is None:
-            self._channel = grpc.aio.insecure_channel(self.target)
+            self._channel = grpc.aio.insecure_channel(
+                self.target,
+                options=[
+                    ("grpc.max_send_message_length", 64 * 1024 * 1024),
+                    ("grpc.max_receive_message_length", 64 * 1024 * 1024),
+                ],
+            )
             self._stub = robocasa_runtime_pb2_grpc.RoboCasaRuntimeStub(self._channel)
         return self._stub
 
@@ -76,6 +82,7 @@ class GrpcRoboCasaRuntimeClient:
         seed: int,
         split: str = "target",
         registries: tuple[str, ...] = ("lightwheel",),
+        execution_artifact_dir: str | None = None,
     ) -> RemoteObservation:
         response = await self._runtime_stub().BeginTrial(
             robocasa_runtime_pb2.BeginTrialRequest(
@@ -84,6 +91,7 @@ class GrpcRoboCasaRuntimeClient:
                 seed=seed,
                 split=split,
                 registries=registries,
+                execution_artifact_dir=execution_artifact_dir or "",
             ),
             timeout=self.timeout_sec,
             metadata=self._metadata(),
@@ -98,29 +106,52 @@ class GrpcRoboCasaRuntimeClient:
         )
         return _observation(response)
 
-    async def step(
+    async def run_option(
         self,
         *,
-        action: list[float],
-        expected_frame_id: int,
-        raw_action: list[float] | None = None,
-        action_clipped: bool = False,
+        session_id: str,
+        instruction: str,
+        max_actions: int,
+        reset_session: bool = False,
     ) -> RemoteStep:
         response = await self._runtime_stub().Step(
             robocasa_runtime_pb2.StepRequest(
-                action=action,
-                expected_frame_id=expected_frame_id,
-                raw_action=raw_action or action,
-                action_clipped=action_clipped,
+                session_id=session_id,
+                instruction=instruction,
+                max_actions=max_actions,
+                reset_session=reset_session,
             ),
             timeout=self.timeout_sec,
             metadata=self._metadata(),
         )
         return RemoteStep(
             observation=_observation(response.observation),
-            reward=float(response.reward),
             done=bool(response.done),
-            metrics=_struct_to_dict(response.metrics),
+            status=str(response.status),
+            actions_executed=int(response.actions_executed),
+            chunks_executed=int(response.chunks_executed),
+            progress=_struct_to_dict(response.progress),
+            diagnostics=_struct_to_dict(response.diagnostics),
+            error=response.error_message or None,
+        )
+
+    async def step_native(
+        self, *, action: list[float], expected_frame_id: int
+    ) -> RemoteStep:
+        response = await self._runtime_stub().StepNative(
+            robocasa_runtime_pb2.NativeStepRequest(
+                action=action, expected_frame_id=expected_frame_id
+            ),
+            timeout=self.timeout_sec,
+            metadata=self._metadata(),
+        )
+        return RemoteStep(
+            observation=_observation(response.observation),
+            done=bool(response.done),
+            status="native",
+            actions_executed=1,
+            chunks_executed=1,
+            progress=_struct_to_dict(response.progress),
         )
 
     async def read_truth(self) -> dict[str, Any]:

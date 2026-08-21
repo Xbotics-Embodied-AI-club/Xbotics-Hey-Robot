@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from threading import RLock
 from typing import Any
 
@@ -23,6 +25,7 @@ class TrialSpec:
     seed: int
     split: str = "target"
     registries: tuple[str, ...] = ("lightwheel",)
+    execution_artifact_dir: str | None = None
 
 
 @dataclass
@@ -37,6 +40,7 @@ class ActiveTrial:
     last_info: dict[str, Any] | None = None
     started_at: float = 0.0
     horizon: int = 1000
+    recorder: ExecutionRecorder | None = None
 
 
 @dataclass(frozen=True)
@@ -49,6 +53,105 @@ class StepOutcome:
     terminated: bool
     truncated: bool
     info: dict[str, Any]
+
+
+class ExecutionRecorder:
+    """Write simulator-owned video and state records for one trial."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.video_path = self.root / "video.mp4"
+        self.trajectory_path = self.root / "trajectory.jsonl"
+        self._container: Any | None = None
+        self._stream: Any | None = None
+        self._writer: Any | None = None
+        self._trajectory = self.trajectory_path.open("w", encoding="utf-8")
+        self.frame_count = 0
+
+    def record(
+        self,
+        observation: dict[str, Any],
+        *,
+        frame_id: int,
+        action: np.ndarray | None,
+        reward: float | None,
+        done: bool,
+    ) -> None:
+        pixels = dict(observation.get("pixels") or {})
+        frame = pixels.get("robot0_agentview_left")
+        if frame is None:
+            raise EpisodeError("recording_failed", "agentview camera is unavailable")
+        self._append_video_frame(np.asarray(frame, dtype=np.uint8))
+        self.frame_count += 1
+        state = np.asarray(observation.get("agent_pos", []), dtype=np.float32)
+        self._trajectory.write(
+            json.dumps(
+                {
+                    "frame_id": frame_id,
+                    "agent_pos": state.tolist(),
+                    "action": action.tolist() if action is not None else None,
+                    "reward": reward,
+                    "done": done,
+                },
+                sort_keys=True,
+            )
+            + "\n"
+        )
+        self._trajectory.flush()
+
+    def _append_video_frame(self, frame: np.ndarray) -> None:
+        """Encode an RGB frame with the backend's pinned PyAV runtime.
+
+        ImageIO selects its PyAV plugin when ``av`` is installed. That plugin
+        does not provide a default output codec, which makes the first frame
+        fail at runtime. RoboCasa365 already pins PyAV, so own the tiny MP4
+        encoding loop here and explicitly request the portable H.264 codec.
+        """
+        if frame.ndim != 3 or frame.shape[2] != 3:
+            raise EpisodeError(
+                "recording_failed",
+                f"agentview frame must be HxWx3 RGB, got {frame.shape}",
+            )
+        try:
+            import av
+        except ModuleNotFoundError:
+            # Unit and gateway-only environments deliberately omit the heavy
+            # RoboCasa dependency group.  Their normal imageio-ffmpeg path
+            # remains a valid encoder when PyAV is absent.
+            import imageio.v2 as imageio
+
+            if self._writer is None:
+                self._writer = imageio.get_writer(
+                    self.video_path, fps=5, codec="libx264"
+                )
+            self._writer.append_data(frame)
+            return
+        if self._container is None:
+            self._container = av.open(str(self.video_path), mode="w")
+            self._stream = self._container.add_stream("libx264", rate=5)
+            self._stream.width = int(frame.shape[1])
+            self._stream.height = int(frame.shape[0])
+            self._stream.pix_fmt = "yuv420p"
+        video_frame = av.VideoFrame.from_ndarray(frame, format="rgb24")
+        container = self._container
+        stream = self._stream
+        if container is None or stream is None:
+            raise EpisodeError("recording_failed", "video encoder was not initialized")
+        for packet in stream.encode(video_frame):
+            container.mux(packet)
+
+    def close(self) -> None:
+        if self._container is not None:
+            container = self._container
+            stream = self._stream
+            if stream is not None:
+                for packet in stream.encode():
+                    container.mux(packet)
+            container.close()
+        if self._writer is not None:
+            self._writer.close()
+        self._trajectory.close()
 
 
 class EpisodeManager:
@@ -89,13 +192,27 @@ class EpisodeManager:
                     "environment_reset_failed",
                     f"failed to create RoboCasa trial: {type(exc).__name__}: {exc}",
                 ) from exc
+            recorder = (
+                ExecutionRecorder(Path(spec.execution_artifact_dir))
+                if spec.execution_artifact_dir
+                else None
+            )
             self._active = ActiveTrial(
                 spec=spec,
                 env=env,
                 observation=observation,
                 started_at=time.time(),
                 horizon=int(getattr(env, "_max_episode_steps", 1000)),
+                recorder=recorder,
             )
+            if recorder is not None:
+                recorder.record(
+                    observation,
+                    frame_id=0,
+                    action=None,
+                    reward=None,
+                    done=False,
+                )
             self._events = [
                 {
                     "kind": "trial_begin",
@@ -155,6 +272,14 @@ class EpisodeManager:
             trial.official_success = bool(dict(info or {}).get("is_success", False))
             trial.last_reward = float(reward)
             trial.last_info = dict(info or {})
+            if trial.recorder is not None:
+                trial.recorder.record(
+                    observation,
+                    frame_id=trial.frame_id,
+                    action=action_array,
+                    reward=float(reward),
+                    done=trial.done,
+                )
             self._events.append(
                 {
                     "kind": "action",
@@ -184,6 +309,35 @@ class EpisodeManager:
                 info=dict(info or {}),
             )
 
+    def step_chunk(
+        self,
+        actions: list[Any],
+        *,
+        expected_frame_id: int,
+        raw_actions: list[Any] | None = None,
+        action_clipped: bool = False,
+    ) -> list[StepOutcome]:
+        """Advance a contiguous policy action block under one runtime lock."""
+        outcomes: list[StepOutcome] = []
+        frame_id = expected_frame_id
+        raw_values = raw_actions or actions
+        if len(raw_values) != len(actions):
+            raise EpisodeError(
+                "action_schema_mismatch", "raw action chunk length differs"
+            )
+        for action, raw_action in zip(actions, raw_values, strict=True):
+            outcome = self.step(
+                action,
+                expected_frame_id=frame_id,
+                raw_action=raw_action,
+                action_clipped=action_clipped,
+            )
+            outcomes.append(outcome)
+            frame_id = outcome.frame_id
+            if outcome.done:
+                break
+        return outcomes
+
     def read_truth(self) -> dict[str, Any]:
         trial = self.current_trial()
         return {
@@ -198,7 +352,75 @@ class EpisodeManager:
             "last_reward": trial.last_reward,
             "last_info": dict(trial.last_info or {}),
             "horizon": trial.horizon,
+            "execution_artifacts": (
+                {
+                    "video": str(trial.recorder.video_path),
+                    "trajectory": str(trial.recorder.trajectory_path),
+                    "recorded_frames": trial.recorder.frame_count,
+                }
+                if trial.recorder is not None
+                else {}
+            ),
         }
+
+    def get_task_progress(self) -> dict[str, Any]:
+        """Return structured task progress for the active RoboCasa trial.
+
+        Resolves the task env (``wrapper._env.env``) and extracts the live
+        ``_check_success`` predicates (e.g. ``success_time``, ``washed_time``,
+        ``kettle_on_site``) so the agent can verify sub-goal progress precisely
+        instead of relying on a VLM ``inspect_scene`` question.
+        """
+        trial = self.current_trial()
+        raw_env = getattr(trial.env, "_env", None)
+        task_env = getattr(raw_env, "env", None) if raw_env is not None else None
+        if task_env is None or not hasattr(task_env, "_check_success"):
+            return {}
+        from hey_robot.robocasa_backend.task_progress import extract_task_progress
+
+        return extract_task_progress(task_env)
+
+    def get_execution_diagnostics(self) -> dict[str, Any]:
+        """Return physical signals used to gate a policy retry.
+
+        This deliberately reports ``grasp_contact`` as unknown when a RoboCasa
+        wrapper does not expose the simulator helper.  Treating unavailable
+        contact as ``False`` would turn missing instrumentation into a false
+        empty-grasp diagnosis.
+        """
+        trial = self.current_trial()
+        state = np.asarray(trial.observation.get("agent_pos", []), dtype=np.float64)
+        result: dict[str, Any] = {
+            "frame_id": trial.frame_id,
+            "task": trial.spec.task,
+            "task_progress": self.get_task_progress(),
+        }
+        if state.shape == (16,):
+            result.update(
+                {
+                    "eef_position_relative": state[:3].round(5).tolist(),
+                    "base_position": state[7:10].round(5).tolist(),
+                    "gripper_qpos": state[14:16].round(5).tolist(),
+                    "gripper_closed": bool(float(state[14]) < 0.004),
+                }
+            )
+        raw_env = getattr(trial.env, "_env", None)
+        task_env = getattr(raw_env, "env", None) if raw_env is not None else None
+        for candidate in (trial.env, raw_env, task_env):
+            contact = getattr(candidate, "grasp_contact", None)
+            if not callable(contact):
+                continue
+            try:
+                value = contact()
+                if isinstance(value, tuple):
+                    result["grasp_contact"] = bool(value[0])
+                    result["grasp_obj"] = str(value[1]) if value[1] else None
+                else:
+                    result["grasp_contact"] = bool(value)
+                break
+            except Exception:  # noqa: S112 - diagnostics are optional
+                continue
+        return result
 
     def record_event(self, kind: str, payload: dict[str, Any]) -> None:
         with self._lock:
@@ -215,6 +437,8 @@ class EpisodeManager:
         if trial is None:
             return False
         self.record_event("trial_end", {"trial_id": trial.spec.trial_id})
+        if trial.recorder is not None:
+            trial.recorder.close()
         close = getattr(trial.env, "close", None)
         if callable(close):
             close()
@@ -228,6 +452,7 @@ class EpisodeManager:
         trial_id: str | None = None,
         split: str = "target",
         registries: tuple[str, ...] = ("lightwheel",),
+        execution_artifact_dir: str | None = None,
     ) -> TrialSpec:
         return TrialSpec(
             trial_id=trial_id or f"rc-{uuid.uuid4().hex}",
@@ -235,6 +460,7 @@ class EpisodeManager:
             seed=seed,
             split=split,
             registries=registries,
+            execution_artifact_dir=execution_artifact_dir,
         )
 
     @staticmethod

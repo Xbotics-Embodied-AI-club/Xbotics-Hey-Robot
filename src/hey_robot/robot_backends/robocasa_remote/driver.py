@@ -11,7 +11,7 @@ import grpc
 import numpy as np
 from PIL import Image
 
-from hey_robot.protocol import Envelope, RobotAction, RobotStatus
+from hey_robot.protocol import Envelope, RobotAction, RobotSkillAction, RobotStatus
 from hey_robot.robot_api import (
     DriverObservation,
     ObservationAsset,
@@ -29,8 +29,8 @@ class RoboCasaRemoteDriver:
     """RobotDriver adapter for a single remote RoboCasa episode.
 
     The simulator and its Python dependencies stay in the standalone container.
-    This driver intentionally transports only observations and normalized 12-D
-    actions; it never translates them to an SO101/XLeRobot joint convention.
+    The foundation policy is co-located with the simulator. This driver sends
+    only bounded policy-option requests and observations.
     """
 
     ACTION_DIMENSIONS = 12
@@ -56,7 +56,6 @@ class RoboCasaRemoteDriver:
         self.done = False
         self.success: bool | None = None
         self.last_error: str | None = None
-        self.last_reward: float | None = None
         self._last_observation: RemoteObservation | None = None
         self._rpc_timeout_sec = max(
             float(context.settings.get("timeout_sec", 10.0)), 1.0
@@ -94,8 +93,8 @@ class RoboCasaRemoteDriver:
                 "embodiment_profile": self.context.embodiment.name
                 if self.context.embodiment
                 else None,
-                "control": "normalized_action",
-                "action_schema": {"dimensions": 12, "bounds": "environment"},
+                "control": "foundation_policy_option",
+                "supported_skills": ["run_policy_option", "embodiment_native_action"],
                 "state_dimensions": 16,
                 "runtime": "remote_simulator",
                 "simulator_only": True,
@@ -113,7 +112,6 @@ class RoboCasaRemoteDriver:
             metrics={
                 "done": self.done,
                 "success": self.success,
-                "last_reward": self.last_reward,
                 "simulator_only": True,
             },
         )
@@ -158,34 +156,45 @@ class RoboCasaRemoteDriver:
             metrics={
                 "driver": "robocasa_remote",
                 "done": self.done,
-                "last_reward": self.last_reward,
                 "simulator_only": True,
             },
         )
 
     async def apply_action(self, action: RobotAction) -> RobotStatus:
         try:
-            self._validate_action(action)
-            if self.done:
-                raise ValueError(
-                    "episode is already done; reset before applying another action"
+            skill = RobotSkillAction.from_robot_action(action)
+            if skill.name == "embodiment_native_action":
+                values = [float(v) for v in skill.arguments["values"]]
+                if len(values) != self.ACTION_DIMENSIONS:
+                    raise ValueError("RoboCasa native action must contain 12 values")
+                step = await asyncio.wait_for(
+                    self.client.step_native(
+                        action=values, expected_frame_id=self.frame_id
+                    ),
+                    timeout=self._rpc_timeout_sec,
                 )
-            if self.episode_id is None:
-                raise ValueError("RoboCasa episode has not been created")
-            self.state = "executing"
-            step = await asyncio.wait_for(
-                self.client.step(
-                    action=[float(value) for value in action.values],
-                    expected_frame_id=self.frame_id,
-                    raw_action=[
-                        float(value)
-                        for value in action.metadata.get("raw_action", action.values)
-                    ],
-                    action_clipped=bool(action.metadata.get("action_clipped", False)),
-                ),
-                timeout=self._rpc_timeout_sec,
-            )
-            self.last_reward = float(step.reward)
+            elif skill.name == "run_policy_option":
+                if self.done:
+                    raise ValueError(
+                        "episode is already done; reset before applying another action"
+                    )
+                if self.episode_id is None:
+                    raise ValueError("RoboCasa episode has not been created")
+                self.state = "executing"
+                step = await asyncio.wait_for(
+                    self.client.run_option(
+                        session_id=str(skill.arguments["session_id"]),
+                        instruction=str(skill.arguments["instruction"]),
+                        max_actions=int(skill.arguments["max_actions"]),
+                        reset_session=bool(
+                            action.metadata.get("reset_model_session", False)
+                            or skill.arguments.get("reset_session", False)
+                        ),
+                    ),
+                    timeout=self._rpc_timeout_sec,
+                )
+            else:
+                raise ValueError("unsupported RoboCasa skill")
             self.done = bool(step.done)
             # Official simulator success belongs exclusively to evaluator
             # ReadTruth and is deliberately unavailable on the data plane.
@@ -194,6 +203,15 @@ class RoboCasaRemoteDriver:
             self.state = "idle" if not self.done else "completed"
             self.last_error = None
             status = await self.status()
+            option = {
+                "status": step.status,
+                "environment_done": self.done,
+                "actions_executed": step.actions_executed,
+                "chunks_executed": step.chunks_executed,
+                "progress": dict(step.progress),
+                "diagnostics": dict(step.diagnostics),
+                "error": step.error,
+            }
             return RobotStatus(
                 envelope=status.envelope,
                 frame_id=status.frame_id,
@@ -201,8 +219,27 @@ class RoboCasaRemoteDriver:
                 task=self.task,
                 skill_id=action.skill_id,
                 success=True,
-                metrics={**status.metrics, "step": dict(step.metrics)},
+                metrics={
+                    **status.metrics,
+                    "option": option,
+                    # Surface the simulator termination on the data plane so the
+                    # VLA option runner's EnvironmentDoneTermination can stop
+                    # exactly when RoboCasa reports done (the backend checks
+                    # check_success every chunk; without this the VLA burns its
+                    # whole max_steps budget after the task already finished).
+                    "environment_done": self.done,
+                    "last_skill_result": {
+                        "summary": step.error or "policy option completed",
+                        "option": option,
+                        "environment_done": self.done,
+                        "done": self.done,
+                        # The action itself executed fine even when the episode
+                        # terminates; clients must not flip this to failure.
+                        "success": True,
+                    },
+                },
             )
+
         except Exception as exc:
             self.state = "error"
             self.last_error = f"{type(exc).__name__}: {exc}"
@@ -254,33 +291,6 @@ class RoboCasaRemoteDriver:
             await self.control_client.close()
         self.episode_id = None
         self.state = "closed"
-
-    def _validate_action(self, action: RobotAction) -> None:
-        if action.metadata.get("action_type") != "embodiment_native":
-            raise ValueError("RoboCasa only accepts embodiment_native actions")
-        action_space = str(action.metadata.get("action_space") or "")
-        if action_space != "robocasa_12d":
-            raise ValueError(
-                f"RoboCasa action_space must be 'robocasa_12d', got {action_space!r}"
-            )
-        embodiment = str(action.metadata.get("embodiment") or "")
-        if embodiment != "robocasa":
-            raise ValueError(
-                f"RoboCasa embodiment must be 'robocasa', got {embodiment!r}"
-            )
-        if len(action.values) != self.ACTION_DIMENSIONS:
-            raise ValueError(
-                f"action dimension mismatch: expected {self.ACTION_DIMENSIONS}, got {len(action.values)}"
-            )
-        if not all(math.isfinite(float(value)) for value in action.values):
-            raise ValueError("action contains a non-finite value")
-        if any(abs(float(value)) > 1.0 for value in action.values):
-            raise ValueError("RoboCasa action must be normalized to [-1, 1]")
-        expected = action.metadata.get("expected_frame_id")
-        if expected is not None and int(expected) != self.frame_id:
-            raise ValueError(
-                f"stale action: expected_frame_id={expected}, current_frame_id={self.frame_id}"
-            )
 
     async def _require_observation(self, *, refresh: bool) -> RemoteObservation:
         observation = await self.client.observe() if refresh else self._last_observation

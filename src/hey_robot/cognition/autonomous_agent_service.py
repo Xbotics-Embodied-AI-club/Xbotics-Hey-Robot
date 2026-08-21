@@ -38,6 +38,24 @@ from hey_robot.protocol import (
     Envelope,
     Topics,
 )
+
+
+def _media_resolver(config: DeploymentConfig):
+    """Build the media resolver used to attach observation images to planner
+    tool results, or None when the media root is unavailable."""
+    from hey_robot.robot_media.store import LocalMediaStore, MediaResolver
+
+    root = Path(config.resources.media_root)
+    if not root.is_dir():
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            return None
+    return MediaResolver(
+        LocalMediaStore(root=root, max_items=config.resources.media_max_items)
+    )
+
+
 from hey_robot.protocol.messages import from_payload, to_payload
 from hey_robot.skills import registry_from_config
 from hey_robot.skills.client import SkillClient
@@ -94,6 +112,7 @@ class AutonomousAgentService:
             self.templates,
             self.conversations,
             self.tasks,
+            image_resolver=_media_resolver(config),
         )
         self.tool_executor = AgentToolExecutor(
             config,
@@ -287,6 +306,7 @@ class AutonomousAgentService:
                 context=self.context_builder,
                 tasks=self.tasks,
                 conversations=self.conversations,
+                hard_max_wall_time_sec=self.config.agent_runtime.hard_max_wall_time_sec,
             )
             self._agents[session_key] = agent
         return agent
