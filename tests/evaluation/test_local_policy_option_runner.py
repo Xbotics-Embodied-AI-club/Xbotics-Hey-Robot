@@ -11,6 +11,10 @@ class _Environment:
     def __init__(self, *, complete_after: int) -> None:
         self.complete_after = complete_after
         self.applied: list[int] = []
+        self.option_starts = 0
+
+    def begin_option(self, _request):
+        self.option_starts += 1
 
     def observe(self):
         return {"frame": len(self.applied)}
@@ -51,6 +55,7 @@ def test_runner_keeps_a_same_instruction_session_continuous() -> None:
     assert result.chunks_executed == 2
     assert policy.resets == ["episode-1"]
     assert policy.prompts == ["rinse sink", "rinse sink"]
+    assert environment.option_starts == 1
 
 
 def test_runner_resets_only_when_session_or_instruction_changes() -> None:
@@ -63,3 +68,4 @@ def test_runner_resets_only_when_session_or_instruction_changes() -> None:
     runner.run(OptionRequest("episode-1", "close fridge", max_actions=1))
 
     assert policy.resets == ["episode-1", "episode-1"]
+    assert environment.option_starts == 3

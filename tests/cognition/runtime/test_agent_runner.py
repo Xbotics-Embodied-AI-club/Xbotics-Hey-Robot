@@ -52,6 +52,16 @@ class Model:
         return self.response
 
 
+class SequentialModel(Model):
+    def __init__(self, responses: list[ModelResponse]) -> None:
+        super().__init__()
+        self._responses = responses
+
+    async def chat(self, **kwargs):
+        self.calls.append(kwargs)
+        return self._responses.pop(0)
+
+
 def _tools():
     return ToolRegistry(
         ToolDependencies(
@@ -193,6 +203,28 @@ async def test_model_and_protocol_failures_are_typed(
     assert result.status == "failed"
     assert result.failure is not None
     assert result.failure.code == expected_code
+
+
+@pytest.mark.asyncio
+async def test_one_empty_response_is_retried_without_executing_a_tool() -> None:
+    model = SequentialModel(
+        [
+            ModelResponse(content="", finish_reason="stop"),
+            ModelResponse(tool_calls=[ModelToolCall("move-after-retry", "move", {})]),
+        ]
+    )
+    result = await AgentRunner(model, _tools()).run(
+        AgentTurnRequest(
+            (ModelMessage("system", "test"),),
+            frozenset({"move"}),
+            time.monotonic() + 1,
+            "empty-retry",
+        )
+    )
+    assert result.status == "action_proposed"
+    assert result.proposal is not None
+    assert result.proposal.name == "move"
+    assert len(model.calls) == 2
 
 
 @pytest.mark.asyncio

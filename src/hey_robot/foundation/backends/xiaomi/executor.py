@@ -46,6 +46,10 @@ class XiaomiClient(Protocol):
 class XiaomiPolicyExecutor:
     """Serve XR-1 through its official length-prefixed socket protocol."""
 
+    # Read by the co-located RoboCasa option adapter.  This is deliberately
+    # Xiaomi-specific: remote and non-Xiaomi model services use encoded media.
+    uses_local_robocasa_observation = True
+
     def __init__(
         self,
         service_id: str,
@@ -227,8 +231,14 @@ class XiaomiPolicyExecutor:
                     )
                     inference_performed = True
                 raw_action = self._action_queue.popleft()
-            action = _clip_action(raw_action, self.settings)
-            clipped = not np.array_equal(action, raw_action)
+            # Xiaomi's official RoboCasa evaluator sends the decoded 12-D
+            # action directly to ``convert_action``.  In particular, its
+            # quantized gripper/control-mode outputs may be slightly outside
+            # [-1, 1] (for example -1.0078125).  Clipping them changes the
+            # closed-loop rollout from the very first action, so preserve the
+            # checkpoint output exactly on this adapter only.
+            action = raw_action
+            clipped = False
             if self._cancel_event.is_set():
                 self._cancel_event.clear()
                 return _cancelled_result()
@@ -609,6 +619,25 @@ def _video_frame(
     payload: dict[str, Any], *, settings: dict[str, Any]
 ) -> dict[str, np.ndarray]:
     camera_names = _camera_names(settings)
+    raw_pixels = payload.get("raw_pixels")
+    if isinstance(raw_pixels, dict):
+        raw_images = {
+            name: np.ascontiguousarray(raw_pixels[name], dtype=np.uint8)
+            for name in camera_names
+            if name in raw_pixels
+        }
+        if set(raw_images) != set(camera_names):
+            raise PolicyExecutionError(
+                "observation_schema_mismatch",
+                f"Xiaomi requires cameras {list(camera_names)}, got {sorted(raw_images)}",
+            )
+        if any(
+            value.ndim != 3 or value.shape[-1] != 3 for value in raw_images.values()
+        ):
+            raise PolicyExecutionError(
+                "observation_schema_mismatch", "Xiaomi camera frames must be HxWx3 RGB"
+            )
+        return raw_images
     images: dict[str, np.ndarray] = {}
     for item in list(payload.get("images", []) or []):
         image = dict(item or {})

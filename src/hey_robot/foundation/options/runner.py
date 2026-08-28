@@ -43,6 +43,11 @@ class LocalPolicyOptionRunner:
     def run(self, request: OptionRequest) -> OptionResult:
         if request.max_actions < 1:
             raise ValueError("max_actions must be positive")
+        # Embodiment adapters may aggregate per-option physical diagnostics.
+        # RoboCasa uses this to mirror RPent's grasp/lift/base-drift signals.
+        begin_option = getattr(self._runtime, "begin_option", None)
+        if callable(begin_option):
+            begin_option(request)
         changed = (
             request.reset_session
             or request.session_id != self._session_id

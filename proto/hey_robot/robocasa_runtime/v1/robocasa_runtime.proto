@@ -10,6 +10,7 @@ service RoboCasaRuntime {
   rpc Observe(EmptyRequest) returns (ObservationResponse);
   rpc Step(StepRequest) returns (StepResponse);
   rpc StepNative(NativeStepRequest) returns (NativeStepResponse);
+  rpc LocalizePixels(LocalizePixelsRequest) returns (LocalizePixelsResponse);
   rpc ReadTruth(EmptyRequest) returns (TruthResponse);
   rpc EndTrial(EndTrialRequest) returns (EndTrialResponse);
 }
@@ -76,6 +77,20 @@ message StepResponse {
 // used by analytic harness primitives; model inference remains out of process.
 message NativeStepRequest { repeated float action = 1; int64 expected_frame_id = 2; }
 message NativeStepResponse { ObservationResponse observation = 1; bool done = 2; google.protobuf.Struct progress = 3; }
+
+// Read-only metric-depth back-projection. This exposes camera geometry at
+// caller-selected pixels, never simulator object identities or coordinates.
+message ImagePixel { int32 row = 1; int32 col = 2; }
+message LocalizePixelsRequest {
+  string camera = 1;
+  repeated ImagePixel pixels = 2;
+  int64 expected_frame_id = 3;
+}
+message LocalizePixelsResponse {
+  int64 frame_id = 1;
+  string camera = 2;
+  google.protobuf.Struct localization = 3;
+}
 
 message TruthResponse {
   bool done = 1;

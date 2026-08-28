@@ -172,6 +172,73 @@ class StepResponse(_message.Message):
         error_message: _Optional[str] = ...,
     ) -> None: ...
 
+class NativeStepRequest(_message.Message):
+    __slots__ = ("action", "expected_frame_id")
+    ACTION_FIELD_NUMBER: _ClassVar[int]
+    EXPECTED_FRAME_ID_FIELD_NUMBER: _ClassVar[int]
+    action: _containers.RepeatedScalarFieldContainer[float]
+    expected_frame_id: int
+    def __init__(
+        self,
+        action: _Optional[_Iterable[float]] = ...,
+        expected_frame_id: _Optional[int] = ...,
+    ) -> None: ...
+
+class NativeStepResponse(_message.Message):
+    __slots__ = ("observation", "done", "progress")
+    OBSERVATION_FIELD_NUMBER: _ClassVar[int]
+    DONE_FIELD_NUMBER: _ClassVar[int]
+    PROGRESS_FIELD_NUMBER: _ClassVar[int]
+    observation: ObservationResponse
+    done: bool
+    progress: _struct_pb2.Struct
+    def __init__(
+        self,
+        observation: _Optional[_Union[ObservationResponse, _Mapping]] = ...,
+        done: bool = ...,
+        progress: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...,
+    ) -> None: ...
+
+class ImagePixel(_message.Message):
+    __slots__ = ("row", "col")
+    ROW_FIELD_NUMBER: _ClassVar[int]
+    COL_FIELD_NUMBER: _ClassVar[int]
+    row: int
+    col: int
+    def __init__(
+        self, row: _Optional[int] = ..., col: _Optional[int] = ...
+    ) -> None: ...
+
+class LocalizePixelsRequest(_message.Message):
+    __slots__ = ("camera", "pixels", "expected_frame_id")
+    CAMERA_FIELD_NUMBER: _ClassVar[int]
+    PIXELS_FIELD_NUMBER: _ClassVar[int]
+    EXPECTED_FRAME_ID_FIELD_NUMBER: _ClassVar[int]
+    camera: str
+    pixels: _containers.RepeatedCompositeFieldContainer[ImagePixel]
+    expected_frame_id: int
+    def __init__(
+        self,
+        camera: _Optional[str] = ...,
+        pixels: _Optional[_Iterable[_Union[ImagePixel, _Mapping]]] = ...,
+        expected_frame_id: _Optional[int] = ...,
+    ) -> None: ...
+
+class LocalizePixelsResponse(_message.Message):
+    __slots__ = ("frame_id", "camera", "localization")
+    FRAME_ID_FIELD_NUMBER: _ClassVar[int]
+    CAMERA_FIELD_NUMBER: _ClassVar[int]
+    LOCALIZATION_FIELD_NUMBER: _ClassVar[int]
+    frame_id: int
+    camera: str
+    localization: _struct_pb2.Struct
+    def __init__(
+        self,
+        frame_id: _Optional[int] = ...,
+        camera: _Optional[str] = ...,
+        localization: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...,
+    ) -> None: ...
+
 class TruthResponse(_message.Message):
     __slots__ = ("done", "official_success", "frame_id", "metrics")
     DONE_FIELD_NUMBER: _ClassVar[int]

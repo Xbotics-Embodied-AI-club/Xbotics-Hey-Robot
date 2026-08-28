@@ -161,6 +161,26 @@ def test_xiaomi_executor_uses_agent_subgoal_when_configured() -> None:
     assert client.calls[0][2] == "agent subgoal"
 
 
+def test_xiaomi_executor_preserves_official_quantized_action_range() -> None:
+    class OfficialRangeClient(_Client):
+        def infer(self, states, images, instruction):
+            self.calls.append((states, images, instruction))
+            actions = np.zeros((16, 12), dtype=np.float32)
+            actions[0, 6] = -1.0078125
+            actions[0, 11] = 1.015625
+            return actions
+
+    client = OfficialRangeClient()
+    executor = _loaded_executor(client)
+
+    result = executor.execute(_payload())
+    arguments = result["metrics"]["policy_result"]["actions"][0]["arguments"]
+
+    assert arguments["values"][6] == pytest.approx(-1.0078125)
+    assert arguments["values"][11] == pytest.approx(1.015625)
+    assert result["metrics"]["action_clipped"] is False
+
+
 def test_xiaomi_executor_preserves_history_when_agent_subgoal_changes() -> None:
     client = _Client()
     executor = _loaded_executor(client, prompt_mode="agent_subgoal")
@@ -197,6 +217,52 @@ def test_xiaomi_executor_rejects_incomplete_observation() -> None:
     executor = _loaded_executor(client)
     payload = _payload()
     payload["arguments"]["observation"]["images"].pop()
+
+    result = executor.execute(payload)
+
+    assert result["success"] is False
+    assert result["failure_mode"] == "observation_schema_mismatch"
+    assert client.calls == []
+
+
+def test_xiaomi_executor_accepts_co_located_raw_rgb_observations() -> None:
+    client = _Client()
+    executor = _loaded_executor(client)
+    payload = _payload()
+    observation = payload["arguments"]["observation"]
+    observation["raw_pixels"] = {
+        name: np.full((3, 4, 3), index, dtype=np.uint8)
+        for index, name in enumerate(("camera1", "camera2", "camera3"))
+    }
+    observation.pop("images")
+
+    result = executor.execute(payload)
+
+    assert result["success"] is True
+    assert client.calls[0][1]["camera2"].shape == (4, 3, 4, 3)
+    assert np.all(client.calls[0][1]["camera3"] == 2)
+
+
+@pytest.mark.parametrize(
+    "raw_pixels",
+    [
+        {"camera1": np.zeros((3, 4, 3), dtype=np.uint8)},
+        {
+            "camera1": np.zeros((3, 4, 3), dtype=np.uint8),
+            "camera2": np.zeros((3, 4, 3), dtype=np.uint8),
+            "camera3": np.zeros((3, 4), dtype=np.uint8),
+        },
+    ],
+)
+def test_xiaomi_executor_rejects_invalid_co_located_raw_rgb_observations(
+    raw_pixels: dict[str, np.ndarray],
+) -> None:
+    client = _Client()
+    executor = _loaded_executor(client)
+    payload = _payload()
+    observation = payload["arguments"]["observation"]
+    observation["raw_pixels"] = raw_pixels
+    observation.pop("images")
 
     result = executor.execute(payload)
 

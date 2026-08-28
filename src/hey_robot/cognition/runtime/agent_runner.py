@@ -78,24 +78,38 @@ class AgentRunner:
             return self._failure(
                 "MODEL_REQUEST", "MODEL_TIMEOUT", "decision deadline elapsed"
             )
-        try:
-            response = await asyncio.wait_for(
-                self._model.chat(
-                    messages=list(request.messages),
-                    tools=definitions,
-                    on_text_delta=on_text_delta,
-                ),
-                timeout=max(0.001, request.deadline - time.monotonic()),
-            )
-        except TimeoutError:
-            return self._failure(
-                "MODEL_REQUEST", "MODEL_TIMEOUT", "model request timed out"
-            )
-        except Exception as exc:
-            import traceback
+        # A few OpenAI-compatible providers occasionally acknowledge a tool
+        # continuation with an empty `stop` response.  It is not an action and
+        # therefore safe to retry once with the identical context.  Retrying
+        # does not execute a skill twice, and preserves the single-tool rule.
+        for attempt in range(2):
+            try:
+                response = await asyncio.wait_for(
+                    self._model.chat(
+                        messages=list(request.messages),
+                        tools=definitions,
+                        on_text_delta=on_text_delta,
+                    ),
+                    timeout=max(0.001, request.deadline - time.monotonic()),
+                )
+            except TimeoutError:
+                return self._failure(
+                    "MODEL_REQUEST", "MODEL_TIMEOUT", "model request timed out"
+                )
+            except Exception as exc:
+                import traceback
 
-            traceback.print_exc()
-            return self._failure("MODEL_REQUEST", "MODEL_ERROR", str(exc))
+                traceback.print_exc()
+                return self._failure("MODEL_REQUEST", "MODEL_ERROR", str(exc))
+            if (
+                response.finish_reason != "error"
+                and not response.tool_calls
+                and not (response.content or "").strip()
+                and attempt == 0
+                and time.monotonic() < request.deadline
+            ):
+                continue
+            break
 
         if response.finish_reason == "error":
             return self._failure(

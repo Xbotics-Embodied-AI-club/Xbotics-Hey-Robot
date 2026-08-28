@@ -25,19 +25,13 @@ _CONDITIONS = {
     ),
     "b1": ExperimentCondition(
         "b1",
-        "Ground the task in the current observation before selecting a policy "
-        "call. Reserve manipulate for contact-sensitive control; use ordinary "
-        "robot skills for navigation, open-space transport, release, and pose "
-        "adjustment.\n"
-        "Treat each uninterrupted manipulate sequence as one policy episode. "
-        "If its action budget expires, continue with the same task text before "
-        "introducing another physical command. Reposition only after several "
-        "attempts show no target interaction. Inspect structured progress after "
-        "every action and allow only the environment to declare completion. "
-        "A scene caption is optional planning context, not a permission gate for "
-        "a vision-action policy: after one unavailable scene caption, do not ask "
-        "the same visual question again. Use structured progress and proceed with "
-        "the bounded policy call using the official Goal text.",
+        "Emit exactly one tool call per turn. Wait for its result before selecting "
+        "the next action; never return parallel or batched tool calls.\n"
+        "Use manipulate for every physical action. For each call, copy the complete "
+        "Goal text byte-for-byte as task_prompt and use max_steps=560. If its action "
+        "budget is exhausted, call manipulate again with that exact same root Goal. "
+        "Do not rewrite, shorten, or decompose the Goal. The environment alone "
+        "declares final success.",
     ),
 }
 

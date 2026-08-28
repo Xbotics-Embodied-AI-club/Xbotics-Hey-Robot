@@ -154,6 +154,31 @@ class GrpcRoboCasaRuntimeClient:
             progress=_struct_to_dict(response.progress),
         )
 
+    async def localize_pixels(
+        self,
+        *,
+        camera: str,
+        pixels: list[list[int]],
+        expected_frame_id: int,
+    ) -> dict[str, Any]:
+        response = await self._runtime_stub().LocalizePixels(
+            robocasa_runtime_pb2.LocalizePixelsRequest(
+                camera=camera,
+                pixels=[
+                    robocasa_runtime_pb2.ImagePixel(row=int(row), col=int(col))
+                    for row, col in pixels
+                ],
+                expected_frame_id=expected_frame_id,
+            ),
+            timeout=self.timeout_sec,
+            metadata=self._metadata(),
+        )
+        return {
+            "frame_id": int(response.frame_id),
+            "camera": str(response.camera),
+            **_struct_to_dict(response.localization),
+        }
+
     async def read_truth(self) -> dict[str, Any]:
         response = await self._runtime_stub().ReadTruth(
             robocasa_runtime_pb2.EmptyRequest(),

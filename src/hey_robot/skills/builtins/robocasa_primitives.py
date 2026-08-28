@@ -25,6 +25,12 @@ from typing import Any, cast
 
 import numpy as np
 
+from hey_robot.skills.builtins.common import execute_robot_action
+from hey_robot.skills.builtins.robocasa_session import (
+    mark_repositioned,
+    mark_vla_desync,
+    session_key,
+)
 from hey_robot.skills.context import SkillContext
 from hey_robot.skills.models import Skill, SkillResult
 from hey_robot.skills.registry import SkillRegistry
@@ -32,10 +38,10 @@ from hey_robot.skills.registry import SkillRegistry
 _OSC_POS_SCALE = 0.05  # action 1.0 -> 0.05 m target delta
 _OSC_ROT_SCALE = 0.5  # action 1.0 -> 0.5 rad
 
-# Per-run primitive state (jacobian / base heading calibration). Keyed by the
-# run id so the calibration survives across separate skill invocations of the
-# same episode, and is dropped when a new episode starts.
-_state_cache: dict[str, _PrimitiveState] = {}
+# RPent owns one primitive object per episode, so its Jacobian and base-heading
+# calibration survive separate tool calls.  A Hey Robot run id identifies one
+# tool call; task id is the corresponding episode-scoped identity.
+_state_cache: dict[tuple[str, str], _PrimitiveState] = {}
 
 
 @dataclass
@@ -93,6 +99,9 @@ async def _step(ctx: SkillContext, state: _Obs, action: list[float]) -> _Obs:
     robot = ctx.robot
     if robot is None:
         raise RuntimeError("robot client is unavailable")
+    # This mirrors RPent's ``_vla_desync = True`` on every non-VLA primitive:
+    # the next policy call must reseed rather than stitch pre/post-manual frames.
+    mark_vla_desync(ctx.robot_id, ctx.task_id)
     result = await robot.execute(
         ctx.robot_id,
         "embodiment_native_action",
@@ -108,7 +117,9 @@ async def _step(ctx: SkillContext, state: _Obs, action: list[float]) -> _Obs:
 
 
 def _state(ctx: SkillContext) -> _PrimitiveState:
-    return _state_cache.setdefault(ctx.run_id, _PrimitiveState())
+    return _state_cache.setdefault(
+        session_key(ctx.robot_id, ctx.task_id), _PrimitiveState()
+    )
 
 
 def _zero(base_mode: float = -1.0) -> np.ndarray:
@@ -167,6 +178,7 @@ async def move_to(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResult:
     prim = _state(ctx)
     state = await _observe(ctx)
     target_q = float(state.gripper_qpos[0])
+    moved = prim.pos_jac is None
     if prim.pos_jac is None:
         prim.pos_jac = await _calibrate_pos_jacobian(ctx, state)
     jinv = np.linalg.pinv(prim.pos_jac)
@@ -175,6 +187,8 @@ async def move_to(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResult:
         err = target - state.eef_world
         dist = float(np.linalg.norm(err))
         if dist < tol:
+            if moved:
+                mark_repositioned(ctx.robot_id, ctx.task_id)
             return _ok(i, dist, state, "reached")
         progress_fraction = min(1.0, step_clip / max(dist, 1e-12))
         cartesian_delta = err * progress_fraction
@@ -184,7 +198,10 @@ async def move_to(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResult:
         a[0:3] = a_xyz
         a[6] = g
         state = await _step(ctx, state, a.tolist())
+        moved = True
     cur = state.eef_world
+    if moved:
+        mark_repositioned(ctx.robot_id, ctx.task_id)
     return _ok(max_steps, float(np.linalg.norm(target - cur)), state, "budget")
 
 
@@ -290,6 +307,8 @@ async def move_base(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResult
         ctx.raise_if_cancelled()
         a[6] = _resolve_grip(gripper, state, target_q)
         state = await _step(ctx, state, a.tolist())
+    if steps > 0:
+        mark_repositioned(ctx.robot_id, ctx.task_id)
     return _ok(steps, 0.0, state, "driven")
 
 
@@ -318,6 +337,7 @@ async def navigate_to(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResu
     prim = _state(ctx)
     state = await _observe(ctx)
     target_q = float(state.gripper_qpos[0])
+    moved = prim.fwd_offset is None
     if prim.fwd_offset is None:
         prim.fwd_offset = await _calibrate_forward(ctx, state)
     for i in range(max_steps):
@@ -327,6 +347,8 @@ async def navigate_to(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResu
         dist = float(np.linalg.norm(to))
         if dist < tol:
             prim.pos_jac = None  # base moved -> recalibrate arm
+            if moved:
+                mark_repositioned(ctx.robot_id, ctx.task_id)
             return _ok(i, dist, state, "reached")
         world_dir = math.atan2(float(to[1]), float(to[0]))
         cur_forward = _quat_yaw(state.base_quat) + prim.fwd_offset
@@ -339,7 +361,10 @@ async def navigate_to(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResu
             a[7] = 1.0
             a[9] = float(np.clip(dyaw * 1.5, -0.4, 0.4))
         state = await _step(ctx, state, a.tolist())
+        moved = True
     prim.pos_jac = None
+    if moved:
+        mark_repositioned(ctx.robot_id, ctx.task_id)
     return _ok(
         max_steps, float(np.linalg.norm(target - state.base_pos[:2])), state, "budget"
     )
@@ -355,11 +380,23 @@ _CAMERA_ALIAS = {
 
 
 async def localize(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResult:
-    """Back-project image pixels to world xyz by intersecting the camera ray with
-    a horizontal plane at height ``z`` (default counter height 0.9 m)."""
+    """Back-project pixels with RPent metric depth, with a plane fallback."""
     pixels = arguments["pixels"]
     z = float(arguments.get("z", 0.9))
     camera = str(arguments.get("camera", "camera1"))
+    transport_camera = {
+        "agentview": "camera1",
+        "wrist": "camera3",
+        "robot0_agentview_left": "camera1",
+        "robot0_agentview_right": "camera2",
+        "robot0_eye_in_hand": "camera3",
+    }.get(camera, camera)
+    if await _has_robot_action(ctx, "localize_pixels"):
+        return await execute_robot_action(
+            ctx,
+            "localize_pixels",
+            {"pixels": pixels, "camera": transport_camera},
+        )
     cam = _CAMERA_ALIAS.get(camera, camera)
 
     obs = await ctx.observe(timeout_sec=10.0)
@@ -411,6 +448,16 @@ async def localize(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResult:
         "completed",
         data={"results": results, "camera": cam, "z": z},
     )
+
+
+async def _has_robot_action(ctx: SkillContext, action_name: str) -> bool:
+    if ctx.robot is None:
+        return False
+    try:
+        capabilities = await ctx.robot.capabilities(ctx.robot_id)
+    except (AttributeError, NotImplementedError):
+        return False
+    return action_name in {action.name for action in capabilities.actions}
 
 
 def _ok(steps: int, dist: float, state: _Obs, stage: str) -> SkillResult:
@@ -578,7 +625,10 @@ NAVIGATE_TO_RC = Skill(
     },
     handler=navigate_to,
     resources=("base",),
-    timeout_sec=60.0,
+    # RPent permits the full 300-step closed-loop navigation budget. Hey's
+    # remote path also transports a post-step observation, so 120 steps can
+    # exceed one minute even though simulator control itself is fast.
+    timeout_sec=240.0,
     supported_robots=("robocasa",),
     required_actions=("embodiment_native_action",),
 )
@@ -587,10 +637,9 @@ NAVIGATE_TO_RC = Skill(
 LOCALIZE = Skill(
     name="localize",
     description=(
-        "Back-project image pixels (row, col) to WORLD xyz by intersecting the "
-        "camera ray with a horizontal plane at height z (default 0.9 = counter "
-        "height; use 0.0 for the floor). camera: camera1=agentview left, "
-        "camera3=wrist. Use this to find where objects are in world coordinates."
+        "Back-project image pixels (row, col) to WORLD xyz using aligned metric "
+        "camera depth, matching RPent's world map. camera: camera1=agentview "
+        "left, camera3=wrist. The z plane is used only by backends without depth."
     ),
     parameters={
         "type": "object",

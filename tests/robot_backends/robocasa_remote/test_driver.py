@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image
 
 from hey_robot.config import DeploymentConfig
-from hey_robot.protocol import Envelope, RobotSkillAction, SkillIntent
+from hey_robot.protocol import Envelope, RobotAction, RobotSkillAction, SkillIntent
 from hey_robot.robot_backends.robocasa_remote.driver import RoboCasaRemoteDriver
 from hey_robot.robot_backends.robocasa_remote.protocol import (
     RemoteImage,
@@ -22,6 +22,8 @@ class _Client:
         self.observe_calls = 0
         self.closed = False
         self.option_calls = []
+        self.native_calls = []
+        self.localize_calls = []
         self.begin_calls = []
         self.end_calls = []
 
@@ -59,6 +61,42 @@ class _Client:
             actions_executed=8,
             chunks_executed=1,
         )
+
+    async def step_native(self, **kwargs):
+        self.native_calls.append(kwargs)
+        return RemoteStep(
+            observation=RemoteObservation(
+                episode_id="trial-1",
+                frame_id=kwargs["expected_frame_id"] + 1,
+                state=[0.0] * 16,
+                images=[
+                    RemoteImage(camera=f"camera{index}", data=_jpeg(index))
+                    for index in range(1, 4)
+                ],
+                task="KettleBoiling",
+            ),
+            done=False,
+            status="native",
+            actions_executed=1,
+            chunks_executed=1,
+        )
+
+    async def localize_pixels(self, **kwargs):
+        self.localize_calls.append(kwargs)
+        return {
+            "frame_id": kwargs["expected_frame_id"],
+            "camera": kwargs["camera"],
+            "method": "simulator_metric_depth",
+            "results": [
+                {
+                    "pixel": kwargs["pixels"][0],
+                    "world_xyz": [1.0, 2.0, 0.12],
+                    "depth_m": 0.7,
+                    "valid": True,
+                }
+            ],
+            "summary": {"valid_count": 1, "total_count": 1},
+        }
 
     async def begin_trial(self, **kwargs):
         self.begin_calls.append(kwargs)
@@ -226,6 +264,69 @@ def test_driver_routes_policy_option_and_reset_through_runtime() -> None:
         assert driver.frame_id == 0
         assert client.end_calls == [{"reason": "robot_reset"}]
         assert client.begin_calls[0]["task"] == "CloseFridge"
+
+    asyncio.run(run())
+
+
+def test_driver_routes_native_robot_action_before_skill_parsing() -> None:
+    async def run() -> None:
+        driver, client = _driver()
+        await driver.start()
+        await driver.observe()
+        values = [0.0] * 12
+        values[6] = -1.0
+        status = await driver.apply_action(
+            RobotAction(
+                envelope=Envelope(robot_id="robocasa0"),
+                values=values,
+                skill_id="release-1",
+                task_id="trial-1",
+                metadata={"action_type": "embodiment_native"},
+            )
+        )
+
+        assert status.success is True
+        assert status.frame_id == 9
+        assert client.native_calls == [{"action": values, "expected_frame_id": 8}]
+
+    asyncio.run(run())
+
+
+def test_driver_routes_read_only_depth_localization() -> None:
+    async def run() -> None:
+        driver, client = _driver()
+        await driver.start()
+        await driver.observe()
+        capabilities = await driver.capabilities()
+        assert "localize_pixels" in capabilities.metadata["supported_skills"]
+
+        status = await driver.apply_action(
+            RobotSkillAction(
+                "localize_pixels", {"camera": "camera1", "pixels": [[3, 4]]}
+            ).to_robot_action(
+                SkillIntent(
+                    envelope=Envelope(robot_id="robocasa0"),
+                    skill_id="localize-1",
+                    task_id="trial-1",
+                    intent_kind="observation",
+                    name="localize_pixels",
+                    arguments={},
+                    objective="localize selected pixels",
+                )
+            )
+        )
+
+        assert status.success is True
+        assert status.metrics["last_skill_result"]["method"] == (
+            "simulator_metric_depth"
+        )
+        assert client.localize_calls == [
+            {
+                "camera": "camera1",
+                "pixels": [[3, 4]],
+                "expected_frame_id": 8,
+            }
+        ]
 
     asyncio.run(run())
 

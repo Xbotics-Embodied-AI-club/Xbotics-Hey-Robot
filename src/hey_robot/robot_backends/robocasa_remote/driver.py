@@ -94,7 +94,11 @@ class RoboCasaRemoteDriver:
                 if self.context.embodiment
                 else None,
                 "control": "foundation_policy_option",
-                "supported_skills": ["run_policy_option", "embodiment_native_action"],
+                "supported_skills": [
+                    "run_policy_option",
+                    "localize_pixels",
+                    "embodiment_native_action",
+                ],
                 "state_dimensions": 16,
                 "runtime": "remote_simulator",
                 "simulator_only": True,
@@ -162,9 +166,12 @@ class RoboCasaRemoteDriver:
 
     async def apply_action(self, action: RobotAction) -> RobotStatus:
         try:
-            skill = RobotSkillAction.from_robot_action(action)
-            if skill.name == "embodiment_native_action":
-                values = [float(v) for v in skill.arguments["values"]]
+            # ``LocalRobotClient`` transports analytic 12-D commands as native
+            # RobotAction values, not as RobotSkillAction metadata.  Route this
+            # before parsing skill metadata; RPent's primitives step the same
+            # native environment action directly.
+            if action.metadata.get("action_type") == "embodiment_native":
+                values = [float(v) for v in action.values]
                 if len(values) != self.ACTION_DIMENSIONS:
                     raise ValueError("RoboCasa native action must contain 12 values")
                 step = await asyncio.wait_for(
@@ -173,7 +180,45 @@ class RoboCasaRemoteDriver:
                     ),
                     timeout=self._rpc_timeout_sec,
                 )
-            elif skill.name == "run_policy_option":
+            else:
+                skill = RobotSkillAction.from_robot_action(action)
+                if skill.name == "localize_pixels":
+                    pixels = [
+                        [int(pixel[0]), int(pixel[1])]
+                        for pixel in skill.arguments.get("pixels", [])
+                    ]
+                    localization = await asyncio.wait_for(
+                        self.client.localize_pixels(
+                            camera=str(skill.arguments.get("camera") or "camera1"),
+                            pixels=pixels,
+                            expected_frame_id=self.frame_id,
+                        ),
+                        timeout=self._rpc_timeout_sec,
+                    )
+                    valid_count = int(
+                        dict(localization.get("summary") or {}).get("valid_count", 0)
+                    )
+                    status = await self.status()
+                    return RobotStatus(
+                        envelope=status.envelope,
+                        frame_id=int(localization.get("frame_id", self.frame_id)),
+                        state=status.state,
+                        task=self.task,
+                        skill_id=action.skill_id,
+                        success=True,
+                        metrics={
+                            **status.metrics,
+                            "last_skill_result": {
+                                "success": True,
+                                "summary": (
+                                    f"depth-localized {valid_count}/{len(pixels)} pixels"
+                                ),
+                                **localization,
+                            },
+                        },
+                    )
+                if skill.name != "run_policy_option":
+                    raise ValueError("unsupported RoboCasa skill")
                 if self.done:
                     raise ValueError(
                         "episode is already done; reset before applying another action"
@@ -193,8 +238,6 @@ class RoboCasaRemoteDriver:
                     ),
                     timeout=self._rpc_timeout_sec,
                 )
-            else:
-                raise ValueError("unsupported RoboCasa skill")
             self.done = bool(step.done)
             # Official simulator success belongs exclusively to evaluator
             # ReadTruth and is deliberately unavailable on the data plane.

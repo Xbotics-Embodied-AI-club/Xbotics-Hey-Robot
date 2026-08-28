@@ -28,6 +28,10 @@ import numpy as np
 
 _SELF_PATH_RE = re.compile(r"self\.([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)")
 
+# Progress is fed back into a planner after every option.  It must therefore
+# contain predicates, not an accidentally captured simulator state tensor.
+_MAX_PROGRESS_SEQUENCE_ITEMS = 16
+
 #: Parsed attribute paths, cached per task class so source is inspected once.
 _path_cache: dict[type[Any], list[str]] = {}
 
@@ -51,8 +55,12 @@ def _json_value(value: Any) -> Any:
     if scalar is not None:
         return scalar
     if isinstance(value, (list, tuple)):
+        if len(value) > _MAX_PROGRESS_SEQUENCE_ITEMS:
+            return None
         return [_json_value(item) for item in value]
     if isinstance(value, np.ndarray):
+        if value.size > _MAX_PROGRESS_SEQUENCE_ITEMS:
+            return None
         return _json_value(value.tolist())
     return None
 

@@ -258,10 +258,13 @@ class EpisodeManager:
                 raise EpisodeError(
                     "action_schema_mismatch", "action must contain 12 finite values"
                 )
-            if not trial.env.action_space.contains(action_array):
-                raise EpisodeError(
-                    "action_out_of_bounds", "action is outside the environment space"
-                )
+            # RoboCasa's official Xiaomi evaluator passes decoded actions
+            # straight through ``convert_action``.  Quantization can produce
+            # small, meaningful excursions such as -1.0078125 in the
+            # gripper/control-mode channels.  RoboCasaEnv performs that same
+            # conversion internally, so do not silently alter or reject a
+            # finite checkpoint action here.  Other policy adapters retain
+            # their own clipping before they reach this boundary.
             observation, reward, terminated, truncated, info = trial.env.step(
                 action_array
             )
@@ -420,7 +423,102 @@ class EpisodeManager:
                 break
             except Exception:  # noqa: S112 - diagnostics are optional
                 continue
+        if "grasp_contact" not in result and task_env is not None:
+            grasp_contact, grasp_obj = _task_grasp_contact(task_env)
+            result["grasp_contact"] = grasp_contact
+            result["grasp_obj"] = grasp_obj
         return result
+
+    def localize_pixels(
+        self,
+        *,
+        camera: str,
+        pixels: list[list[int]],
+        expected_frame_id: int,
+    ) -> dict[str, Any]:
+        """Back-project selected RGB pixels using RPent's metric-depth world map."""
+        with self._lock:
+            trial = self.current_trial()
+            if expected_frame_id != trial.frame_id:
+                raise EpisodeError(
+                    "stale_observation",
+                    f"expected frame {expected_frame_id}, current frame {trial.frame_id}",
+                )
+            frame = dict(trial.observation.get("pixels") or {}).get(camera)
+            if frame is None:
+                raise EpisodeError(
+                    "camera_unavailable", f"camera {camera!r} is unavailable"
+                )
+            raw_env = getattr(trial.env, "_env", None)
+            task_env = getattr(raw_env, "env", None) if raw_env is not None else None
+            sim = getattr(task_env, "sim", None)
+            if sim is None:
+                raise EpisodeError(
+                    "camera_unavailable", "RoboCasa simulator camera is unavailable"
+                )
+            height, width = np.asarray(frame).shape[:2]
+            world_map, depth = _render_world_map(
+                sim, camera=camera, height=height, width=width
+            )
+            results: list[dict[str, Any]] = []
+            valid_xyzs: list[list[float]] = []
+            for pixel in pixels:
+                if len(pixel) != 2:
+                    results.append(
+                        {
+                            "pixel": list(pixel),
+                            "world_xyz": None,
+                            "valid": False,
+                            "error": "pixel must be [row, col]",
+                        }
+                    )
+                    continue
+                row, col = int(pixel[0]), int(pixel[1])
+                if row < 0 or row >= height or col < 0 or col >= width:
+                    results.append(
+                        {
+                            "pixel": [row, col],
+                            "world_xyz": None,
+                            "valid": False,
+                            "error": (
+                                f"pixel ({row},{col}) out of bounds ({height}x{width})"
+                            ),
+                        }
+                    )
+                    continue
+                xyz = world_map[row, col, :3]
+                valid = bool(
+                    np.isfinite(xyz).all()
+                    and np.isfinite(depth[row, col])
+                    and float(depth[row, col]) > 0.0
+                )
+                rounded = [round(float(value), 4) for value in xyz] if valid else None
+                results.append(
+                    {
+                        "pixel": [row, col],
+                        "world_xyz": rounded,
+                        "depth_m": round(float(depth[row, col]), 4) if valid else None,
+                        "valid": valid,
+                        "error": None if valid else "invalid metric depth",
+                    }
+                )
+                if rounded is not None:
+                    valid_xyzs.append(rounded)
+            summary: dict[str, Any] = {
+                "valid_count": len(valid_xyzs),
+                "total_count": len(pixels),
+            }
+            if valid_xyzs:
+                summary["median_xyz"] = (
+                    np.median(np.asarray(valid_xyzs), axis=0).round(4).tolist()
+                )
+            return {
+                "frame_id": trial.frame_id,
+                "camera": camera,
+                "method": "simulator_metric_depth",
+                "results": results,
+                "summary": summary,
+            }
 
     def record_event(self, kind: str, payload: dict[str, Any]) -> None:
         with self._lock:
@@ -496,6 +594,55 @@ class EpisodeManager:
             env.close()
             raise
         return env, observation
+
+
+def _task_grasp_contact(task_env: Any) -> tuple[bool, str | None]:
+    """Use RoboCasa's own grasp predicate exactly as RPent's env facade does."""
+    try:
+        gripper = task_env.robots[0].gripper
+        for name, obj in task_env.objects.items():
+            try:
+                if task_env._check_grasp(gripper, obj):
+                    return True, str(name)
+            except Exception:  # noqa: S112 - skip unsupported object types
+                continue
+    except Exception:
+        return False, None
+    return False, None
+
+
+def _render_world_map(
+    sim: Any, *, camera: str, height: int, width: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Render RPent's top-down metric-depth map and pixel-to-world transform."""
+    import robosuite.utils.camera_utils as camera_utils
+
+    _rgb, normalized_depth = sim.render(
+        width=width,
+        height=height,
+        camera_name=camera,
+        depth=True,
+    )
+    normalized = np.clip(
+        np.nan_to_num(np.asarray(normalized_depth), nan=1.0, posinf=1.0, neginf=0.0),
+        0.0,
+        1.0,
+    )
+    if normalized.ndim == 2:
+        normalized = normalized[..., None]
+    metric_depth = camera_utils.get_real_depth_map(sim, normalized)[..., 0]
+    # MuJoCo's depth buffer is bottom-up while the transported RGB is top-down.
+    depth = metric_depth[::-1]
+    camera_transform = camera_utils.get_camera_transform_matrix(
+        sim, camera, height, width
+    )
+    pixel_to_world = np.linalg.inv(camera_transform)
+    rows, cols = np.meshgrid(np.arange(height), np.arange(width), indexing="ij")
+    homogeneous = np.stack(
+        [cols * depth, rows * depth, depth, np.ones_like(depth)], axis=-1
+    )
+    world = homogeneous @ pixel_to_world.T
+    return world[..., :3], depth
 
 
 def _validate_observation(observation: dict[str, Any]) -> None:

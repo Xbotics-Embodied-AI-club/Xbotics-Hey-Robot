@@ -6,6 +6,9 @@ import logging
 from typing import Any
 
 from hey_robot.skills.builtins.common import execute_robot_action
+from hey_robot.skills.builtins.robocasa_session import (
+    consume_vla_desync,
+)
 from hey_robot.skills.context import SkillContext
 from hey_robot.skills.models import Skill, SkillResult
 from hey_robot.skills.registry import SkillRegistry
@@ -62,7 +65,13 @@ async def manipulate(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResul
     task_prompt = str(arguments["task_prompt"])
     requested_max_steps = int(arguments.get("max_steps", _DEFAULT_OPTION_STEPS))
     max_steps = await _effective_max_steps(ctx, task_prompt, requested_max_steps)
-    if await _uses_local_foundation_option(ctx):
+    uses_local_option = await _uses_local_foundation_option(ctx)
+    if uses_local_option:
+        # RPent force-resets its RLDX memory/history after any analytic action,
+        # while consecutive VLA calls remain continuous.  Hey Robot's option
+        # runner already resets on prompt/session changes; this supplies the
+        # missing manual-action desynchronization signal.
+        reset_session = consume_vla_desync(ctx.robot_id, ctx.task_id)
         execution = await execute_robot_action(
             ctx,
             "run_policy_option",
@@ -70,7 +79,7 @@ async def manipulate(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResul
                 "session_id": ctx.task_id,
                 "instruction": task_prompt,
                 "max_actions": max_steps,
-                "reset_session": False,
+                "reset_session": reset_session,
             },
         )
         execution.data["requested_max_steps"] = requested_max_steps
@@ -99,6 +108,7 @@ async def manipulate(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResul
     execution.data["effective_max_steps"] = max_steps
     attempt_diagnostics = _attempt_diagnostics(execution.data)
     execution.data["attempt_diagnostics"] = attempt_diagnostics
+    after_diagnostics = dict(attempt_diagnostics.get("after") or {})
     await _record_harness_attempt(ctx, task_prompt, execution.data)
     if not execution.success or execution.data.get("subgoal_succeeded") is True:
         return execution
@@ -124,6 +134,19 @@ async def manipulate(ctx: SkillContext, arguments: dict[str, Any]) -> SkillResul
                     "subgoal_status": execution.data.get("subgoal_status"),
                     "subgoal_succeeded": execution.data.get("subgoal_succeeded"),
                     "task_progress": progress,
+                    "attempt_diagnostics": attempt_diagnostics,
+                    "task_prompt": task_prompt,
+                    "retry_prompt_must_match_exactly": bool(
+                        execution.data.get("termination_reason") == "budget"
+                    ),
+                    # This signal is evidence, not a retry gate.  With the
+                    # environment root task, XR-1 must retain its own
+                    # closed-loop retries just as it does in the official
+                    # evaluator.
+                    "reposition_required": bool(
+                        after_diagnostics.get("reposition_required")
+                    ),
+                    "required_next_action": None,
                 },
             },
             evidence_ids=execution.evidence_ids,
@@ -239,6 +262,12 @@ def _attempt_diagnostics(data: dict[str, Any]) -> dict[str, Any]:
         diagnostics = item.get("harness_diagnostics")
         if isinstance(diagnostics, dict):
             return dict(diagnostics)
+        # The co-located RoboCasa option loop reports the same physical
+        # evidence directly.  Normalize it to the before/after shape used by
+        # the generic VLA runner so the planner sees one stable contract.
+        diagnostics = item.get("diagnostics")
+        if isinstance(diagnostics, dict):
+            return {"after": dict(diagnostics)}
     return {}
 
 

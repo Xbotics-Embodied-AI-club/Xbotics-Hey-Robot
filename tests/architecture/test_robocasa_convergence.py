@@ -53,23 +53,29 @@ def test_agent_surface_has_only_generic_manipulate() -> None:
     ]
 
 
-def test_xiaomi_agent_subgoal_evaluation_uses_non_reasoning_gpt() -> None:
+def test_xiaomi_evaluation_uses_root_instruction_and_configured_models() -> None:
     config = DeploymentConfig.from_yaml(
         ROOT / "configs" / "evaluation" / "robocasa365.xiaomi.yaml"
     )
 
     assert config.model_services["robocasa365"].settings["prompt_mode"] == (
-        "agent_subgoal"
+        "environment_root"
     )
     models = config.agents["main"].settings["models"]
-    for purpose in ("planner", "scene_captioner"):
-        assert models[purpose]["model"] == "gpt-5.6-sol"
-        assert models[purpose]["api_key_env"] == "OPENAI_API_KEY"
-        assert models[purpose]["base_url_env"] == "OPENAI_BASE_URL"
-        assert models[purpose]["reasoning_effort"] == "none"
-        assert models[purpose]["timeout_sec"] == 30
-        assert models[purpose]["max_retries"] == 0
-        assert models[purpose]["disable_keepalive"] is True
+    assert models["planner"] == {
+        "model_env": "DEEPSEEK_MODEL",
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "base_url_env": "DEEPSEEK_BASE_URL",
+        "temperature": 0.0,
+        "max_tokens": 2048,
+    }
+    assert models["scene_captioner"] == {
+        "model_env": "DASHSCOPE_MODEL",
+        "api_key_env": "DASHSCOPE_API_KEY",
+        "base_url_env": "DASHSCOPE_BASE_URL",
+        "temperature": 0.0,
+        "max_tokens": 1024,
+    }
     assert not [
         issue for issue in validate_deployment(config) if issue.level == "error"
     ]

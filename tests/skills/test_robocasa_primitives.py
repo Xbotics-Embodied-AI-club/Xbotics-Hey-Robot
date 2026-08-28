@@ -8,14 +8,19 @@ details of the servo loops.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
 import pytest
 
 from hey_robot.protocol import Envelope, RobotObservation
+from hey_robot.robot_api import RobotActionResult
 from hey_robot.skills import SkillContext, SkillRegistry
-from hey_robot.skills.builtins import robocasa_primitives as primitives
+from hey_robot.skills.builtins import (
+    robocasa_primitives as primitives,
+    robocasa_session,
+)
 from hey_robot.skills.models import SkillResult
 
 
@@ -73,6 +78,7 @@ def _context(robot: _NativeRobot) -> SkillContext:
 @pytest.fixture(autouse=True)
 def _clear_primitive_state() -> None:
     primitives._state_cache.clear()
+    robocasa_session.clear_session_state()
 
 
 async def test_arm_motion_gripper_and_delta_use_native_closed_loop_actions() -> None:
@@ -113,6 +119,33 @@ async def test_base_motion_and_navigation_reset_arm_calibration() -> None:
     assert primitives._state(ctx).pos_jac is None
     assert any(action[11] == 1.0 for action in robot.actions)
     assert reached.data["base_pos"][0] >= 0.35
+
+
+async def test_calibration_and_vla_desync_are_episode_scoped() -> None:
+    robot = _NativeRobot()
+    first = SkillContext("move-run", "episode-1", "robocasa", robot=robot)  # type: ignore[arg-type]
+    second = SkillContext("release-run", "episode-1", "robocasa", robot=robot)  # type: ignore[arg-type]
+
+    primitives._state(first).pos_jac = np.eye(3)
+    assert primitives._state(second).pos_jac is primitives._state(first).pos_jac
+    assert robocasa_session.consume_vla_desync("robocasa", "episode-1") is True
+    assert robocasa_session.consume_vla_desync("robocasa", "episode-1") is False
+
+    await primitives.release(second, {"steps": 1})
+
+    assert robocasa_session.consume_vla_desync("robocasa", "episode-1") is True
+
+
+async def test_only_positioning_motion_clears_the_recovery_guard() -> None:
+    robot = _NativeRobot()
+    ctx = _context(robot)
+    robocasa_session.set_reposition_required("robocasa", "task", True)
+
+    await primitives.release(ctx, {"steps": 1})
+    assert robocasa_session.reposition_required("robocasa", "task") is True
+
+    await primitives.move_base(ctx, {"forward": 0.5, "steps": 1})
+    assert robocasa_session.reposition_required("robocasa", "task") is False
 
 
 async def test_localize_progress_and_registration_cover_observation_only_skills() -> (
@@ -163,6 +196,52 @@ async def test_localize_progress_and_registration_cover_observation_only_skills(
         "localize",
         "read_progress",
     }
+
+
+async def test_localize_prefers_rpent_metric_depth_transport() -> None:
+    class DepthRobot(_NativeRobot):
+        def __init__(self) -> None:
+            super().__init__()
+            self.localization_calls: list[dict[str, Any]] = []
+
+        async def capabilities(self, _robot_id: str):
+            return SimpleNamespace(actions=(SimpleNamespace(name="localize_pixels"),))
+
+        async def execute(
+            self,
+            _robot_id: str,
+            action: str,
+            arguments: dict[str, Any],
+            **_kwargs: Any,
+        ) -> RobotActionResult:
+            assert action == "localize_pixels"
+            self.localization_calls.append(arguments)
+            return RobotActionResult(
+                True,
+                "depth-localized 1/1 pixels",
+                frame_id=4,
+                data={
+                    "method": "simulator_metric_depth",
+                    "results": [
+                        {
+                            "pixel": [9, 7],
+                            "world_xyz": [1.2, -0.4, 0.11],
+                            "depth_m": 0.8,
+                            "valid": True,
+                        }
+                    ],
+                },
+            )
+
+    robot = DepthRobot()
+    result = await primitives.localize(
+        _context(robot), {"camera": "agentview", "pixels": [[9, 7]], "z": 0.9}
+    )
+
+    assert result.success is True
+    assert result.data["method"] == "simulator_metric_depth"
+    assert result.data["results"][0]["world_xyz"][2] == 0.11
+    assert robot.localization_calls == [{"camera": "camera1", "pixels": [[9, 7]]}]
 
 
 async def test_scripted_grasp_preserves_the_failed_stage(

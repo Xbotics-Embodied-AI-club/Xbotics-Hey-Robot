@@ -49,6 +49,11 @@ def test_progress_conversion_and_uninspectable_task_are_safe() -> None:
     assert task_progress.extract_task_progress(object()) == {}
 
 
+def test_progress_drops_large_simulator_arrays() -> None:
+    assert task_progress._json_value(np.zeros((17, 3))) is None
+    assert task_progress._json_value(list(range(17))) is None
+
+
 def test_progress_ignores_missing_attributes_and_check_success_exceptions() -> None:
     class _Broken:
         def _check_success(self) -> bool:

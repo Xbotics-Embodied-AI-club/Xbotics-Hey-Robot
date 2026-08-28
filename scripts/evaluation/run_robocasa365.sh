@@ -77,6 +77,7 @@ if len(managed) != 1:
     raise SystemExit("config requires exactly one managed RoboCasa robot")
 print(config.resources.runtime_dir)
 print(math.ceil(float(managed[0].settings.get("backend_startup_timeout_sec") or 600) + 60))
+print(str(managed[0].settings.get("target") or "grpc://127.0.0.1:9092"))
 required = set()
 for agent in config.agents.values():
     models = agent.settings.get("models") or {}
@@ -92,11 +93,12 @@ PY
 )
 runtime_dir="${launcher_settings[0]}"
 startup_timeout_sec="${launcher_settings[1]}"
+runtime_target="${launcher_settings[2]}"
 credentials_path="$runtime_dir/robocasa.credentials.json"
 launcher_log_dir="$runtime_dir/launcher-logs"
 agent_log="$launcher_log_dir/agent.log"
 
-for env_name in "${launcher_settings[@]:2}"; do
+for env_name in "${launcher_settings[@]:3}"; do
   if [[ -z "${!env_name:-}" ]]; then
     printf 'configure %s in .env for %s\n' "$env_name" "$config_path" >&2
     exit 2
@@ -140,6 +142,30 @@ until curl --fail --silent http://127.0.0.1:18080/api/tasks >/dev/null; do
   sleep 1
 done
 printf '%s\n' 'robocasa365: web channel ready'
+
+# The web gateway can become ready before the managed backend has written the
+# role-scoped evaluator credentials.  Do not let benchmark startup race that
+# sidecar, especially when multiple deployments are loading models in parallel.
+until [[ -f "$credentials_path" ]]; do
+  if ! kill -0 "$agent_pid" 2>/dev/null || ((SECONDS >= deadline)); then
+    sed -n '1,200p' "$agent_log" >&2
+    printf 'robocasa365: managed backend credentials were not created: %s\n' "$credentials_path" >&2
+    exit 1
+  fi
+  sleep 1
+done
+printf '%s\n' 'robocasa365: managed backend credentials ready'
+
+runtime_port="${runtime_target##*:}"
+until ss -ltn | grep -q ":${runtime_port}[[:space:]]"; do
+  if ! kill -0 "$agent_pid" 2>/dev/null || ((SECONDS >= deadline)); then
+    sed -n '1,200p' "$agent_log" >&2
+    printf 'robocasa365: managed backend did not listen on %s\n' "$runtime_target" >&2
+    exit 1
+  fi
+  sleep 1
+done
+printf '%s\n' 'robocasa365: managed backend runtime ready'
 
 "$launcher_python" -m evaluation.robocasa365.benchmark \
   --config "$config_path" \

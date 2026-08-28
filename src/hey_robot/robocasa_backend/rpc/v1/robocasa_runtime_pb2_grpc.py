@@ -4,9 +4,7 @@
 import grpc
 import warnings
 
-from . import (
-    robocasa_runtime_pb2 as hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2,
-)
+from . import robocasa_runtime_pb2 as robocasa__runtime__pb2
 
 GRPC_GENERATED_VERSION = "1.73.1"
 GRPC_VERSION = grpc.__version__
@@ -24,7 +22,7 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f"The grpc package installed is at version {GRPC_VERSION},"
-        + f" but the generated code in hey_robot/robocasa_runtime/v1/robocasa_runtime_pb2_grpc.py depends on"
+        + f" but the generated code in robocasa_runtime_pb2_grpc.py depends on"
         + f" grpcio>={GRPC_GENERATED_VERSION}."
         + f" Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}"
         + f" or downgrade your generated code using grpcio-tools<={GRPC_VERSION}."
@@ -42,44 +40,50 @@ class RoboCasaRuntimeStub(object):
         """
         self.GetHealth = channel.unary_unary(
             "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/GetHealth",
-            request_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.HealthRequest.SerializeToString,
-            response_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.HealthResponse.FromString,
+            request_serializer=robocasa__runtime__pb2.HealthRequest.SerializeToString,
+            response_deserializer=robocasa__runtime__pb2.HealthResponse.FromString,
             _registered_method=True,
         )
         self.BeginTrial = channel.unary_unary(
             "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/BeginTrial",
-            request_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.BeginTrialRequest.SerializeToString,
-            response_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.ObservationResponse.FromString,
+            request_serializer=robocasa__runtime__pb2.BeginTrialRequest.SerializeToString,
+            response_deserializer=robocasa__runtime__pb2.ObservationResponse.FromString,
             _registered_method=True,
         )
         self.Observe = channel.unary_unary(
             "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/Observe",
-            request_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EmptyRequest.SerializeToString,
-            response_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.ObservationResponse.FromString,
+            request_serializer=robocasa__runtime__pb2.EmptyRequest.SerializeToString,
+            response_deserializer=robocasa__runtime__pb2.ObservationResponse.FromString,
             _registered_method=True,
         )
         self.Step = channel.unary_unary(
             "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/Step",
-            request_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.StepRequest.SerializeToString,
-            response_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.StepResponse.FromString,
+            request_serializer=robocasa__runtime__pb2.StepRequest.SerializeToString,
+            response_deserializer=robocasa__runtime__pb2.StepResponse.FromString,
             _registered_method=True,
         )
         self.StepNative = channel.unary_unary(
             "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/StepNative",
-            request_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.NativeStepRequest.SerializeToString,
-            response_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.NativeStepResponse.FromString,
+            request_serializer=robocasa__runtime__pb2.NativeStepRequest.SerializeToString,
+            response_deserializer=robocasa__runtime__pb2.NativeStepResponse.FromString,
+            _registered_method=True,
+        )
+        self.LocalizePixels = channel.unary_unary(
+            "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/LocalizePixels",
+            request_serializer=robocasa__runtime__pb2.LocalizePixelsRequest.SerializeToString,
+            response_deserializer=robocasa__runtime__pb2.LocalizePixelsResponse.FromString,
             _registered_method=True,
         )
         self.ReadTruth = channel.unary_unary(
             "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/ReadTruth",
-            request_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EmptyRequest.SerializeToString,
-            response_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.TruthResponse.FromString,
+            request_serializer=robocasa__runtime__pb2.EmptyRequest.SerializeToString,
+            response_deserializer=robocasa__runtime__pb2.TruthResponse.FromString,
             _registered_method=True,
         )
         self.EndTrial = channel.unary_unary(
             "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/EndTrial",
-            request_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EndTrialRequest.SerializeToString,
-            response_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EndTrialResponse.FromString,
+            request_serializer=robocasa__runtime__pb2.EndTrialRequest.SerializeToString,
+            response_deserializer=robocasa__runtime__pb2.EndTrialResponse.FromString,
             _registered_method=True,
         )
 
@@ -117,6 +121,12 @@ class RoboCasaRuntimeServicer(object):
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
+    def LocalizePixels(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
     def ReadTruth(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -134,38 +144,43 @@ def add_RoboCasaRuntimeServicer_to_server(servicer, server):
     rpc_method_handlers = {
         "GetHealth": grpc.unary_unary_rpc_method_handler(
             servicer.GetHealth,
-            request_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.HealthRequest.FromString,
-            response_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.HealthResponse.SerializeToString,
+            request_deserializer=robocasa__runtime__pb2.HealthRequest.FromString,
+            response_serializer=robocasa__runtime__pb2.HealthResponse.SerializeToString,
         ),
         "BeginTrial": grpc.unary_unary_rpc_method_handler(
             servicer.BeginTrial,
-            request_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.BeginTrialRequest.FromString,
-            response_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.ObservationResponse.SerializeToString,
+            request_deserializer=robocasa__runtime__pb2.BeginTrialRequest.FromString,
+            response_serializer=robocasa__runtime__pb2.ObservationResponse.SerializeToString,
         ),
         "Observe": grpc.unary_unary_rpc_method_handler(
             servicer.Observe,
-            request_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EmptyRequest.FromString,
-            response_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.ObservationResponse.SerializeToString,
+            request_deserializer=robocasa__runtime__pb2.EmptyRequest.FromString,
+            response_serializer=robocasa__runtime__pb2.ObservationResponse.SerializeToString,
         ),
         "Step": grpc.unary_unary_rpc_method_handler(
             servicer.Step,
-            request_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.StepRequest.FromString,
-            response_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.StepResponse.SerializeToString,
+            request_deserializer=robocasa__runtime__pb2.StepRequest.FromString,
+            response_serializer=robocasa__runtime__pb2.StepResponse.SerializeToString,
         ),
         "StepNative": grpc.unary_unary_rpc_method_handler(
             servicer.StepNative,
-            request_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.NativeStepRequest.FromString,
-            response_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.NativeStepResponse.SerializeToString,
+            request_deserializer=robocasa__runtime__pb2.NativeStepRequest.FromString,
+            response_serializer=robocasa__runtime__pb2.NativeStepResponse.SerializeToString,
+        ),
+        "LocalizePixels": grpc.unary_unary_rpc_method_handler(
+            servicer.LocalizePixels,
+            request_deserializer=robocasa__runtime__pb2.LocalizePixelsRequest.FromString,
+            response_serializer=robocasa__runtime__pb2.LocalizePixelsResponse.SerializeToString,
         ),
         "ReadTruth": grpc.unary_unary_rpc_method_handler(
             servicer.ReadTruth,
-            request_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EmptyRequest.FromString,
-            response_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.TruthResponse.SerializeToString,
+            request_deserializer=robocasa__runtime__pb2.EmptyRequest.FromString,
+            response_serializer=robocasa__runtime__pb2.TruthResponse.SerializeToString,
         ),
         "EndTrial": grpc.unary_unary_rpc_method_handler(
             servicer.EndTrial,
-            request_deserializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EndTrialRequest.FromString,
-            response_serializer=hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EndTrialResponse.SerializeToString,
+            request_deserializer=robocasa__runtime__pb2.EndTrialRequest.FromString,
+            response_serializer=robocasa__runtime__pb2.EndTrialResponse.SerializeToString,
         ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -198,8 +213,8 @@ class RoboCasaRuntime(object):
             request,
             target,
             "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/GetHealth",
-            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.HealthRequest.SerializeToString,
-            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.HealthResponse.FromString,
+            robocasa__runtime__pb2.HealthRequest.SerializeToString,
+            robocasa__runtime__pb2.HealthResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -228,8 +243,8 @@ class RoboCasaRuntime(object):
             request,
             target,
             "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/BeginTrial",
-            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.BeginTrialRequest.SerializeToString,
-            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.ObservationResponse.FromString,
+            robocasa__runtime__pb2.BeginTrialRequest.SerializeToString,
+            robocasa__runtime__pb2.ObservationResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -258,8 +273,8 @@ class RoboCasaRuntime(object):
             request,
             target,
             "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/Observe",
-            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EmptyRequest.SerializeToString,
-            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.ObservationResponse.FromString,
+            robocasa__runtime__pb2.EmptyRequest.SerializeToString,
+            robocasa__runtime__pb2.ObservationResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -288,8 +303,8 @@ class RoboCasaRuntime(object):
             request,
             target,
             "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/Step",
-            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.StepRequest.SerializeToString,
-            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.StepResponse.FromString,
+            robocasa__runtime__pb2.StepRequest.SerializeToString,
+            robocasa__runtime__pb2.StepResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -318,8 +333,38 @@ class RoboCasaRuntime(object):
             request,
             target,
             "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/StepNative",
-            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.NativeStepRequest.SerializeToString,
-            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.NativeStepResponse.FromString,
+            robocasa__runtime__pb2.NativeStepRequest.SerializeToString,
+            robocasa__runtime__pb2.NativeStepResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def LocalizePixels(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/LocalizePixels",
+            robocasa__runtime__pb2.LocalizePixelsRequest.SerializeToString,
+            robocasa__runtime__pb2.LocalizePixelsResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -348,8 +393,8 @@ class RoboCasaRuntime(object):
             request,
             target,
             "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/ReadTruth",
-            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EmptyRequest.SerializeToString,
-            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.TruthResponse.FromString,
+            robocasa__runtime__pb2.EmptyRequest.SerializeToString,
+            robocasa__runtime__pb2.TruthResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -378,8 +423,8 @@ class RoboCasaRuntime(object):
             request,
             target,
             "/hey_robot.robocasa_runtime.v1.RoboCasaRuntime/EndTrial",
-            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EndTrialRequest.SerializeToString,
-            hey__robot_dot_robocasa__runtime_dot_v1_dot_robocasa__runtime__pb2.EndTrialResponse.FromString,
+            robocasa__runtime__pb2.EndTrialRequest.SerializeToString,
+            robocasa__runtime__pb2.EndTrialResponse.FromString,
             options,
             channel_credentials,
             insecure,

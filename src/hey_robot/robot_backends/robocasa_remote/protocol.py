@@ -65,6 +65,14 @@ class RemoteEpisodeClient(Protocol):
         self, *, action: list[float], expected_frame_id: int
     ) -> RemoteStep: ...
 
+    async def localize_pixels(
+        self,
+        *,
+        camera: str,
+        pixels: list[list[int]],
+        expected_frame_id: int,
+    ) -> dict[str, Any]: ...
+
     async def read_truth(self) -> dict[str, Any]: ...
 
     async def end_trial(self, *, reason: str = "completed") -> bool: ...

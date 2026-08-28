@@ -26,6 +26,7 @@ from hey_robot.skills import (
     SkillRunner,
     load_skill_registry,
 )
+from hey_robot.skills.builtins import robocasa_session
 from hey_robot.skills.resources import ResourceManager
 
 
@@ -106,6 +107,7 @@ class _Events:
 
 @pytest.mark.asyncio
 async def test_vla_action_reaches_real_robocasa_runtime_gate(tmp_path) -> None:
+    robocasa_session.clear_session_state()
     config = DeploymentConfig.from_dict(
         {
             "robots": {
@@ -163,7 +165,7 @@ async def test_vla_action_reaches_real_robocasa_runtime_gate(tmp_path) -> None:
         "session_id": "task-1",
         "instruction": "Close the fridge.",
         "max_actions": 1,
-        "reset_session": False,
+        "reset_session": True,
     }
 
 

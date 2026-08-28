@@ -9,7 +9,14 @@ import numpy as np
 import pytest
 
 from hey_robot.foundation.options import OptionResult, OptionStatus
-from hey_robot.robocasa_backend.episode_manager import EpisodeManager
+from hey_robot.robocasa_backend.episode_manager import (
+    ActiveTrial,
+    EpisodeManager,
+    TrialSpec,
+    _render_world_map,
+    _task_grasp_contact,
+    _validate_observation as validate_episode_observation,
+)
 from hey_robot.robocasa_backend.rpc.v1 import (
     robocasa_runtime_pb2 as pb,
 )
@@ -56,6 +63,202 @@ class _SlowEnv(_Env):
     def step(self, _action):
         time.sleep(0.05)
         return _observation(), 0.0, False, False, {}
+
+
+def test_task_grasp_contact_matches_rpent_robocasa_predicate() -> None:
+    class TaskEnv:
+        def __init__(self) -> None:
+            self.robots = [types.SimpleNamespace(gripper="panda-gripper")]
+            self.objects = {"spatula": object(), "onion": object()}
+
+        def _check_grasp(self, gripper, obj):
+            assert gripper == "panda-gripper"
+            return obj is self.objects["spatula"]
+
+    assert _task_grasp_contact(TaskEnv()) == (True, "spatula")
+
+
+def test_task_grasp_contact_tolerates_unsupported_or_malformed_tasks() -> None:
+    class UnsupportedObjectTask:
+        def __init__(self) -> None:
+            self.robots = [types.SimpleNamespace(gripper="panda-gripper")]
+            self.objects = {"unsupported": object(), "miss": object()}
+
+        def _check_grasp(self, _gripper, obj):
+            if obj is self.objects["unsupported"]:
+                raise TypeError("unsupported object")
+            return False
+
+    assert _task_grasp_contact(UnsupportedObjectTask()) == (False, None)
+    assert _task_grasp_contact(types.SimpleNamespace()) == (False, None)
+
+
+@pytest.mark.parametrize(
+    ("observation", "message"),
+    [
+        ({"agent_pos": [0.0], "pixels": {}}, "state must be 16 finite values"),
+        (
+            {"agent_pos": np.zeros(16, dtype=np.float32), "pixels": {}},
+            "observation must contain three cameras",
+        ),
+    ],
+)
+def test_episode_manager_rejects_malformed_environment_observations(
+    observation, message
+) -> None:
+    with pytest.raises(Exception, match=message):
+        validate_episode_observation(observation)
+
+
+def test_episode_manager_localizes_pixels_with_simulator_metric_depth(
+    monkeypatch,
+) -> None:
+    manager = EpisodeManager(allowed_tasks=frozenset({"CloseFridge"}))
+    task_env = types.SimpleNamespace(sim=object())
+    manager._active = ActiveTrial(
+        spec=TrialSpec(trial_id="trial", task="CloseFridge", seed=0),
+        env=types.SimpleNamespace(_env=types.SimpleNamespace(env=task_env)),
+        observation={"pixels": {"camera": np.zeros((2, 3, 3), dtype=np.uint8)}},
+        frame_id=4,
+    )
+    world = np.asarray(
+        [
+            [[1.11111, 2.22222, 3.33333], [np.nan, 0.0, 0.0], [7.0, 8.0, 9.0]],
+            [[4.44444, 5.55555, 6.66666], [10.0, 11.0, 12.0], [13.0, 14.0, 15.0]],
+        ]
+    )
+    depth = np.asarray([[0.2, 0.3, 0.0], [0.4, np.nan, 0.6]])
+    monkeypatch.setattr(
+        "hey_robot.robocasa_backend.episode_manager._render_world_map",
+        lambda *_args, **_kwargs: (world, depth),
+    )
+
+    result = manager.localize_pixels(
+        camera="camera", pixels=[[0, 0], [0, 1], [0, 3], [1]], expected_frame_id=4
+    )
+
+    assert result["method"] == "simulator_metric_depth"
+    assert result["results"] == [
+        {
+            "pixel": [0, 0],
+            "world_xyz": [1.1111, 2.2222, 3.3333],
+            "depth_m": 0.2,
+            "valid": True,
+            "error": None,
+        },
+        {
+            "pixel": [0, 1],
+            "world_xyz": None,
+            "depth_m": None,
+            "valid": False,
+            "error": "invalid metric depth",
+        },
+        {
+            "pixel": [0, 3],
+            "world_xyz": None,
+            "valid": False,
+            "error": "pixel (0,3) out of bounds (2x3)",
+        },
+        {
+            "pixel": [1],
+            "world_xyz": None,
+            "valid": False,
+            "error": "pixel must be [row, col]",
+        },
+    ]
+    assert result["summary"] == {
+        "valid_count": 1,
+        "total_count": 4,
+        "median_xyz": [1.1111, 2.2222, 3.3333],
+    }
+
+
+def test_episode_manager_localization_rejects_stale_missing_and_unavailable_camera() -> (
+    None
+):
+    manager = EpisodeManager(allowed_tasks=frozenset({"CloseFridge"}))
+    manager._active = ActiveTrial(
+        spec=TrialSpec(trial_id="trial", task="CloseFridge", seed=0),
+        env=types.SimpleNamespace(
+            _env=types.SimpleNamespace(env=types.SimpleNamespace())
+        ),
+        observation={"pixels": {}},
+        frame_id=4,
+    )
+
+    with pytest.raises(Exception, match="expected frame 3, current frame 4"):
+        manager.localize_pixels(camera="camera", pixels=[], expected_frame_id=3)
+    with pytest.raises(Exception, match="camera 'camera' is unavailable"):
+        manager.localize_pixels(camera="camera", pixels=[], expected_frame_id=4)
+
+    manager._active.observation["pixels"]["camera"] = np.zeros(
+        (2, 3, 3), dtype=np.uint8
+    )
+    with pytest.raises(Exception, match="simulator camera is unavailable"):
+        manager.localize_pixels(camera="camera", pixels=[], expected_frame_id=4)
+
+
+def test_episode_manager_creates_the_registered_robocasa_environment(
+    monkeypatch,
+) -> None:
+    configured = []
+    monkeypatch.setattr(
+        "hey_robot.robocasa_backend.egl_config.configure_headless_egl",
+        lambda: configured.append(True),
+    )
+    instances = []
+
+    class RoboCasaEnv:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+            instances.append(self)
+
+        def reset(self, *, seed: int):
+            return _observation(), {"seed": seed}
+
+    lerobot = types.ModuleType("lerobot")
+    envs = types.ModuleType("lerobot.envs")
+    robocasa_env = types.ModuleType("lerobot.envs.robocasa")
+    robocasa_env.DEFAULT_CAMERAS = ("left", "right", "wrist")
+    robocasa_env.RoboCasaEnv = RoboCasaEnv
+    robocasa = types.ModuleType("robocasa")
+    utils = types.ModuleType("robocasa.utils")
+    registry = types.ModuleType("robocasa.utils.dataset_registry")
+    registry.ATOMIC_TASK_DATASETS = {"CloseFridge": {"horizon": 77}}
+    registry.COMPOSITE_TASK_DATASETS = {}
+    monkeypatch.setitem(sys.modules, "lerobot", lerobot)
+    monkeypatch.setitem(sys.modules, "lerobot.envs", envs)
+    monkeypatch.setitem(sys.modules, "lerobot.envs.robocasa", robocasa_env)
+    monkeypatch.setitem(sys.modules, "robocasa", robocasa)
+    monkeypatch.setitem(sys.modules, "robocasa.utils", utils)
+    monkeypatch.setitem(sys.modules, "robocasa.utils.dataset_registry", registry)
+
+    spec = TrialSpec(
+        trial_id="trial",
+        task="CloseFridge",
+        seed=9,
+        split="pretrain",
+        registries=("lightwheel",),
+    )
+    env, observation = EpisodeManager._create_environment(spec)
+
+    assert configured == [True]
+    assert env is instances[0]
+    assert np.array_equal(observation["agent_pos"], np.zeros(16, dtype=np.float32))
+    assert set(observation["pixels"]) == {
+        "robot0_agentview_left",
+        "robot0_agentview_right",
+        "robot0_eye_in_hand",
+    }
+    assert instances[0].kwargs == {
+        "task": "CloseFridge",
+        "camera_name": ("left", "right", "wrist"),
+        "obs_type": "pixels_agent_pos",
+        "obj_registries": ("lightwheel",),
+        "split": "pretrain",
+        "episode_length": 77,
+        "horizon": 77,
+    }
 
 
 class _Runner:
@@ -130,6 +333,43 @@ async def test_runtime_service_covers_authenticated_trial_lifecycle() -> None:
 
     observed = await service.Observe(pb.EmptyRequest(), data)
     assert observed.task == "CloseFridge"
+    localization_calls = []
+
+    def localize_pixels(**kwargs):
+        localization_calls.append(kwargs)
+        return {
+            "frame_id": 0,
+            "camera": kwargs["camera"],
+            "method": "simulator_metric_depth",
+            "results": [
+                {
+                    "pixel": [1, 2],
+                    "world_xyz": [0.1, 0.2, 0.3],
+                    "valid": True,
+                }
+            ],
+            "summary": {"valid_count": 1, "total_count": 1},
+        }
+
+    manager.localize_pixels = localize_pixels  # type: ignore[method-assign]
+    localized = await service.LocalizePixels(
+        pb.LocalizePixelsRequest(
+            camera="camera1",
+            pixels=[pb.ImagePixel(row=1, col=2)],
+            expected_frame_id=0,
+        ),
+        data,
+    )
+    assert localized.frame_id == 0
+    assert localized.camera == "camera1"
+    assert localized.localization["method"] == "simulator_metric_depth"
+    assert localization_calls == [
+        {
+            "camera": "robot0_agentview_left",
+            "pixels": [[1, 2]],
+            "expected_frame_id": 0,
+        }
+    ]
     step = await service.Step(
         pb.StepRequest(
             session_id="trial-1",
@@ -223,6 +463,34 @@ def test_runtime_helpers_validate_assets_observations_and_numpy(
     monkeypatch.setitem(sys.modules, "lerobot", types.ModuleType("lerobot"))
     monkeypatch.setitem(sys.modules, "lerobot.envs", types.ModuleType("lerobot.envs"))
     monkeypatch.setitem(sys.modules, "lerobot.envs.robocasa", fake)
+
+
+def test_depth_world_map_matches_rpent_top_down_back_projection(
+    monkeypatch,
+) -> None:
+    camera_utils = types.ModuleType("robosuite.utils.camera_utils")
+    camera_utils.get_real_depth_map = lambda _sim, depth: depth
+    camera_utils.get_camera_transform_matrix = lambda _sim, _camera, _height, _width: (
+        np.eye(4)
+    )
+    utils = types.ModuleType("robosuite.utils")
+    utils.camera_utils = camera_utils
+    robosuite = types.ModuleType("robosuite")
+    robosuite.utils = utils
+    monkeypatch.setitem(sys.modules, "robosuite", robosuite)
+    monkeypatch.setitem(sys.modules, "robosuite.utils", utils)
+    monkeypatch.setitem(sys.modules, "robosuite.utils.camera_utils", camera_utils)
+
+    class Sim:
+        def render(self, **_kwargs):
+            return np.zeros((2, 2, 3)), np.asarray([[0.1, 0.2], [0.3, 0.4]])
+
+    world, depth = _render_world_map(
+        Sim(), camera="robot0_agentview_left", height=2, width=2
+    )
+
+    assert np.allclose(depth, [[0.3, 0.4], [0.1, 0.2]])
+    assert np.allclose(world[0, 1], [0.4, 0.0, 0.4])
 
 
 def test_episode_manager_records_execution_owned_video_and_trajectory(tmp_path) -> None:

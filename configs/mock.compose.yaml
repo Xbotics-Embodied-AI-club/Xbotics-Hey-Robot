@@ -6,18 +6,15 @@ deployment:
     options:
       robot_publish_hz: 10.0
       robot_status_log_every_frames: 30
-
 agent_runtime:
   enabled: true
   robot_id: mock0
-
 logging:
   level: INFO
   theme: dark
   json_format: false
   file_path: runtime/mock.compose/app.log
   json_file_path: runtime/mock.compose/app.jsonl
-
 resources:
   runtime_dir: runtime/mock.compose
   media:
@@ -28,7 +25,6 @@ resources:
     root: runtime/mock.compose/episodes
   events:
     retain: 2000
-
 skills:
   modules:
   - hey_robot.skills.builtins
@@ -36,13 +32,11 @@ skills:
   tools:
   - inspect_scene
   execution_mode: local
-
 identity:
   enabled: true
   unified_user_episodes: true
   bindings:
     web:sender:compose-user: owner
-
 channels:
   web:
     type: web
@@ -55,7 +49,6 @@ channels:
     serve_frontend: false
     access_log: false
     uvicorn_log_level: warning
-
 robots:
   mock0:
     type: mock
@@ -75,15 +68,12 @@ robots:
           visible: true
           location: table
           graspable: true
-
 model_services: {}
-
 policies:
   embodied_skills:
     enabled: true
     robot_id: mock0
     freq_hz: 10.0
-
 agents:
   main:
     enabled: true

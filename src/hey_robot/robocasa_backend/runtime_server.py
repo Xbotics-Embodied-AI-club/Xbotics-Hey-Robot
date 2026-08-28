@@ -42,6 +42,7 @@ _CAMERA_ALIASES = {
     )
     for source, target in CAMERA_RENAME_MAP.items()
 }
+_CAMERA_SOURCES = {target: source for source, target in _CAMERA_ALIASES.items()}
 
 
 class RoboCasaRuntimeService(robocasa_runtime_pb2_grpc.RoboCasaRuntimeServicer):
@@ -216,6 +217,36 @@ class RoboCasaRuntimeService(robocasa_runtime_pb2_grpc.RoboCasaRuntimeServicer):
                 progress=_struct(
                     _json_safe(self.manager.read_truth().get("last_info", {}))
                 ),
+            )
+
+    async def LocalizePixels(self, request, context):  # noqa: N802
+        """Return RPent-style metric-depth world coordinates for selected pixels."""
+        await self._authorize(context, role="data")
+        async with self._lock:
+            camera = _CAMERA_SOURCES.get(str(request.camera))
+            if camera is None:
+                await context.abort(
+                    grpc.StatusCode.INVALID_ARGUMENT,
+                    f"unsupported RoboCasa camera {request.camera!r}",
+                )
+                raise AssertionError("context.abort must not return")
+            try:
+                localization = await asyncio.to_thread(
+                    self.manager.localize_pixels,
+                    camera=camera,
+                    pixels=[
+                        [int(pixel.row), int(pixel.col)] for pixel in request.pixels
+                    ],
+                    expected_frame_id=int(request.expected_frame_id),
+                )
+            except Exception as exc:
+                await context.abort(grpc.StatusCode.FAILED_PRECONDITION, str(exc))
+                raise AssertionError("context.abort must not return") from exc
+            localization["camera"] = str(request.camera)
+            return robocasa_runtime_pb2.LocalizePixelsResponse(
+                frame_id=int(localization["frame_id"]),
+                camera=str(request.camera),
+                localization=_struct(_json_safe(localization)),
             )
 
     async def ReadTruth(self, request, context):  # noqa: N802
